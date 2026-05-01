@@ -160,8 +160,12 @@ jobs:
           
           if [ $EXIT_CODE -ne 0 ]; then
             # Count exact lines matching our FAIL pattern
-            FAILS=$(grep -c " FAIL (" litmus-output.txt || true)
-            MOVE_COLL_FAILS=$(grep -c "move_coll............. FAIL" litmus-output.txt || true)
+            # Using grep -E and simplifying the pattern to be more robust across environments
+            FAILS=$(grep -E "FAIL \\(" litmus-output.txt | wc -l)
+            MOVE_COLL_FAILS=$(grep -E "move_coll.*FAIL" litmus-output.txt | wc -l)
+            
+            echo "Debug: Total FAILS found: $FAILS"
+            echo "Debug: move_coll FAILS found: $MOVE_COLL_FAILS"
             
             if [ "$FAILS" -eq 1 ] && [ "$MOVE_COLL_FAILS" -eq 1 ]; then
               echo "✅ Only known failure (move_coll) detected. Ignoring and returning 0."
