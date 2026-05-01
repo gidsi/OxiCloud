@@ -145,6 +145,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y litmus
 
       - name: Run litmus (WebDAV compliance)
+        shell: bash
         run: |
           set +e
           # We restrict to basic and copymove to establish our current baseline.
