@@ -150,9 +150,11 @@ jobs:
           set +e
           # We restrict to basic and copymove to establish our current baseline.
           # (props and locks have known major gaps being addressed separately)
-          TESTS="basic copymove" litmus http://localhost:8086/webdav/user1/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-output.txt
+          TESTS="basic copymove" litmus http://localhost:8086/webdav/user1/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
+          # Strip ANSI escape codes so grep works reliably
+          sed 's/\x1b\[[0-9;]*[mGJK]//g' litmus-raw.txt > litmus-output.txt
           
           echo ""
           echo "=== litmus summary ==="
