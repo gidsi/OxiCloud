@@ -56,10 +56,10 @@ jobs:
           ./target/release/oxicloud &
           echo "Waiting for server..."
           for i in $(seq 1 30); do
-            curl -sf http://localhost:8086/version >/dev/null 2>&1 && break
+            curl -sf http://localhost:8086/api/version >/dev/null 2>&1 && break
             sleep 1
           done
-          curl -sf http://localhost:8086/version
+          curl -sf http://localhost:8086/api/version
         env:
           DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud"
           OXICLOUD_STORAGE_PATH: /tmp/oxicloud-storage
@@ -69,6 +69,15 @@ jobs:
       - name: Create test users and app passwords
         run: |
           set -euo pipefail
+
+          setup_admin() {
+            local user=$1 email=$2 pass=$3
+            echo "Setting up admin: $user..."
+            curl -sf -X POST http://localhost:8086/api/setup \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"$user\",\"email\":\"$email\",\"password\":\"$pass\"}"
+            echo ""
+          }
 
           register_user() {
             local user=$1 email=$2 pass=$3
@@ -96,7 +105,8 @@ jobs:
               | jq -r '.password // .app_password // .appPassword'
           }
 
-          register_user "user1" "user1@test.local" "TestPass123!"
+          # First user must be created via /api/setup (admin bootstrap)
+          setup_admin "user1" "user1@test.local" "TestPass123!"
           register_user "user2" "user2@test.local" "TestPass123!"
 
           TOKEN1=$(login_user "user1" "TestPass123!")
