@@ -90,19 +90,39 @@ jobs:
 
           login_user() {
             local user=$1 pass=$2
-            curl -sf -X POST http://localhost:8086/api/auth/login \
+            local resp
+            resp=$(curl -s -w '\n%{http_code}' -X POST http://localhost:8086/api/auth/login \
               -H "Content-Type: application/json" \
-              -d "{\"username\":\"$user\",\"password\":\"$pass\"}" \
-              | jq -r '.token // .access_token // .accessToken'
+              -d "{\"username\":\"$user\",\"password\":\"$pass\"}")
+            local http_code
+            http_code=$(echo "$resp" | tail -1)
+            local body
+            body=$(echo "$resp" | sed '$d')
+            if [ "$http_code" != "200" ]; then
+              echo "Login failed for $user: HTTP $http_code" >&2
+              echo "$body" >&2
+              return 1
+            fi
+            echo "$body" | jq -r '.access_token // .token // .accessToken'
           }
 
           create_app_password() {
             local token=$1 name=$2
-            curl -sf -X POST http://localhost:8086/api/auth/app-passwords \
+            local resp
+            resp=$(curl -s -w '\n%{http_code}' -X POST http://localhost:8086/api/auth/app-passwords \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer $token" \
-              -d "{\"name\":\"$name\"}" \
-              | jq -r '.password // .app_password // .appPassword'
+              -d "{\"name\":\"$name\"}")
+            local http_code
+            http_code=$(echo "$resp" | tail -1)
+            local body
+            body=$(echo "$resp" | sed '$d')
+            if [ "$http_code" != "200" ] && [ "$http_code" != "201" ]; then
+              echo "App password creation failed: HTTP $http_code" >&2
+              echo "$body" >&2
+              return 1
+            fi
+            echo "$body" | jq -r '.password // .app_password // .appPassword'
           }
 
           # First user must be created via /api/setup (admin bootstrap)
