@@ -21,7 +21,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: oxicloud_test
+          POSTGRES_DB: oxicloud
         ports:
           - 5432:5432
         options: >-
@@ -44,7 +44,7 @@ jobs:
       - name: Initialise database
         run: |
           for f in migrations/*.sql; do
-            psql -h localhost -U postgres -d oxicloud_test -f "$f"
+            psql -h localhost -U postgres -d oxicloud -f "$f"
           done
         env:
           PGPASSWORD: postgres
@@ -52,6 +52,7 @@ jobs:
       # ── Start server ───────────────────────────────────────
       - name: Start OxiCloud
         run: |
+          mkdir -p /tmp/oxicloud-storage
           ./target/release/oxicloud &
           echo "Waiting for server..."
           for i in $(seq 1 30); do
@@ -60,7 +61,7 @@ jobs:
           done
           curl -sf http://localhost:8086/version
         env:
-          DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+          DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud"
           OXICLOUD_STORAGE_PATH: /tmp/oxicloud-storage
           OXICLOUD_ENABLE_AUTH: "true"
 
