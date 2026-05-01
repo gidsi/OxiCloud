@@ -314,6 +314,7 @@ pub trait FileWritePort: Send + Sync + 'static {
         &self,
         file_id: &str,
         target_folder_id: Option<String>,
+        new_name: Option<String>,
     ) -> Result<File, DomainError>;
 
     /// Copies an entire folder subtree atomically using ltree.
