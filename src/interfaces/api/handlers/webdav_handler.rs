@@ -1023,10 +1023,13 @@ async fn handle_mkcol(
 
     // 2. Check if the resource already exists (RFC 4918 §9.3 -> 405)
     let exists = if let Some(resolver) = &state.path_resolver {
-        resolver.exists_for_user(&path, user.id).await.unwrap_or(false)
+        resolver
+            .exists_for_user(&path, user.id)
+            .await
+            .unwrap_or(false)
     } else {
-        folder_service.get_folder_by_path(&path).await.is_ok() || 
-        file_retrieval_service.get_file_by_path(&path).await.is_ok()
+        folder_service.get_folder_by_path(&path).await.is_ok()
+            || file_retrieval_service.get_file_by_path(&path).await.is_ok()
     };
 
     if exists {
@@ -1035,7 +1038,9 @@ async fn handle_mkcol(
 
     // 3. Verify parent existence (RFC 4918 §9.3 -> 409)
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    let name = segments.last().ok_or_else(|| AppError::bad_request("Invalid path"))?;
+    let name = segments
+        .last()
+        .ok_or_else(|| AppError::bad_request("Invalid path"))?;
     let parent_path = segments[..segments.len() - 1].join("/");
 
     let parent_id = if parent_path.is_empty() {
@@ -1043,16 +1048,25 @@ async fn handle_mkcol(
             .list_folders_for_owner(None, user.id)
             .await
             .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-        let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+        let home = home_folders
+            .first()
+            .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
         Some(home.id.clone())
     } else {
         match folder_service.get_folder_by_path(&parent_path).await {
             Ok(folder) => {
-                assert_owner(folder.owner_id.as_deref(), &user.id.to_string(), &parent_path)?;
+                assert_owner(
+                    folder.owner_id.as_deref(),
+                    &user.id.to_string(),
+                    &parent_path,
+                )?;
                 Some(folder.id)
             }
             Err(_) => {
-                return Err(AppError::conflict(format!("Parent folder not found: {}", parent_path)));
+                return Err(AppError::conflict(format!(
+                    "Parent folder not found: {}",
+                    parent_path
+                )));
             }
         }
     };
@@ -1215,7 +1229,10 @@ async fn handle_move(
     let file_management_service_top = &state.applications.file_management_service;
     let dest_existed = {
         let (dest_is_folder, dest_is_file) = if let Some(resolver) = &state.path_resolver {
-            match resolver.resolve_path_for_user(&destination_path, user.id).await {
+            match resolver
+                .resolve_path_for_user(&destination_path, user.id)
+                .await
+            {
                 Ok(ResolvedResource::Folder(_)) => (true, false),
                 Ok(ResolvedResource::File(_)) => (false, true),
                 Err(_) => (false, false),
@@ -1243,7 +1260,10 @@ async fn handle_move(
 
         if exists && overwrite {
             if let Some(resolver) = &state.path_resolver {
-                match resolver.resolve_path_for_user(&destination_path, user.id).await {
+                match resolver
+                    .resolve_path_for_user(&destination_path, user.id)
+                    .await
+                {
                     Ok(ResolvedResource::Folder(f)) => {
                         let _ = folder_service.delete_folder(&f.id, user.id).await;
                     }
@@ -1257,10 +1277,12 @@ async fn handle_move(
                     if let Ok(folder) = folder_service.get_folder_by_path(&destination_path).await {
                         let _ = folder_service.delete_folder(&folder.id, user.id).await;
                     }
-                } else if dest_is_file {
-                    if let Ok(file) = file_retrieval_service.get_file_by_path(&destination_path).await {
-                        let _ = file_management_service_top.delete_file(&file.id).await;
-                    }
+                } else if dest_is_file
+                    && let Ok(file) = file_retrieval_service
+                        .get_file_by_path(&destination_path)
+                        .await
+                {
+                    let _ = file_management_service_top.delete_file(&file.id).await;
                 }
             }
         }
@@ -1287,8 +1309,15 @@ async fn handle_move(
                         let home_folders = folder_service
                             .list_folders_for_owner(None, user.id)
                             .await
-                            .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-                        let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+                            .map_err(|e| {
+                                AppError::internal_error(format!(
+                                    "Failed to list home folders: {}",
+                                    e
+                                ))
+                            })?;
+                        let home = home_folders
+                            .first()
+                            .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
                         Some(home.id.clone())
                     } else {
                         match folder_service.get_folder_by_path(dest_parent_path).await {
@@ -1301,7 +1330,11 @@ async fn handle_move(
                                 )?;
                                 Some(parent.id)
                             }
-                            Err(_) => return Err(AppError::conflict("Destination parent collection does not exist")),
+                            Err(_) => {
+                                return Err(AppError::conflict(
+                                    "Destination parent collection does not exist",
+                                ));
+                            }
                         }
                     },
                 };
@@ -1342,8 +1375,15 @@ async fn handle_move(
                         let home_folders = folder_service
                             .list_folders_for_owner(None, user.id)
                             .await
-                            .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-                        let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+                            .map_err(|e| {
+                                AppError::internal_error(format!(
+                                    "Failed to list home folders: {}",
+                                    e
+                                ))
+                            })?;
+                        let home = home_folders
+                            .first()
+                            .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
                         Some(home.id.clone())
                     } else {
                         match folder_service.get_folder_by_path(dest_parent_path).await {
@@ -1355,7 +1395,9 @@ async fn handle_move(
                                 )?;
                                 Some(parent.id)
                             }
-                            Err(_) => return Err(AppError::conflict("Destination parent not found")),
+                            Err(_) => {
+                                return Err(AppError::conflict("Destination parent not found"));
+                            }
                         }
                     };
 
@@ -1403,8 +1445,12 @@ async fn handle_move(
                     let home_folders = folder_service
                         .list_folders_for_owner(None, user.id)
                         .await
-                        .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-                    let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+                        .map_err(|e| {
+                        AppError::internal_error(format!("Failed to list home folders: {}", e))
+                    })?;
+                    let home = home_folders
+                        .first()
+                        .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
                     Some(home.id.clone())
                 } else {
                     match folder_service.get_folder_by_path(dest_parent_path).await {
@@ -1417,7 +1463,11 @@ async fn handle_move(
                             )?;
                             Some(parent.id)
                         }
-                        Err(_) => return Err(AppError::conflict("Destination parent collection does not exist")),
+                        Err(_) => {
+                            return Err(AppError::conflict(
+                                "Destination parent collection does not exist",
+                            ));
+                        }
                     }
                 },
             };
@@ -1475,8 +1525,12 @@ async fn handle_move(
                     let home_folders = folder_service
                         .list_folders_for_owner(None, user.id)
                         .await
-                        .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-                    let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+                        .map_err(|e| {
+                        AppError::internal_error(format!("Failed to list home folders: {}", e))
+                    })?;
+                    let home = home_folders
+                        .first()
+                        .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
                     Some(home.id.clone())
                 } else {
                     Some(dest_parent_path.to_string())
@@ -1495,7 +1549,11 @@ async fn handle_move(
         }
     }
 
-    let status = if dest_existed { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
+    let status = if dest_existed {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::CREATED
+    };
     Ok(Response::builder()
         .status(status)
         .body(Body::empty())
@@ -1569,7 +1627,10 @@ async fn handle_copy(
     let file_management_service_top = &state.applications.file_management_service;
     let dest_existed = {
         let (dest_is_folder, dest_is_file) = if let Some(resolver) = &state.path_resolver {
-            match resolver.resolve_path_for_user(&destination_path, user.id).await {
+            match resolver
+                .resolve_path_for_user(&destination_path, user.id)
+                .await
+            {
                 Ok(ResolvedResource::Folder(_)) => (true, false),
                 Ok(ResolvedResource::File(_)) => (false, true),
                 Err(_) => (false, false),
@@ -1597,7 +1658,10 @@ async fn handle_copy(
 
         if exists && overwrite {
             if let Some(resolver) = &state.path_resolver {
-                match resolver.resolve_path_for_user(&destination_path, user.id).await {
+                match resolver
+                    .resolve_path_for_user(&destination_path, user.id)
+                    .await
+                {
                     Ok(ResolvedResource::Folder(f)) => {
                         let _ = folder_service.delete_folder(&f.id, user.id).await;
                     }
@@ -1611,10 +1675,12 @@ async fn handle_copy(
                     if let Ok(folder) = folder_service.get_folder_by_path(&destination_path).await {
                         let _ = folder_service.delete_folder(&folder.id, user.id).await;
                     }
-                } else if dest_is_file {
-                    if let Ok(file) = file_retrieval_service.get_file_by_path(&destination_path).await {
-                        let _ = file_management_service_top.delete_file(&file.id).await;
-                    }
+                } else if dest_is_file
+                    && let Ok(file) = file_retrieval_service
+                        .get_file_by_path(&destination_path)
+                        .await
+                {
+                    let _ = file_management_service_top.delete_file(&file.id).await;
                 }
             }
         }
@@ -1642,8 +1708,12 @@ async fn handle_copy(
                     let home_folders = folder_service
                         .list_folders_for_owner(None, user.id)
                         .await
-                        .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-                    let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+                        .map_err(|e| {
+                        AppError::internal_error(format!("Failed to list home folders: {}", e))
+                    })?;
+                    let home = home_folders
+                        .first()
+                        .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
                     Some(home.id.clone())
                 } else {
                     match folder_service.get_folder_by_path(dest_parent_path).await {
@@ -1656,7 +1726,11 @@ async fn handle_copy(
                             )?;
                             Some(parent.id)
                         }
-                        Err(_) => return Err(AppError::conflict("Destination parent collection does not exist")),
+                        Err(_) => {
+                            return Err(AppError::conflict(
+                                "Destination parent collection does not exist",
+                            ));
+                        }
                     }
                 };
 
@@ -1699,8 +1773,12 @@ async fn handle_copy(
                     let home_folders = folder_service
                         .list_folders_for_owner(None, user.id)
                         .await
-                        .map_err(|e| AppError::internal_error(format!("Failed to list home folders: {}", e)))?;
-                    let home = home_folders.first().ok_or_else(|| AppError::internal_error("Home folder not found"))?;
+                        .map_err(|e| {
+                        AppError::internal_error(format!("Failed to list home folders: {}", e))
+                    })?;
+                    let home = home_folders
+                        .first()
+                        .ok_or_else(|| AppError::internal_error("Home folder not found"))?;
                     Some(home.id.clone())
                 } else {
                     match folder_service.get_folder_by_path(dest_parent_path).await {
@@ -1713,11 +1791,18 @@ async fn handle_copy(
                             )?;
                             Some(parent.id)
                         }
-                        Err(_) => return Err(AppError::conflict("Destination parent collection does not exist")),
+                        Err(_) => {
+                            return Err(AppError::conflict(
+                                "Destination parent collection does not exist",
+                            ));
+                        }
                     }
                 };
 
-                let dest_filename = destination_path.split('/').next_back().unwrap_or(&destination_path);
+                let dest_filename = destination_path
+                    .split('/')
+                    .next_back()
+                    .unwrap_or(&destination_path);
                 let file_management_service = &state.applications.file_management_service;
                 file_management_service
                     .copy_file(&file.id, target_folder_id, Some(dest_filename.to_string()))
@@ -1756,18 +1841,22 @@ async fn handle_copy(
             let target_parent_id = if dest_parent_path.is_empty() {
                 None
             } else {
-                    match folder_service.get_folder_by_path(dest_parent_path).await {
-                        Ok(parent) => {
-                            // SECURITY: verify destination parent belongs to caller (V-08)
-                            assert_owner(
-                                parent.owner_id.as_deref(),
-                                &user.id.to_string(),
-                                dest_parent_path,
-                            )?;
-                            Some(parent.id)
-                        }
-                        Err(_) => return Err(AppError::conflict("Destination parent collection does not exist")),
+                match folder_service.get_folder_by_path(dest_parent_path).await {
+                    Ok(parent) => {
+                        // SECURITY: verify destination parent belongs to caller (V-08)
+                        assert_owner(
+                            parent.owner_id.as_deref(),
+                            &user.id.to_string(),
+                            dest_parent_path,
+                        )?;
+                        Some(parent.id)
                     }
+                    Err(_) => {
+                        return Err(AppError::conflict(
+                            "Destination parent collection does not exist",
+                        ));
+                    }
+                }
             };
 
             if recursive {
@@ -1815,30 +1904,41 @@ async fn handle_copy(
             let target_folder_id = if dest_parent_path.is_empty() {
                 None
             } else {
-                    match folder_service.get_folder_by_path(dest_parent_path).await {
-                        Ok(parent) => {
-                            // SECURITY: verify destination parent belongs to caller (V-08)
-                            assert_owner(
-                                parent.owner_id.as_deref(),
-                                &user.id.to_string(),
-                                dest_parent_path,
-                            )?;
-                            Some(parent.id)
-                        }
-                        Err(_) => return Err(AppError::conflict("Destination parent collection does not exist")),
+                match folder_service.get_folder_by_path(dest_parent_path).await {
+                    Ok(parent) => {
+                        // SECURITY: verify destination parent belongs to caller (V-08)
+                        assert_owner(
+                            parent.owner_id.as_deref(),
+                            &user.id.to_string(),
+                            dest_parent_path,
+                        )?;
+                        Some(parent.id)
                     }
+                    Err(_) => {
+                        return Err(AppError::conflict(
+                            "Destination parent collection does not exist",
+                        ));
+                    }
+                }
             };
 
-            let dest_filename = destination_path.split('/').next_back().unwrap_or(&destination_path);
-                let file_management_service = &state.applications.file_management_service;
-                file_management_service
-                    .copy_file(&file.id, target_folder_id, Some(dest_filename.to_string()))
-                    .await
+            let dest_filename = destination_path
+                .split('/')
+                .next_back()
+                .unwrap_or(&destination_path);
+            let file_management_service = &state.applications.file_management_service;
+            file_management_service
+                .copy_file(&file.id, target_folder_id, Some(dest_filename.to_string()))
+                .await
                 .map_err(|e| AppError::internal_error(format!("Failed to copy file: {}", e)))?;
         }
     }
 
-    let status = if dest_existed { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
+    let status = if dest_existed {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::CREATED
+    };
     Ok(Response::builder()
         .status(status)
         .body(Body::empty())

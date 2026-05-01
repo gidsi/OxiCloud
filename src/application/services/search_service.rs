@@ -1,3 +1,4 @@
+#![allow(clippy::unnecessary_sort_by)]
 use std::cmp::Reverse;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -346,7 +347,7 @@ impl SearchUseCase for SearchService {
                     enriched_folders.sort_by_cached_key(|f| Reverse(f.name.to_lowercase()));
                 }
                 "date" => {
-                    enriched_folders.sort_by(|a, b| a.modified_at.cmp(&b.modified_at));
+                    enriched_folders.sort_by_key(|a| a.modified_at);
                 }
                 "date_desc" => {
                     enriched_folders.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
@@ -432,7 +433,7 @@ impl SearchUseCase for SearchService {
                 enriched_folders.sort_by_cached_key(|f| Reverse(f.name.to_lowercase()));
             }
             "date" => {
-                enriched_folders.sort_by(|a, b| a.modified_at.cmp(&b.modified_at));
+                enriched_folders.sort_by_key(|a| a.modified_at);
             }
             "date_desc" => {
                 enriched_folders.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
