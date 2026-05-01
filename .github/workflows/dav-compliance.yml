@@ -160,7 +160,7 @@ jobs:
               content = f.read()
 
           # Strip ANSI escape codes
-          clean_content = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', content)
+          clean_content = re.sub(r'\\x1b\\[[0-9;]*[mGJK]', '', content)
           with open('litmus-output.txt', 'w') as f:
               f.write(clean_content)
 
@@ -170,7 +170,7 @@ jobs:
               print(line)
 
           if $EXIT_CODE != 0:
-              fails = len(re.findall(r' FAIL \(', clean_content))
+              fails = len(re.findall(r' FAIL \\(', clean_content))
               move_coll_fails = len(re.findall(r'move_coll.*FAIL', clean_content))
               
               print(f"\nDebug: Total FAILS found: {fails}")
