@@ -147,7 +147,6 @@ jobs:
       - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-                    cat << 'PYEOF' > litmus_runner.py
           cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
@@ -181,8 +180,8 @@ jobs:
 
           print("\n--- Validation ---")
           
-          # Use re.search on the full output with flexible spacing
           def find_fail_count(suite_name):
+              # Use a regex that is extremely flexible with symbols around suite names
               pattern = r'summary for\s+.*?%s.*?\s*:\s*of\s+\d+\s+tests\s+run:.*?\d+\s+passed,\s+(\d+)\s+failed' % suite_name
               match = re.search(pattern, output, re.I | re.S)
               if match:
