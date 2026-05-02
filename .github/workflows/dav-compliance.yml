@@ -154,6 +154,7 @@ jobs:
           import os
 
           def strip_garbage(text):
+              if not text: return ""
               # Strip ANSI, carriage returns, and non-printable junk
               clean = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', text)
               clean = re.sub(r'\x1b\(B', '', clean)
@@ -166,11 +167,18 @@ jobs:
           user = "user1"
           password = env.get("USER1_APP_PASS", "")
           
-          print(f"--- Running litmus on {url} as {user} ---")
-          cmd = ["litmus", "-k", url, user, password]
-          proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
-          
-          output = strip_garbage(proc.stdout + proc.stderr)
+          print(f"--- Launching litmus on {url} as {user} ---")
+          try:
+              cmd = ["litmus", "-k", url, user, password]
+              proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
+              print(f"--- Litmus finished with exit code {proc.returncode} ---")
+              stdout_clean = strip_garbage(proc.stdout)
+              stderr_clean = strip_garbage(proc.stderr)
+              output = stdout_clean + stderr_clean
+          except Exception as e:
+              print(f"❌ Failed to run litmus: {e}")
+              sys.exit(1)
+
           with open('litmus-output.txt', 'w') as f:
               f.write(output)
 
@@ -181,7 +189,7 @@ jobs:
           print("\n--- Validation ---")
           
           def find_fail_count(suite_name):
-              # Use a regex that is extremely flexible with symbols around suite names
+              # Extremely flexible regex
               pattern = r'summary for\s+.*?%s.*?\s*:\s*of\s+\d+\s+tests\s+run:.*?\d+\s+passed,\s+(\d+)\s+failed' % suite_name
               match = re.search(pattern, output, re.I | re.S)
               if match:
@@ -190,18 +198,20 @@ jobs:
 
           basic_fails = find_fail_count("basic")
           cm_fails = find_fail_count("copymove")
+          
+          # Check for move_coll in the clean output
           has_move_coll = "move_coll" in output and "FAIL" in output
 
           print(f"Result: basic_fails={basic_fails}, cm_fails={cm_fails}, move_coll_detected={has_move_coll}")
 
           if basic_fails == '0' and cm_fails == '1' and has_move_coll:
-              print("✅ Known baseline verified.")
+              print("✅ Only known failure (move_coll) detected. Baseline verified.")
               sys.exit(0)
           elif basic_fails == '0' and cm_fails == '0':
-              print("✅ All tests passed.")
+              print("✅ Perfect score! All tests passed.")
               sys.exit(0)
           else:
-              print("❌ Unexpected results.")
+              print("❌ Unexpected failures or missing summaries.")
               sys.exit(1)
           PYEOF
           
