@@ -147,42 +147,42 @@ jobs:
       - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-          set +e
-          TESTS="basic copymove" litmus http://localhost:8086/webdav/user1/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          set -e
+          # Use -k to ensure we get a full summary even if tests fail
+          TESTS="basic copymove" litmus -k http://localhost:8086/webdav/user1/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt || true
           
-          python3 - <<EOF
+          echo ""
+          echo "=== litmus summary ==="
+          # Strip ANSI and show summary
+          sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" litmus-raw.txt | tail -n 20
+          
+          # Use python for the actual validation to avoid bash quoting hell
+          cat << 'PYEOF' > validate_litmus.py
           import re
           import sys
 
           with open('litmus-raw.txt', 'r') as f:
-              content = f.read()
+              raw = f.read()
 
           # Strip ANSI escape codes
-          clean_content = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', content)
-          with open('litmus-output.txt', 'w') as f:
-              f.write(clean_content)
-
-          print("\n=== litmus summary ===")
-          lines = clean_content.splitlines()
-          for line in lines[-30:]:
-              print(line)
-
-          if $EXIT_CODE != 0:
-              fails = len(re.findall(r' FAIL \(', clean_content))
-              move_coll_fails = len(re.findall(r'move_coll.*FAIL', clean_content))
-              
-              print(f"\nDebug: Total FAILS found: {fails}")
-              print(f"Debug: move_coll FAILS found: {move_coll_fails}")
-              
-              if fails == 1 and move_coll_fails == 1:
-                  print("✅ Only known failure (move_coll) detected. Ignoring.")
-                  sys.exit(0)
-              else:
-                  print(f"❌ Litmus failed with unexpected regressions! Total fails: {fails}")
-                  sys.exit($EXIT_CODE)
-          EOF
+          content = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', raw)
+          
+          fails = len(re.findall(r' FAIL \(', content))
+          move_coll_fails = len(re.findall(r'move_coll.*FAIL', content))
+          
+          print(f"Validation: Total FAILS={fails}, move_coll FAILS={move_coll_fails}")
+          
+          if fails == 0:
+              print("✅ All tests passed.")
+              sys.exit(0)
+          elif fails == 1 and move_coll_fails == 1:
+              print("✅ Only known failure (move_coll) detected. Ignoring.")
+              sys.exit(0)
+          else:
+              print(f"❌ Found {fails} failures. Failing build.")
+              sys.exit(1)
+          PYEOF
+          
+          python3 validate_litmus.py
 
       - name: Run CalDAVTester
         working-directory: ccs-caldavtester
