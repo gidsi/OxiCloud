@@ -154,7 +154,12 @@ jobs:
           import os
 
           def strip_ansi(text):
-              return re.sub(r'\x1b\[[0-9;]*[mGJK]', '', text)
+              # Handle different formats of escape sequences and terminal garbage
+              clean = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', text)
+              clean = re.sub(r'\x1b\(B', '', clean)
+              # Also strip common carriage returns that might mess up line breaks
+              clean = clean.replace('\r', '')
+              return clean
 
           print("--- Starting litmus ---")
           env = os.environ.copy()
@@ -175,14 +180,14 @@ jobs:
               print(line)
 
           # Validation logic
-          # 1. Look for suite summaries
-          summaries = [l for l in lines if 'summary for' in l]
+          # 1. Look for suite summaries. Use regex to be more forgiving.
+          summaries = [l for l in lines if re.search(r'summary\s+for', l)]
           
           basic_ok = False
           copymove_expected_fail = False
           
           for s in summaries:
-              m = re.search(r'summary for .(\w+).: of \d+ tests run: (\d+) passed, (\d+) failed', s)
+              m = re.search(r'summary\s+for\s+`?(\w+)\'?:.*?(\d+)\s+passed,\s+(\d+)\s+failed', s)
               if m:
                   suite, passed, failed = m.groups()
                   failed = int(failed)
@@ -200,9 +205,10 @@ jobs:
               sys.exit(0)
           else:
               print("❌ Unexpected failures or missing summaries detected!")
-              # Print more lines if failed for debugging
-              if len(summaries) < 2:
-                  print("DEBUG: Full output follows because summaries were missing:")
+              print(f"Found summaries: {summaries}")
+              # Print full output if missing summaries
+              if not basic_ok or not copymove_expected_fail:
+                  print("DEBUG: Full output follows for inspection:")
                   print(full_output)
               sys.exit(1)
           PYEOF
