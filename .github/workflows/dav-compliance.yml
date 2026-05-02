@@ -147,7 +147,6 @@ jobs:
       - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-                    cat << 'PYEOF' > litmus_runner.py
           cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
@@ -182,21 +181,12 @@ jobs:
           print("\n--- Validation ---")
           
           # Basic suite
-          basic_summary_idx = output.lower().find("summary for")
-          basic_fails = "MISSING"
-          if basic_summary_idx != -1:
-              basic_chunk = output[basic_summary_idx:basic_summary_idx+500]
-              m = re.search(r'summary for.*?basic.*?:.*?(\d+)\s+failed', basic_chunk, re.S | re.I)
-              if m:
-                  basic_fails = m.group(1)
+          basic_match = re.search(r'summary for.*?basic.*?:.*?(\d+)\s+failed', output, re.S | re.I)
+          basic_fails = basic_match.group(1) if basic_match else "MISSING"
 
           # Copymove suite
-          cm_summary_idx = output.lower().find("summary for")
-          cm_fails = "MISSING"
-          # Find the second summary or search specifically for copymove
-          m_cm = re.search(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S | re.I)
-          if m_cm:
-              cm_fails = m_cm.group(1)
+          cm_match = re.search(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S | re.I)
+          cm_fails = cm_match.group(1) if cm_match else "MISSING"
 
           has_move_coll = "move_coll" in output and "FAIL" in output
 
