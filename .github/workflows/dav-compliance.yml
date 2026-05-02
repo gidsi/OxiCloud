@@ -166,6 +166,10 @@ jobs:
           # Strip ANSI escape codes
           content = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', raw)
           
+          print("--- DEBUG: BEGIN CONTENT ---")
+          print(content)
+          print("--- DEBUG: END CONTENT ---")
+          
           fails = len(re.findall(r' FAIL \(', content))
           move_coll_fails = len(re.findall(r'move_coll.*FAIL', content))
           
