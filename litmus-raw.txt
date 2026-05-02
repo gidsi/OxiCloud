@@ -1,0 +1,38 @@
+-> running `basic':
+ 0. init..................  0. init.................. pass
+ 1. begin.................  1. begin................. pass
+ 2. options...............  2. options............... pass
+ 3. put_get............... WARNING: PUT of new resource gave 204, should be 201
+    ...................... pass (with 1 warning)
+    ...................... WARNING: PUT of new resource gave 204, should be 201
+    ...................... pass (with 1 warning)
+    ......................  5. put_no_parent......... pass
+ 6. mkcol_over_plain......  6. mkcol_over_plain...... pass
+ 7. delete................  7. delete................ pass
+ 8. delete_null...........  8. delete_null........... pass
+ 9. delete_fragment....... WARNING: DELETE removed collection resource with Request-URI including fragment; unsafe
+    ...................... pass (with 1 warning)
+    ...................... 10. mkcol................. pass
+11. mkcol_again........... 11. mkcol_again........... pass
+12. delete_coll........... 12. delete_coll........... pass
+13. mkcol_no_parent....... 13. mkcol_no_parent....... pass
+14. mkcol_with_body....... 14. mkcol_with_body....... pass
+15. finish................ 15. finish................ pass
+<- summary for `basic': of 16 tests run: 16 passed, 0 failed. 100.0%
+-> 3 warnings were issued.
+-> running `copymove':
+ 0. init..................  0. init.................. pass
+ 1. begin.................  1. begin................. pass
+ 2. copy_init.............  2. copy_init............. pass
+ 3. copy_simple...........  3. copy_simple........... pass
+ 4. copy_overwrite........  4. copy_overwrite........ pass
+ 5. copy_nodestcoll.......  5. copy_nodestcoll....... pass
+ 6. copy_cleanup..........  6. copy_cleanup.......... pass
+ 7. copy_coll.............  7. copy_coll............. pass
+ 8. copy_shallow..........  8. copy_shallow.......... pass
+ 9. move..................  9. move.................. pass
+10. move_coll............. 10. move_coll............. FAIL (MKCOL of `/webdav/litmus/mvsrc/subcoll/' failed: 405 Method Not Allowed
+)
+11. move_cleanup.......... 11. move_cleanup.......... pass
+12. finish................ 12. finish................ pass
+<- summary for `copymove': of 13 tests run: 12 passed, 1 failed. 92.3%
