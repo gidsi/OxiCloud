@@ -147,11 +147,13 @@ jobs:
       - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
+          # Ensure we have a clean environment
+          rm -f litmus-raw.txt litmus-output.txt validate_litmus.py
+          
           # Use -k to ensure we get a full summary even if tests fail
           TESTS="basic copymove" litmus -k http://localhost:8086/webdav/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt || true
           
           # Use python for the actual validation to avoid bash quoting/parsing hell
-          # We write the clean output to litmus-output.txt so the CI artifact step finds it
           cat << 'PYEOF' > validate_litmus.py
           import re
           import sys
@@ -164,6 +166,7 @@ jobs:
               sys.exit(1)
 
           # Strip ANSI escape codes and character set escapes
+          # This is the most common reason for regex failure in CI logs
           content = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', raw)
           content = re.sub(r'\x1b\(B', '', content)
           
@@ -175,10 +178,11 @@ jobs:
           for l in lines[-30:]:
               print(l)
 
-          actual_fails = [l for l in lines if re.search(r'FAIL\s*\(', l)]
+          # Find all lines containing FAIL (case insensitive and allowing for dots)
+          actual_fails = [l for l in lines if re.search(r'FAIL', l, re.I) and not re.search(r'summary for', l)]
           summaries = [l for l in lines if "summary for" in l]
 
-          print(f"\nValidation: Found {len(actual_fails)} actual test failures.")
+          print(f"\nValidation: Found {len(actual_fails)} actual test failure lines.")
           for l in actual_fails:
               print(f"  -> {l}")
 
@@ -194,16 +198,15 @@ jobs:
                           print(f"❌ Summary: Unexpected failure(s) in suite: {l}")
                           unexpected_summary = True
 
-          is_move_coll_only = len(actual_fails) == 1 and "move_coll" in actual_fails[0]
-
-          if len(actual_fails) == 0 and not unexpected_summary:
-              print("✅ All tests passed.")
-              sys.exit(0)
-          elif is_move_coll_only and not unexpected_summary:
-              print("✅ Only known failure (move_coll) detected. Ignoring.")
+          # We specifically ignore move_coll FAIL
+          non_ignored_fails = [l for l in actual_fails if "move_coll" not in l]
+          
+          if len(non_ignored_fails) == 0 and not unexpected_summary:
+              print("✅ All (non-ignored) tests passed.")
               sys.exit(0)
           else:
-              print(f"❌ Found unexpected failures (fails={len(actual_fails)}, unexpected_summary={unexpected_summary}). Failing build.")
+              print(f"❌ Found unexpected failures. Failing build.")
+              print(f"Fails: {non_ignored_fails}")
               sys.exit(1)
           PYEOF
           
