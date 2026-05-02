@@ -148,6 +148,7 @@ jobs:
         shell: bash
         run: |
                     cat << 'PYEOF' > litmus_runner.py
+          cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
           import sys
@@ -161,8 +162,12 @@ jobs:
           env = os.environ.copy()
           env["TESTS"] = "basic copymove"
           
-          print("--- Running litmus ---")
-          cmd = ["litmus", "-k", "http://localhost:8086/webdav/", "user1", env.get("USER1_APP_PASS", "")]
+          url = "http://localhost:8086/webdav/"
+          user = "user1"
+          password = env.get("USER1_APP_PASS", "")
+          
+          print(f"--- Running litmus on {url} as {user} ---")
+          cmd = ["litmus", "-k", url, user, password]
           proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
           
           output = strip_ansi(proc.stdout + proc.stderr)
@@ -173,25 +178,35 @@ jobs:
           print(output)
           print("=== END RAW OUTPUT ===")
 
-          # Search for the summary markers
-          basic_start = output.find("summary for")
-          if basic_start == -1:
-              print("Could not find any suite summary.")
-              sys.exit(1)
-              
-          # Find basic summary
-          basic_match = re.search(r'summary for.*?basic.*?:.*?(\d+)\s+failed', output, re.S | re.I)
-          # Find copymove summary
-          cm_match = re.search(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S | re.I)
+          # Search for the summary markers using even more primitive matching
+          print("\n--- Validation ---")
           
-          basic_fails = basic_match.group(1) if basic_match else "MISSING"
-          cm_fails = cm_match.group(1) if cm_match else "MISSING"
+          # Basic suite
+          basic_summary_idx = output.lower().find("summary for")
+          basic_fails = "MISSING"
+          if basic_summary_idx != -1:
+              basic_chunk = output[basic_summary_idx:basic_summary_idx+500]
+              m = re.search(r'summary for.*?basic.*?:.*?(\d+)\s+failed', basic_chunk, re.S | re.I)
+              if m:
+                  basic_fails = m.group(1)
+
+          # Copymove suite
+          cm_summary_idx = output.lower().find("summary for")
+          cm_fails = "MISSING"
+          # Find the second summary or search specifically for copymove
+          m_cm = re.search(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S | re.I)
+          if m_cm:
+              cm_fails = m_cm.group(1)
+
           has_move_coll = "move_coll" in output and "FAIL" in output
 
-          print("\nFinal Analysis: basic_fails=" + str(basic_fails) + ", cm_fails=" + str(cm_fails) + ", move_coll_detected=" + str(has_move_coll))
+          print(f"Result: basic_fails={basic_fails}, cm_fails={cm_fails}, move_coll_detected={has_move_coll}")
 
           if basic_fails == '0' and cm_fails == '1' and has_move_coll:
               print("✅ Only known failure (move_coll) detected. Baseline verified.")
+              sys.exit(0)
+          elif basic_fails == '0' and cm_fails == '0':
+              print("✅ Perfect score! All tests passed.")
               sys.exit(0)
           else:
               print("❌ Unexpected failures or missing summaries.")
