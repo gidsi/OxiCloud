@@ -144,10 +144,10 @@ jobs:
       - name: Install litmus
         run: sudo apt-get update && sudo apt-get install -y litmus
 
-      - name: Run litmus (WebDAV compliance)
+            - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-                    cat << 'PYEOF' > litmus_runner.py
+          cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
           import sys
@@ -161,64 +161,45 @@ jobs:
 
           env = os.environ.copy()
           env["TESTS"] = "basic copymove"
-          
           url = "http://localhost:8086/webdav/"
           user = "user1"
           password = env.get("USER1_APP_PASS", "")
           
-          print(f"--- Launching litmus on {url} as {user} ---")
+          print("--- Running litmus ---")
           try:
               cmd = ["litmus", "-k", url, user, password]
               proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
               output = strip_garbage(proc.stdout + proc.stderr)
           except Exception as e:
-              print(f"❌ Failed to run litmus: {e}")
+              print(f"Error: {e}")
               sys.exit(1)
 
           with open('litmus-output.txt', 'w') as f:
               f.write(output)
 
-          print("\n=== LITMUS OUTPUT ===")
-          print(output)
-          print("=== END OUTPUT ===")
+          print("\n=== OUTPUT ===\n" + output + "\n=== END ===")
 
-          print("\n--- Validation ---")
-          
-          def get_suite_fails(suite):
-              # Flexible search for summary
-              idx = output.find(f"summary for")
-              if idx == -1: return "MISSING_SUMMARY_MARKER"
-              
-              # Find the line that mentioned the suite name specifically after 'summary for'
-              # Litmus output: "<- summary for `basic': ..."
-              suite_line = None
-              for line in output.splitlines():
-                  if "summary for" in line and suite in line:
-                      suite_line = line
-                      break
-              
-              if not suite_line: return "MISSING_SUITE_LINE"
-              
-              match = re.search(r'(\d+)\s+failed', suite_line)
-              return match.group(1) if match else "PARSE_ERROR"
+          lines = output.splitlines()
+          basic_fails = "MISSING"
+          cm_fails = "MISSING"
+          for line in lines:
+              if "summary for" in line:
+                  m = re.search(r'(\d+)\s+failed', line)
+                  if m:
+                      if "basic" in line: basic_fails = m.group(1)
+                      if "copymove" in line: cm_fails = m.group(1)
 
-          basic_fails = get_suite_fails("basic")
-          cm_fails = get_suite_fails("copymove")
           has_move_coll = "move_coll" in output and "FAIL" in output
+          print(f"Summary: basic={basic_fails}, copymove={cm_fails}, move_coll={has_move_coll}")
 
-          print(f"Result: basic_fails={basic_fails}, cm_fails={cm_fails}, move_coll_detected={has_move_coll}")
-
-          if basic_fails == '0' and cm_fails == '1' and has_move_coll:
-              print("✅ Baseline verified (known move_coll failure found).")
+          if basic_fails == "0" and cm_fails == "1" and has_move_coll:
+              print("✅ Baseline verified.")
               sys.exit(0)
-          elif basic_fails == '0' and cm_fails == '0':
-              print("✅ All tests passed!")
+          elif basic_fails == "0" and cm_fails == "0":
+              print("✅ All passed.")
               sys.exit(0)
-          else:
-              print("❌ Unexpected failure state.")
-              sys.exit(1)
+          sys.exit(1)
           PYEOF
-          
           python3 litmus_runner.py
 
       - name: Run CalDAVTester
