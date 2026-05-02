@@ -145,9 +145,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y litmus
 
             - name: Run litmus (WebDAV compliance)
+      - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-          cat << 'PYEOF' > litmus_runner.py
+          cat << 'PYEOF' > /tmp/litmus_runner.py
           import subprocess
           import re
           import sys
@@ -165,19 +166,21 @@ jobs:
           user = "user1"
           password = env.get("USER1_APP_PASS", "")
           
-          print("--- Running litmus ---")
+          print(f"--- Running litmus against {url} ---")
           try:
               cmd = ["litmus", "-k", url, user, password]
               proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
               output = strip_garbage(proc.stdout + proc.stderr)
           except Exception as e:
-              print(f"Error: {e}")
+              print(f"FAILED TO EXECUTE LITMUS: {e}")
               sys.exit(1)
 
           with open('litmus-output.txt', 'w') as f:
               f.write(output)
 
-          print("\n=== OUTPUT ===\n" + output + "\n=== END ===")
+          print("\n=== LITMUS OUTPUT START ===")
+          print(output)
+          print("=== LITMUS OUTPUT END ===\n")
 
           lines = output.splitlines()
           basic_fails = "MISSING"
@@ -190,17 +193,19 @@ jobs:
                       if "copymove" in line: cm_fails = m.group(1)
 
           has_move_coll = "move_coll" in output and "FAIL" in output
-          print(f"Summary: basic={basic_fails}, copymove={cm_fails}, move_coll={has_move_coll}")
+          print(f"Parsed Result: basic={basic_fails}, copymove={cm_fails}, move_coll={has_move_coll}")
 
           if basic_fails == "0" and cm_fails == "1" and has_move_coll:
-              print("✅ Baseline verified.")
+              print("✅ Validation successful: Matches known baseline.")
               sys.exit(0)
           elif basic_fails == "0" and cm_fails == "0":
-              print("✅ All passed.")
+              print("✅ Validation successful: Perfect score.")
               sys.exit(0)
+          
+          print("❌ Validation failed: Unexpected results or missing summaries.")
           sys.exit(1)
           PYEOF
-          python3 litmus_runner.py
+          python3 /tmp/litmus_runner.py
 
       - name: Run CalDAVTester
         working-directory: ccs-caldavtester
