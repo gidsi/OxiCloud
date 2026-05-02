@@ -147,7 +147,7 @@ jobs:
       - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-          cat << 'PYEOF' > litmus_runner.py
+                    cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
           import sys
@@ -156,8 +156,7 @@ jobs:
           def strip_ansi(text):
               clean = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', text)
               clean = re.sub(r'\x1b\(B', '', clean)
-              clean = clean.replace('\r', '')
-              return clean
+              return clean.replace('\r', '')
 
           env = os.environ.copy()
           env["TESTS"] = "basic copymove"
@@ -170,37 +169,32 @@ jobs:
           with open('litmus-output.txt', 'w') as f:
               f.write(output)
 
-          print("\n=== LATEST LOGS ===")
-          print("\n".join(output.splitlines()[-50:]))
+          print("\n=== RAW OUTPUT FOR DEBUGGING ===")
+          print(output)
+          print("=== END RAW OUTPUT ===")
 
-          # The most primitive validation possible:
-          # 1. 'basic' must end with '0 failed'
-          # 2. 'copymove' must end with '1 failed'
-          # 3. 'move_coll' must be in the logs
+          # Search for the summary markers
+          basic_start = output.find("summary for")
+          if basic_start == -1:
+              print("Could not find any suite summary.")
+              sys.exit(1)
+              
+          # Find basic summary
+          basic_match = re.search(r'summary for.*?basic.*?:.*?(\d+)\s+failed', output, re.S | re.I)
+          # Find copymove summary
+          cm_match = re.search(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S | re.I)
           
-          has_basic_summary = "summary for `basic':" in output or "summary for basic:" in output
-          basic_zero_fails = "0 failed" in output and output.find("summary for", output.find("basic")) != -1
-          
-          has_copymove_summary = "summary for `copymove':" in output or "summary for copymove:" in output
-          copymove_one_fail = "1 failed" in output and output.find("summary for", output.find("copymove")) != -1
-          
+          basic_fails = basic_match.group(1) if basic_match else "MISSING"
+          cm_fails = cm_match.group(1) if cm_match else "MISSING"
           has_move_coll = "move_coll" in output and "FAIL" in output
 
-          print(f"\nPrimitive Checks: has_basic={has_basic_summary}, basic_0={basic_zero_fails}, has_cm={has_copymove_summary}, cm_1={copymove_one_fail}, has_move_coll={has_move_coll}")
+          print("\nFinal Analysis: basic_fails=" + str(basic_fails) + ", cm_fails=" + str(cm_fails) + ", move_coll_detected=" + str(has_move_coll))
 
-          # If the summaries are there and the counts are right, we are good.
-          # We'll use a slightly smarter approach for the counts to be sure.
-          
-          basic_fails = re.findall(r'summary for.*?basic.*?:.*?(\d+)\s+failed', output, re.S)
-          cm_fails = re.findall(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S)
-          
-          print(f"Regex Counts: basic_fails={basic_fails}, cm_fails={cm_fails}")
-
-          if basic_fails and basic_fails[0] == '0' and cm_fails and cm_fails[0] == '1' and has_move_coll:
-              print("✅ Baseline verified.")
+          if basic_fails == '0' and cm_fails == '1' and has_move_coll:
+              print("✅ Only known failure (move_coll) detected. Baseline verified.")
               sys.exit(0)
           else:
-              print("❌ Validation failed.")
+              print("❌ Unexpected failures or missing summaries.")
               sys.exit(1)
           PYEOF
           
