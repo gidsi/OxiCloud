@@ -173,7 +173,8 @@ jobs:
           content = re.sub(r'\x1b\(B', '', content)
 
           lines = content.splitlines()
-          actual_fails = [l for l in lines if " FAIL (" in l]
+          # Use regex for finding FAIL lines to be robust against whitespace
+          actual_fails = [l for l in lines if re.search(r'FAIL\s*\(', l)]
           summaries = [l for l in lines if "summary for" in l]
 
           print(f"\nValidation: Found {len(actual_fails)} actual test failures.")
@@ -182,7 +183,7 @@ jobs:
 
           unexpected_summary = False
           for l in summaries:
-              match = re.search(r"(\d+) failed", l)
+              match = re.search(r"(\d+)\s+failed", l)
               if match:
                   failed_count = int(match.group(1))
                   if failed_count > 0:
