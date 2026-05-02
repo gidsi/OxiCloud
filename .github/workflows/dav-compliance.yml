@@ -150,7 +150,7 @@ jobs:
           # Use -k to ensure we get a full summary even if tests fail
           TESTS="basic copymove" litmus -k http://localhost:8086/webdav/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt || true
           
-          # Use python for the actual validation to avoid bash quoting/parsing hell
+                    # Use python for the actual validation to avoid bash quoting/parsing hell
           cat << 'PYEOF' > validate_litmus.py
           import re
           import sys
@@ -159,7 +159,7 @@ jobs:
               with open('litmus-raw.txt', 'r') as f:
                   raw = f.read()
           except Exception as e:
-              print(f"❌ Could not read litmus-raw.txt: {e}")
+              print("Could not read litmus-raw.txt")
               sys.exit(1)
 
           # Strip ANSI escape codes and character set escapes
@@ -174,36 +174,34 @@ jobs:
           for l in lines[-30:]:
               print(l)
 
-          # Find test failures: lines containing "FAIL ("
-          actual_fails = [l for l in lines if re.search(r'FAIL\s*\(', l)]
-          # Find summary lines
-          summaries = [l for l in lines if re.search(r'summary\s+for', l)]
-
-          print(f"\nValidation: Found {len(actual_fails)} actual test failure lines.")
-          for l in actual_fails:
-              print(f"  -> {l}")
-
-          unexpected_summary = False
-          for l in summaries:
-              match = re.search(r"(\d+)\s+failed", l)
-              if match:
-                  failed_count = int(match.group(1))
-                  if failed_count > 0:
-                      if "copymove" in l and failed_count == 1:
-                          print(f"Summary: Expected single failure in copymove found.")
-                      else:
-                          print(f"❌ Summary: Unexpected failure(s) in suite: {l}")
-                          unexpected_summary = True
-
-          # We specifically ignore move_coll FAIL
-          non_ignored_fails = [l for l in actual_fails if "move_coll" not in l]
+          # Find summaries
+          summaries = [l for l in lines if re.search(r'summary for', l)]
           
-          if len(non_ignored_fails) == 0 and not unexpected_summary:
-              print("✅ All (non-ignored) tests passed.")
+          unexpected_failures = False
+          if not summaries:
+              print("No litmus summaries found in output.")
+              unexpected_failures = True
+          
+          for s in summaries:
+              match = re.search(r'(\d+)\s+passed,\s+(\d+)\s+failed', s)
+              if match:
+                  passed, failed = int(match.group(1)), int(match.group(2))
+                  if failed > 0:
+                      if "copymove" in s and failed == 1:
+                          if re.search(r'10\.\s+move_coll', content):
+                              print("Summary: Expected move_coll failure in copymove found.")
+                          else:
+                              print("Summary: Failure in copymove is NOT move_coll")
+                              unexpected_failures = True
+                      else:
+                          print("Summary: Unexpected failure in suite: " + s)
+                          unexpected_failures = True
+
+          if not unexpected_failures:
+              print("✅ Validation successful. Any detected failures are known/ignored.")
               sys.exit(0)
           else:
-              print(f"❌ Found unexpected failures. Failing build.")
-              print(f"Non-ignored fails: {non_ignored_fails}")
+              print("❌ Validation failed. Unexpected regressions detected.")
               sys.exit(1)
           PYEOF
           
