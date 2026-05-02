@@ -148,7 +148,7 @@ jobs:
         shell: bash
         run: |
           # Use -k to ensure we get a full summary even if tests fail
-          TESTS="basic copymove" litmus -k http://localhost:8086/webdav/user1/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt || true
+          TESTS="basic copymove" litmus -k http://localhost:8086/webdav/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-raw.txt || true
           
           echo ""
           echo "=== litmus summary ==="
