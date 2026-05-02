@@ -154,62 +154,53 @@ jobs:
           import os
 
           def strip_ansi(text):
-              # Handle different formats of escape sequences and terminal garbage
               clean = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', text)
               clean = re.sub(r'\x1b\(B', '', clean)
-              # Also strip common carriage returns that might mess up line breaks
               clean = clean.replace('\r', '')
               return clean
 
-          print("--- Starting litmus ---")
           env = os.environ.copy()
           env["TESTS"] = "basic copymove"
           
-          # Run litmus with -k (keep going)
+          print("--- Running litmus ---")
           cmd = ["litmus", "-k", "http://localhost:8086/webdav/", "user1", env.get("USER1_APP_PASS", "")]
           proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
           
-          full_output = strip_ansi(proc.stdout + proc.stderr)
-          
+          output = strip_ansi(proc.stdout + proc.stderr)
           with open('litmus-output.txt', 'w') as f:
-              f.write(full_output)
+              f.write(output)
 
-          print("\n=== litmus summary ===")
-          lines = full_output.splitlines()
-          for line in lines[-40:]:
-              print(line)
+          print("\n=== LATEST LOGS ===")
+          print("\n".join(output.splitlines()[-50:]))
 
-          # Validation logic
-          # 1. Look for suite summaries. Use regex to be more forgiving.
-          summaries = [l for l in lines if re.search(r'summary\s+for', l)]
+          # The most primitive validation possible:
+          # 1. 'basic' must end with '0 failed'
+          # 2. 'copymove' must end with '1 failed'
+          # 3. 'move_coll' must be in the logs
           
-          basic_ok = False
-          copymove_expected_fail = False
+          has_basic_summary = "summary for `basic':" in output or "summary for basic:" in output
+          basic_zero_fails = "0 failed" in output and output.find("summary for", output.find("basic")) != -1
           
-          for s in summaries:
-              m = re.search(r'summary\s+for\s+`?(\w+)\'?:.*?(\d+)\s+passed,\s+(\d+)\s+failed', s)
-              if m:
-                  suite, passed, failed = m.groups()
-                  failed = int(failed)
-                  if suite == 'basic' and failed == 0:
-                      basic_ok = True
-                  elif suite == 'copymove' and failed == 1:
-                      # Verify it is specifically move_coll
-                      if 'move_coll' in full_output:
-                          copymove_expected_fail = True
+          has_copymove_summary = "summary for `copymove':" in output or "summary for copymove:" in output
+          copymove_one_fail = "1 failed" in output and output.find("summary for", output.find("copymove")) != -1
           
-          print(f"\nValidation: basic_ok={basic_ok}, copymove_expected_fail={copymove_expected_fail}")
+          has_move_coll = "move_coll" in output and "FAIL" in output
+
+          print(f"\nPrimitive Checks: has_basic={has_basic_summary}, basic_0={basic_zero_fails}, has_cm={has_copymove_summary}, cm_1={copymove_one_fail}, has_move_coll={has_move_coll}")
+
+          # If the summaries are there and the counts are right, we are good.
+          # We'll use a slightly smarter approach for the counts to be sure.
           
-          if basic_ok and copymove_expected_fail:
-              print("✅ Only known failure (move_coll) detected. Returning success.")
+          basic_fails = re.findall(r'summary for.*?basic.*?:.*?(\d+)\s+failed', output, re.S)
+          cm_fails = re.findall(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S)
+          
+          print(f"Regex Counts: basic_fails={basic_fails}, cm_fails={cm_fails}")
+
+          if basic_fails and basic_fails[0] == '0' and cm_fails and cm_fails[0] == '1' and has_move_coll:
+              print("✅ Baseline verified.")
               sys.exit(0)
           else:
-              print("❌ Unexpected failures or missing summaries detected!")
-              print(f"Found summaries: {summaries}")
-              # Print full output if missing summaries
-              if not basic_ok or not copymove_expected_fail:
-                  print("DEBUG: Full output follows for inspection:")
-                  print(full_output)
+              print("❌ Validation failed.")
               sys.exit(1)
           PYEOF
           
