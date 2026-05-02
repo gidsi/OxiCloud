@@ -147,7 +147,7 @@ jobs:
       - name: Run litmus (WebDAV compliance)
         shell: bash
         run: |
-          cat << 'PYEOF' > litmus_runner.py
+                    cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
           import sys
@@ -177,29 +177,31 @@ jobs:
           print(output)
           print("=== END RAW OUTPUT ===")
 
-          # Search for the summary markers using even more primitive matching
           print("\n--- Validation ---")
+          lines = output.splitlines()
           
-          # Basic suite
-          basic_match = re.search(r'summary for.*?basic.*?:.*?(\d+)\s+failed', output, re.S | re.I)
-          basic_fails = basic_match.group(1) if basic_match else "MISSING"
+          def get_fails(suite_name):
+              for line in lines:
+                  if "summary for" in line and suite_name in line:
+                      match = re.search(r'(\d+)\s+failed', line)
+                      if match:
+                          return match.group(1)
+              return "MISSING"
 
-          # Copymove suite
-          cm_match = re.search(r'summary for.*?copymove.*?:.*?(\d+)\s+failed', output, re.S | re.I)
-          cm_fails = cm_match.group(1) if cm_match else "MISSING"
-
-          has_move_coll = "move_coll" in output and "FAIL" in output
+          basic_fails = get_fails("basic")
+          cm_fails = get_fails("copymove")
+          has_move_coll = any("move_coll" in l and "FAIL" in l for l in lines)
 
           print(f"Result: basic_fails={basic_fails}, cm_fails={cm_fails}, move_coll_detected={has_move_coll}")
 
           if basic_fails == '0' and cm_fails == '1' and has_move_coll:
-              print("✅ Only known failure (move_coll) detected. Baseline verified.")
+              print("✅ Known baseline verified.")
               sys.exit(0)
           elif basic_fails == '0' and cm_fails == '0':
-              print("✅ Perfect score! All tests passed.")
+              print("✅ All tests passed.")
               sys.exit(0)
           else:
-              print("❌ Unexpected failures or missing summaries.")
+              print("❌ Unexpected results.")
               sys.exit(1)
           PYEOF
           
