@@ -148,12 +148,14 @@ jobs:
         shell: bash
         run: |
                     cat << 'PYEOF' > litmus_runner.py
+          cat << 'PYEOF' > litmus_runner.py
           import subprocess
           import re
           import sys
           import os
 
-          def strip_ansi(text):
+          def strip_garbage(text):
+              # Strip ANSI, carriage returns, and non-printable junk
               clean = re.sub(r'\x1b\[[0-9;]*[mGJK]', '', text)
               clean = re.sub(r'\x1b\(B', '', clean)
               return clean.replace('\r', '')
@@ -169,7 +171,7 @@ jobs:
           cmd = ["litmus", "-k", url, user, password]
           proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
           
-          output = strip_ansi(proc.stdout + proc.stderr)
+          output = strip_garbage(proc.stdout + proc.stderr)
           with open('litmus-output.txt', 'w') as f:
               f.write(output)
 
@@ -178,19 +180,18 @@ jobs:
           print("=== END RAW OUTPUT ===")
 
           print("\n--- Validation ---")
-          lines = output.splitlines()
           
-          def get_fails(suite_name):
-              for line in lines:
-                  if "summary for" in line and suite_name in line:
-                      match = re.search(r'(\d+)\s+failed', line)
-                      if match:
-                          return match.group(1)
+          # Use re.search on the full output with flexible spacing
+          def find_fail_count(suite_name):
+              pattern = r'summary for\s+.*?%s.*?\s*:\s*of\s+\d+\s+tests\s+run:.*?\d+\s+passed,\s+(\d+)\s+failed' % suite_name
+              match = re.search(pattern, output, re.I | re.S)
+              if match:
+                  return match.group(1)
               return "MISSING"
 
-          basic_fails = get_fails("basic")
-          cm_fails = get_fails("copymove")
-          has_move_coll = any("move_coll" in l and "FAIL" in l for l in lines)
+          basic_fails = find_fail_count("basic")
+          cm_fails = find_fail_count("copymove")
+          has_move_coll = "move_coll" in output and "FAIL" in output
 
           print(f"Result: basic_fails={basic_fails}, cm_fails={cm_fails}, move_coll_detected={has_move_coll}")
 
