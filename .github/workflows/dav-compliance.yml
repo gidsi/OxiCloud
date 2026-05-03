@@ -157,34 +157,26 @@ jobs:
           tail -n 30 litmus-clean.txt
           
           # Validation:
-          # Extract failure counts using grep on the cleaned file
-          # We check if 'basic' summary exists and has 0 failed
-          # We check if 'copymove' summary exists and has exactly 1 failed
-          # We check if 'move_coll' exists anywhere in the file
+          # Grep for the specific summary lines and counts
+          BASIC_SUMMARY=$(grep -a "summary for .*basic" litmus-clean.txt | tail -1 || echo "MISSING")
+          CM_SUMMARY=$(grep -a "summary for .*copymove" litmus-clean.txt | tail -1 || echo "MISSING")
           
-          BASIC_STATS=$(grep -a "summary for .*basic" litmus-clean.txt || echo "MISSING")
-          COPYMOVE_STATS=$(grep -a "summary for .*copymove" litmus-clean.txt || echo "MISSING")
+          BASIC_FAILS=$(echo "$BASIC_SUMMARY" | grep -o "[0-9]\+ failed" | awk '{print $1}' || echo "N/A")
+          CM_FAILS=$(echo "$CM_SUMMARY" | grep -o "[0-9]\+ failed" | awk '{print $1}' || echo "N/A")
           
-          BASIC_FAILED=$(echo "$BASIC_STATS" | grep -oE "[0-9]+ failed" | awk '{print $1}' || echo "N/A")
-          COPYMOVE_FAILED=$(echo "$COPYMOVE_STATS" | grep -oE "[0-9]+ failed" | awk '{print $1}' || echo "N/A")
+          HAS_MOVE_COLL=$(grep -ai "move_coll" litmus-clean.txt | grep -ai "FAIL" | head -1 || echo "")
           
-          MOVE_COLL_DETECTED=$(grep -ai "move_coll" litmus-clean.txt | grep -ai "FAIL" | wc -l)
+          echo "Debug: BASIC_FAILS=$BASIC_FAILS, CM_FAILS=$CM_FAILS, HAS_MOVE_COLL=$HAS_MOVE_COLL"
           
-          echo "Debug: BASIC_FAILED=$BASIC_FAILED, COPYMOVE_FAILED=$COPYMOVE_FAILED, MOVE_COLL_DETECTED=$MOVE_COLL_DETECTED"
-          
-          if [ "$BASIC_FAILED" = "0" ] && [ "$COPYMOVE_FAILED" = "1" ] && [ $MOVE_COLL_DETECTED -ge 1 ]; then
-            echo "✅ Baseline verified: Only expected move_coll failure detected."
+          if [ "$BASIC_FAILS" = "0" ] && [ "$CM_FAILS" = "1" ] && [ -n "$HAS_MOVE_COLL" ]; then
+            echo "✅ Baseline verified: move_coll is the only failure."
             exit 0
-          elif [ "$BASIC_FAILED" = "0" ] && [ "$COPYMOVE_FAILED" = "0" ]; then
-            echo "✅ Perfect score: All tests passed."
+          elif [ "$BASIC_FAILS" = "0" ] && [ "$CM_FAILS" = "0" ]; then
+            echo "✅ Perfect score."
             exit 0
-          else
-            echo "❌ Unexpected failures detected in litmus tests!"
-            echo "Summary lines found:"
-            echo "$BASIC_STATS"
-            echo "$COPYMOVE_STATS"
-            exit 1
           fi
+          echo "❌ Unexpected failure state."
+          exit 1
 
       # ── CalDAVTester (CalDAV + CardDAV) ────────────────────
       - name: Checkout CalDAVTester
