@@ -599,6 +599,7 @@ impl FileWritePort for MockFileRepository {
         &self,
         _file_id: &str,
         _target_folder_id: Option<String>,
+        _new_name: Option<String>,
     ) -> std::result::Result<File, DomainError> {
         unimplemented!()
     }

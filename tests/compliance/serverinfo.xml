@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    OxiCloud server configuration for Apple CalDAVTester.
+
+    Placeholders __USER1_APP_PASS__ and __USER2_APP_PASS__ are replaced at CI
+    time with real app passwords provisioned during the workflow.
+
+    Reference: https://github.com/apple/ccs-caldavtester
+-->
+<serverinfo>
+  <host>localhost</host>
+  <nonsslport>8086</nonsslport>
+  <authtype>basic</authtype>
+
+  <!-- ── Substitution variables used by the test scripts ── -->
+  <substitutions>
+    <!-- Server root and DAV paths -->
+    <substitution>
+      <key>$root:</key>
+      <value>/</value>
+    </substitution>
+    <substitution>
+      <key>$principalcollection:</key>
+      <value>/caldav/</value>
+    </substitution>
+    <substitution>
+      <key>$calendarhome:</key>
+      <value>/caldav/$userid1:/</value>
+    </substitution>
+    <substitution>
+      <key>$calendarpath1:</key>
+      <value>/caldav/$userid1:/default/</value>
+    </substitution>
+    <substitution>
+      <key>$addressbookhome:</key>
+      <value>/carddav/$userid1:/</value>
+    </substitution>
+    <substitution>
+      <key>$addressbookpath1:</key>
+      <value>/carddav/$userid1:/default/</value>
+    </substitution>
+
+    <!-- User 1 (primary test user) -->
+    <substitution>
+      <key>$userid1:</key>
+      <value>user1</value>
+    </substitution>
+    <substitution>
+      <key>$pswd1:</key>
+      <value>__USER1_APP_PASS__</value>
+    </substitution>
+
+    <!-- User 2 (secondary — for sharing / scheduling tests) -->
+    <substitution>
+      <key>$userid2:</key>
+      <value>user2</value>
+    </substitution>
+    <substitution>
+      <key>$pswd2:</key>
+      <value>__USER2_APP_PASS__</value>
+    </substitution>
+
+    <!-- User 3 placeholder (some tests reference it; reuse user2) -->
+    <substitution>
+      <key>$userid3:</key>
+      <value>user2</value>
+    </substitution>
+    <substitution>
+      <key>$pswd3:</key>
+      <value>__USER2_APP_PASS__</value>
+    </substitution>
+  </substitutions>
+</serverinfo>

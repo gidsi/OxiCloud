@@ -153,6 +153,7 @@ impl FileManagementUseCase for FileManagementService {
         &self,
         file_id: &str,
         target_folder_id: Option<String>,
+        new_name: Option<String>,
     ) -> Result<FileDto, DomainError> {
         info!(
             "Copying file with ID: {} to folder: {:?}",
@@ -161,7 +162,7 @@ impl FileManagementUseCase for FileManagementService {
 
         let copied_file = self
             .file_repository
-            .copy_file(file_id, target_folder_id)
+            .copy_file(file_id, target_folder_id, new_name)
             .await
             .map_err(|e| {
                 error!("Error copying file (ID: {}): {}", file_id, e);
@@ -183,9 +184,10 @@ impl FileManagementUseCase for FileManagementService {
         file_id: &str,
         caller_id: Uuid,
         target_folder_id: Option<String>,
+        new_name: Option<String>,
     ) -> Result<FileDto, DomainError> {
         self.verify_owner(file_id, caller_id).await?;
-        self.copy_file(file_id, target_folder_id).await
+        self.copy_file(file_id, target_folder_id, new_name).await
     }
 
     async fn rename_file(&self, file_id: &str, new_name: &str) -> Result<FileDto, DomainError> {

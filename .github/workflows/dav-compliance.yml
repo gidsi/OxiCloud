@@ -1,0 +1,239 @@
+name: DAV Compliance
+
+on:
+  push:
+    branches: [main, dev, "feat/**", "fix/**"]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  CARGO_TERM_COLOR: always
+  DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+
+jobs:
+  dav-compliance:
+    name: WebDAV / CalDAV / CardDAV compliance
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: oxicloud
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # ── Build ──────────────────────────────────────────────
+      - name: Build OxiCloud (release)
+        run: cargo build --release
+
+      # ── Database ───────────────────────────────────────────
+      - name: Initialise database
+        run: |
+          for f in migrations/*.sql; do
+            psql -h localhost -U postgres -d oxicloud -f "$f"
+          done
+        env:
+          PGPASSWORD: postgres
+
+      # ── Start server ───────────────────────────────────────
+      - name: Start OxiCloud
+        run: |
+          mkdir -p /tmp/oxicloud-storage
+          ./target/release/oxicloud &
+          echo "Waiting for server..."
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8086/api/version >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf http://localhost:8086/api/version
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud"
+          OXICLOUD_STORAGE_PATH: /tmp/oxicloud-storage
+          OXICLOUD_ENABLE_AUTH: "true"
+
+      # ── Provision test users ───────────────────────────────
+      - name: Create test users and app passwords
+        run: |
+          set -euo pipefail
+
+          setup_admin() {
+            local user=$1 email=$2 pass=$3
+            echo "Setting up admin: $user..."
+            curl -sf -X POST http://localhost:8086/api/setup \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"$user\",\"email\":\"$email\",\"password\":\"$pass\"}"
+            echo ""
+          }
+
+          register_user() {
+            local user=$1 email=$2 pass=$3
+            echo "Registering $user..."
+            curl -sf -X POST http://localhost:8086/api/auth/register \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"$user\",\"email\":\"$email\",\"password\":\"$pass\"}"
+            echo ""
+          }
+
+          login_user() {
+            local user=$1 pass=$2
+            local resp
+            resp=$(curl -s -w '\n%{http_code}' -X POST http://localhost:8086/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"$user\",\"password\":\"$pass\"}")
+            local http_code
+            http_code=$(echo "$resp" | tail -1)
+            local body
+            body=$(echo "$resp" | sed '$d')
+            if [ "$http_code" != "200" ]; then
+              echo "Login failed for $user: HTTP $http_code" >&2
+              echo "$body" >&2
+              return 1
+            fi
+            echo "$body" | jq -r '.access_token // .token // .accessToken'
+          }
+
+          create_app_password() {
+            local token=$1 name=$2
+            local resp
+            resp=$(curl -s -w '\n%{http_code}' -X POST http://localhost:8086/api/auth/app-passwords \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $token" \
+              -d "{\"name\":\"$name\"}")
+            local http_code
+            http_code=$(echo "$resp" | tail -1)
+            local body
+            body=$(echo "$resp" | sed '$d')
+            if [ "$http_code" != "200" ] && [ "$http_code" != "201" ]; then
+              echo "App password creation failed: HTTP $http_code" >&2
+              echo "$body" >&2
+              return 1
+            fi
+            echo "$body" | jq -r '.password // .app_password // .appPassword'
+          }
+
+          # First user must be created via /api/setup (admin bootstrap)
+          setup_admin "user1" "user1@test.local" "TestPass123!"
+          register_user "user2" "user2@test.local" "TestPass123!"
+
+          TOKEN1=$(login_user "user1" "TestPass123!")
+          TOKEN2=$(login_user "user2" "TestPass123!")
+
+          APP_PASS1=$(create_app_password "$TOKEN1" "ci-litmus")
+          APP_PASS2=$(create_app_password "$TOKEN2" "ci-litmus")
+
+          echo "USER1_TOKEN=$TOKEN1" >> "$GITHUB_ENV"
+          echo "USER2_TOKEN=$TOKEN2" >> "$GITHUB_ENV"
+          echo "USER1_APP_PASS=$APP_PASS1" >> "$GITHUB_ENV"
+          echo "USER2_APP_PASS=$APP_PASS2" >> "$GITHUB_ENV"
+
+      # ── litmus (WebDAV) ────────────────────────────────────
+      - name: Install litmus
+        run: sudo apt-get update && sudo apt-get install -y litmus
+
+      - name: Run litmus (WebDAV compliance)
+        shell: bash
+        run: |
+          # Use -k to ensure we get a full summary even if tests fail
+          TESTS="basic copymove" litmus -k http://localhost:8086/webdav/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-output.txt || true
+          
+          echo ""
+          echo "=== LITMUS SUMMARY ==="
+          # Strip ANSI and show summary
+          sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" litmus-output.txt > litmus-clean.txt
+          tail -n 30 litmus-clean.txt
+          
+          # Validation:
+          # Extract failure counts using grep on the cleaned file
+          # We check if 'basic' summary exists and has 0 failed
+          # We check if 'copymove' summary exists and has exactly 1 failed
+          # We check if 'move_coll' exists anywhere in the file
+          
+          BASIC_STATS=$(grep -a "summary for .*basic" litmus-clean.txt || echo "MISSING")
+          COPYMOVE_STATS=$(grep -a "summary for .*copymove" litmus-clean.txt || echo "MISSING")
+          
+          BASIC_FAILED=$(echo "$BASIC_STATS" | grep -oE "[0-9]+ failed" | awk '{print $1}' || echo "N/A")
+          COPYMOVE_FAILED=$(echo "$COPYMOVE_STATS" | grep -oE "[0-9]+ failed" | awk '{print $1}' || echo "N/A")
+          
+          MOVE_COLL_DETECTED=$(grep -ai "move_coll" litmus-clean.txt | grep -ai "FAIL" | wc -l)
+          
+          echo "Debug: BASIC_FAILED=$BASIC_FAILED, COPYMOVE_FAILED=$COPYMOVE_FAILED, MOVE_COLL_DETECTED=$MOVE_COLL_DETECTED"
+          
+          if [ "$BASIC_FAILED" = "0" ] && [ "$COPYMOVE_FAILED" = "1" ] && [ $MOVE_COLL_DETECTED -ge 1 ]; then
+            echo "✅ Baseline verified: Only expected move_coll failure detected."
+            exit 0
+          elif [ "$BASIC_FAILED" = "0" ] && [ "$COPYMOVE_FAILED" = "0" ]; then
+            echo "✅ Perfect score: All tests passed."
+            exit 0
+          else
+            echo "❌ Unexpected failures detected in litmus tests!"
+            echo "Summary lines found:"
+            echo "$BASIC_STATS"
+            echo "$COPYMOVE_STATS"
+            exit 1
+          fi
+
+      # ── CalDAVTester (CalDAV + CardDAV) ────────────────────
+      - name: Checkout CalDAVTester
+        uses: actions/checkout@v4
+        with:
+          repository: apple/ccs-caldavtester
+          path: ccs-caldavtester
+
+      - name: Checkout CalDAV test data (pycalendar)
+        uses: actions/checkout@v4
+        with:
+          repository: niccokunzmann/ccs-pycalendar
+          path: ccs-pycalendar
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare CalDAVTester
+        run: |
+          # CalDAVTester expects pycalendar as a sibling or in a known path
+          ln -sf "$GITHUB_WORKSPACE/ccs-pycalendar" "$GITHUB_WORKSPACE/ccs-caldavtester/pycalendar"
+
+          # Inject real app passwords into serverinfo.xml
+          cd "$GITHUB_WORKSPACE"
+          sed -e "s|__USER1_APP_PASS__|$USER1_APP_PASS|g" \
+              -e "s|__USER2_APP_PASS__|$USER2_APP_PASS|g" \
+              tests/compliance/serverinfo.xml > ccs-caldavtester/serverinfo-oxicloud.xml
+
+      - name: Run CalDAVTester
+        working-directory: ccs-caldavtester
+        # Allow failure to establish baseline
+        run: |
+          python testcaldav.py --print-details-onfail \
+            --serverinfo serverinfo-oxicloud.xml \
+            -s CalDAV 2>&1 | tee "$GITHUB_WORKSPACE/caldav-output.txt" || true
+
+          python testcaldav.py --print-details-onfail \
+            --serverinfo serverinfo-oxicloud.xml \
+            -s CardDAV 2>&1 | tee "$GITHUB_WORKSPACE/carddav-output.txt" || true
+
+      # ── Upload results ─────────────────────────────────────
+      - name: Upload compliance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dav-compliance-reports
+          path: |
+            litmus-output.txt
+            caldav-output.txt
+            carddav-output.txt
