@@ -280,6 +280,7 @@ pub trait FileManagementUseCase: Send + Sync + 'static {
         &self,
         file_id: &str,
         target_folder_id: Option<String>,
+        new_name: Option<String>,
     ) -> Result<FileDto, DomainError>;
 
     /// Copies a file, enforcing that `caller_id` is the owner.
@@ -288,6 +289,7 @@ pub trait FileManagementUseCase: Send + Sync + 'static {
         file_id: &str,
         caller_id: Uuid,
         target_folder_id: Option<String>,
+        new_name: Option<String>,
     ) -> Result<FileDto, DomainError>;
 
     /// Renames a file (system/internal — no ownership check).
