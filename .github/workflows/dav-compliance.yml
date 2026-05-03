@@ -1,0 +1,174 @@
+name: DAV Compliance
+
+on:
+  push:
+    branches: [main, dev, "feat/**", "fix/**"]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  CARGO_TERM_COLOR: always
+  DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+
+jobs:
+  dav-compliance:
+    name: WebDAV / CalDAV / CardDAV compliance
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: oxicloud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # ── Build ──────────────────────────────────────────────
+      - name: Build OxiCloud (release)
+        run: cargo build --release
+
+      # ── Database ───────────────────────────────────────────
+      - name: Initialise database
+        run: |
+          for f in migrations/*.sql; do
+            psql -h localhost -U postgres -d oxicloud_test -f "$f"
+          done
+        env:
+          PGPASSWORD: postgres
+
+      # ── Start server ───────────────────────────────────────
+      - name: Start OxiCloud
+        run: |
+          ./target/release/oxicloud &
+          echo "Waiting for server..."
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8086/version >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf http://localhost:8086/version
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+          OXICLOUD_STORAGE_PATH: /tmp/oxicloud-storage
+          OXICLOUD_ENABLE_AUTH: "true"
+
+      # ── Provision test users ───────────────────────────────
+      - name: Create test users and app passwords
+        run: |
+          set -euo pipefail
+
+          register_user() {
+            local user=$1 email=$2 pass=$3
+            echo "Registering $user..."
+            curl -sf -X POST http://localhost:8086/api/auth/register \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"$user\",\"email\":\"$email\",\"password\":\"$pass\"}"
+            echo ""
+          }
+
+          login_user() {
+            local user=$1 pass=$2
+            curl -sf -X POST http://localhost:8086/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"$user\",\"password\":\"$pass\"}" \
+              | jq -r '.token // .access_token // .accessToken'
+          }
+
+          create_app_password() {
+            local token=$1 name=$2
+            curl -sf -X POST http://localhost:8086/api/auth/app-passwords \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $token" \
+              -d "{\"name\":\"$name\"}" \
+              | jq -r '.password // .app_password // .appPassword'
+          }
+
+          register_user "user1" "user1@test.local" "TestPass123!"
+          register_user "user2" "user2@test.local" "TestPass123!"
+
+          TOKEN1=$(login_user "user1" "TestPass123!")
+          TOKEN2=$(login_user "user2" "TestPass123!")
+
+          APP_PASS1=$(create_app_password "$TOKEN1" "ci-litmus")
+          APP_PASS2=$(create_app_password "$TOKEN2" "ci-litmus")
+
+          echo "USER1_TOKEN=$TOKEN1" >> "$GITHUB_ENV"
+          echo "USER2_TOKEN=$TOKEN2" >> "$GITHUB_ENV"
+          echo "USER1_APP_PASS=$APP_PASS1" >> "$GITHUB_ENV"
+          echo "USER2_APP_PASS=$APP_PASS2" >> "$GITHUB_ENV"
+
+      # ── litmus (WebDAV) ────────────────────────────────────
+      - name: Install litmus
+        run: sudo apt-get update && sudo apt-get install -y litmus
+
+      - name: Run litmus (WebDAV compliance)
+        # Allow failure to establish baseline — remove `|| true` once passing
+        run: |
+          litmus http://localhost:8086/webdav/user1/ user1 "$USER1_APP_PASS" 2>&1 | tee litmus-output.txt || true
+          echo ""
+          echo "=== litmus summary ==="
+          tail -30 litmus-output.txt
+
+      # ── CalDAVTester (CalDAV + CardDAV) ────────────────────
+      - name: Checkout CalDAVTester
+        uses: actions/checkout@v4
+        with:
+          repository: apple/ccs-caldavtester
+          path: ccs-caldavtester
+
+      - name: Checkout CalDAV test data (pycalendar)
+        uses: actions/checkout@v4
+        with:
+          repository: niccokunzmann/ccs-pycalendar
+          path: ccs-pycalendar
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare CalDAVTester
+        run: |
+          # CalDAVTester expects pycalendar as a sibling or in a known path
+          ln -sf "$GITHUB_WORKSPACE/ccs-pycalendar" "$GITHUB_WORKSPACE/ccs-caldavtester/pycalendar"
+
+          # Inject real app passwords into serverinfo.xml
+          cd "$GITHUB_WORKSPACE"
+          sed -e "s|__USER1_APP_PASS__|$USER1_APP_PASS|g" \
+              -e "s|__USER2_APP_PASS__|$USER2_APP_PASS|g" \
+              tests/compliance/serverinfo.xml > ccs-caldavtester/serverinfo-oxicloud.xml
+
+      - name: Run CalDAVTester
+        working-directory: ccs-caldavtester
+        # Allow failure to establish baseline
+        run: |
+          python testcaldav.py --print-details-onfail \
+            --serverinfo serverinfo-oxicloud.xml \
+            -s CalDAV 2>&1 | tee "$GITHUB_WORKSPACE/caldav-output.txt" || true
+
+          python testcaldav.py --print-details-onfail \
+            --serverinfo serverinfo-oxicloud.xml \
+            -s CardDAV 2>&1 | tee "$GITHUB_WORKSPACE/carddav-output.txt" || true
+
+      # ── Upload results ─────────────────────────────────────
+      - name: Upload compliance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dav-compliance-reports
+          path: |
+            litmus-output.txt
+            caldav-output.txt
+            carddav-output.txt
