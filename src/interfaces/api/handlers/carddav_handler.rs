@@ -124,6 +124,33 @@ fn reject_path_traversal(path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+// ─── Helper: strip optional username prefix from CardDAV path ────────
+//
+// The `addressbook-home-set` discovery property returns `/carddav/{username}/`,
+// so standard clients will prefix all subsequent requests with the username segment.
+// The handlers below expect paths of the form `{address_book_id}` or `{address_book_id}/{contact}.vcf`.
+//
+// Heuristic: if the first path segment is a valid UUID it is already an
+// address book ID; otherwise treat it as a username and skip it.
+
+fn strip_username_prefix(path: &str) -> &str {
+    if let Some(pos) = path.find('/') {
+        let first = &path[..pos];
+        if uuid::Uuid::parse_str(first).is_ok() {
+            path
+        } else {
+            &path[pos + 1..]
+        }
+    } else {
+        if uuid::Uuid::parse_str(path).is_ok() {
+            path
+        } else {
+            ""
+        }
+    }
+}
+
+
 // ─── Helper: extract user from request ───────────────────────────────
 
 fn extract_user(req: &Request<Body>) -> Result<AuthUser, AppError> {
@@ -201,8 +228,10 @@ async fn handle_propfind(
         .map_err(|e| AppError::bad_request(format!("Failed to parse PROPFIND: {}", e)))?
     };
 
-    if path.is_empty() {
-        // Root CardDAV path — list user's address books
+    let effective_path = strip_username_prefix(path);
+
+    if effective_path.is_empty() {
+        // Root CardDAV path or user home — list user's address books
         let address_books = addressbook_service
             .list_user_address_books(user.id)
             .await
@@ -210,13 +239,18 @@ async fn handle_propfind(
                 AppError::internal_error(format!("Failed to list address books: {}", e))
             })?;
 
-        let base_href = "/carddav/";
+        let base_href = if path.is_empty() {
+            "/carddav/".to_string()
+        } else {
+            let user_part = path.split('/').next().unwrap_or(path);
+            format!("/carddav/{}/", user_part)
+        };
         let mut response_body = Vec::new();
         CardDavAdapter::generate_addressbooks_propfind_response(
             &mut response_body,
             &address_books,
             &propfind_request,
-            base_href,
+            &base_href,
         )
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
@@ -226,7 +260,7 @@ async fn handle_propfind(
             .body(Body::from(response_body))
             .unwrap())
     } else {
-        let parts: Vec<&str> = path.splitn(2, '/').collect();
+        let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
         let address_book_id = parts[0];
 
         if parts.len() == 1 {
@@ -324,7 +358,8 @@ async fn handle_report(
     let report = CardDavAdapter::parse_report(body_bytes.reader())
         .map_err(|e| AppError::bad_request(format!("Failed to parse REPORT: {}", e)))?;
 
-    let address_book_id = path.split('/').next().unwrap_or(path);
+    let effective_path = strip_username_prefix(path);
+    let address_book_id = effective_path.split('/').next().unwrap_or(effective_path);
 
     if address_book_id.is_empty() {
         return Err(AppError::bad_request("Address book ID required in path"));
@@ -431,7 +466,8 @@ async fn handle_put(
     let user = extract_user(&req)?;
     let contact_svc = get_contact_service(&state)?;
 
-    let parts: Vec<&str> = path.splitn(2, '/').collect();
+    let effective_path = strip_username_prefix(path);
+    let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
     if parts.len() < 2 {
         return Err(AppError::bad_request(
             "Path must be {address_book_id}/{uid}.vcf",
@@ -524,7 +560,8 @@ async fn handle_get(
     let user = extract_user(&req)?;
     let contact_svc = get_contact_service(&state)?;
 
-    let parts: Vec<&str> = path.splitn(2, '/').collect();
+    let effective_path = strip_username_prefix(path);
+    let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
     let address_book_id = parts[0];
 
     if parts.len() < 2 {
@@ -581,7 +618,8 @@ async fn handle_delete(
     let addressbook_service = get_addressbook_service(&state)?;
     let contact_svc = get_contact_service(&state)?;
 
-    let parts: Vec<&str> = path.splitn(2, '/').collect();
+    let effective_path = strip_username_prefix(path);
+    let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
     let address_book_id = parts[0];
 
     if address_book_id.is_empty() {
@@ -643,7 +681,8 @@ async fn handle_proppatch(
         )
         .map_err(|e| AppError::bad_request(format!("Failed to parse PROPPATCH: {}", e)))?;
 
-    let address_book_id = path.split('/').next().unwrap_or(path);
+    let effective_path = strip_username_prefix(path);
+    let address_book_id = effective_path.split('/').next().unwrap_or(effective_path);
 
     if address_book_id.is_empty() {
         return Err(AppError::bad_request("Address book ID required"));
@@ -697,4 +736,58 @@ async fn handle_proppatch(
         .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
         .body(Body::from(response_body))
         .unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_username_prefix;
+
+    #[test]
+    fn test_strip_username_prefix_uuid_only() {
+        let uuid = "ae8ae236-709f-4939-b766-37ad589ac7f2";
+        assert_eq!(strip_username_prefix(uuid), uuid);
+    }
+
+    #[test]
+    fn test_strip_username_prefix_uuid_with_contact() {
+        let path = "ae8ae236-709f-4939-b766-37ad589ac7f2/contact.vcf";
+        assert_eq!(strip_username_prefix(path), path);
+    }
+
+    #[test]
+    fn test_strip_username_prefix_username_and_uuid() {
+        let path = "timm/ae8ae236-709f-4939-b766-37ad589ac7f2";
+        assert_eq!(
+            strip_username_prefix(path),
+            "ae8ae236-709f-4939-b766-37ad589ac7f2"
+        );
+    }
+
+    #[test]
+    fn test_strip_username_prefix_username_uuid_and_contact() {
+        let path = "timm/ae8ae236-709f-4939-b766-37ad589ac7f2/contact.vcf";
+        assert_eq!(
+            strip_username_prefix(path),
+            "ae8ae236-709f-4939-b766-37ad589ac7f2/contact.vcf"
+        );
+    }
+
+    #[test]
+    fn test_strip_username_prefix_bare_username() {
+        assert_eq!(strip_username_prefix("timm"), "");
+    }
+
+    #[test]
+    fn test_strip_username_prefix_empty() {
+        assert_eq!(strip_username_prefix(""), "");
+    }
+
+    #[test]
+    fn test_strip_username_prefix_email_style_username() {
+        let path = "user@example.com/ae8ae236-709f-4939-b766-37ad589ac7f2/contact.vcf";
+        assert_eq!(
+            strip_username_prefix(path),
+            "ae8ae236-709f-4939-b766-37ad589ac7f2/contact.vcf"
+        );
+    }
 }
