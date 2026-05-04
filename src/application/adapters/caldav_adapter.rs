@@ -203,7 +203,7 @@ impl CalDavAdapter {
         writer: W,
         calendars: &[CalendarDto],
         request: &PropFindRequest,
-        base_href: &str,
+        base_href: &str, username: &str,
         username: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
@@ -218,6 +218,9 @@ impl CalDavAdapter {
         ))?;
 
         // Write the root /caldav/ response with discovery properties
+        Self::write_root_response(&mut xml_writer, request, base_href, username)?;
+
+        // Write the home collection response
         Self::write_root_response(&mut xml_writer, request, base_href, username)?;
 
         // Add responses for calendars
@@ -241,7 +244,7 @@ impl CalDavAdapter {
         writer: W,
         calendars: &[CalendarDto],
         request: &PropFindRequest,
-        base_href: &str,
+        base_href: &str, username: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 
@@ -253,6 +256,9 @@ impl CalDavAdapter {
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
             ]),
         ))?;
+
+        // Write the home collection response
+        Self::write_root_response(&mut xml_writer, request, base_href, username)?;
 
         // Add responses for calendars
         for calendar in calendars {
@@ -880,7 +886,7 @@ impl CalDavAdapter {
         calendar: &CalendarDto,
         events: &[CalendarEventDto],
         request: &PropFindRequest,
-        base_href: &str,
+        base_href: &str, username: &str,
         depth: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
@@ -952,7 +958,7 @@ impl CalDavAdapter {
         writer: W,
         events: &[CalendarEventDto],
         request: &CalDavReportType,
-        base_href: &str,
+        base_href: &str, username: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 

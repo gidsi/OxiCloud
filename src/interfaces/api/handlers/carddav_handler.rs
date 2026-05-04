@@ -246,12 +246,7 @@ async fn handle_propfind(
             format!("/carddav/{}/", user_part)
         };
         let mut response_body = Vec::new();
-        CardDavAdapter::generate_addressbooks_propfind_response(
-            &mut response_body,
-            &address_books,
-            &propfind_request,
-            &base_href,
-        )
+        CardDavAdapter::generate_addressbooks_propfind_response(&mut response_body, &address_books, &propfind_request, &base_href, &user.username)
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
         Ok(Response::builder()
@@ -262,6 +257,10 @@ async fn handle_propfind(
     } else {
         let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
         let address_book_id = parts[0];
+
+        if uuid::Uuid::parse_str(address_book_id).is_err() {
+            return Err(AppError::not_found("Address book not found"));
+        }
 
         if parts.len() == 1 {
             // Address book collection
@@ -476,6 +475,10 @@ async fn handle_put(
 
     let address_book_id = parts[0];
 
+        if uuid::Uuid::parse_str(address_book_id).is_err() {
+            return Err(AppError::not_found("Address book not found"));
+        }
+
     let body_bytes = body::to_bytes(req.into_body(), MAX_CARDDAV_BODY)
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
@@ -564,6 +567,10 @@ async fn handle_get(
     let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
     let address_book_id = parts[0];
 
+        if uuid::Uuid::parse_str(address_book_id).is_err() {
+            return Err(AppError::not_found("Address book not found"));
+        }
+
     if parts.len() < 2 {
         // GET on address book collection — return all contacts as vcf
         let contacts = contact_svc
@@ -621,6 +628,10 @@ async fn handle_delete(
     let effective_path = strip_username_prefix(path);
     let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
     let address_book_id = parts[0];
+
+        if uuid::Uuid::parse_str(address_book_id).is_err() {
+            return Err(AppError::not_found("Address book not found"));
+        }
 
     if address_book_id.is_empty() {
         return Err(AppError::bad_request("Address book ID required"));

@@ -138,7 +138,7 @@ impl CardDavAdapter {
         writer: W,
         address_books: &[AddressBookDto],
         request: &PropFindRequest,
-        base_href: &str,
+        base_href: &str, username: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 
@@ -149,6 +149,9 @@ impl CardDavAdapter {
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
             ]),
         ))?;
+
+        // Write the home collection response
+        Self::write_root_response(&mut xml_writer, request, base_href, username)?;
 
         for book in address_books {
             Self::write_addressbook_response(
@@ -169,7 +172,7 @@ impl CardDavAdapter {
         address_book: &AddressBookDto,
         contacts: &[ContactDto],
         request: &PropFindRequest,
-        base_href: &str,
+        base_href: &str, username: &str,
         depth: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
@@ -404,7 +407,7 @@ impl CardDavAdapter {
         contacts: &[ContactDto],
         vcards: &[(String, String)], // (uid, vcard_data)
         report: &CardDavReportType,
-        base_href: &str,
+        base_href: &str, username: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 

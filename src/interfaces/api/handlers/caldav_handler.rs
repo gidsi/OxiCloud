@@ -353,12 +353,7 @@ async fn handle_propfind(
                 let base_href = &format!("/caldav/{}/", first_segment);
                 let mut response_body = Vec::new();
 
-                CalDavAdapter::generate_calendars_propfind_response(
-                    &mut response_body,
-                    &calendars,
-                    &propfind_request,
-                    base_href,
-                )
+                CalDavAdapter::generate_calendars_propfind_response(&mut response_body, &calendars, &propfind_request, base_href, &user.username)
                 .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
                 Ok(Response::builder()
@@ -478,6 +473,10 @@ async fn handle_report(
 
     let effective_path = strip_username_prefix(path);
     let calendar_id = effective_path.split('/').next().unwrap_or(effective_path);
+
+    if uuid::Uuid::parse_str(calendar_id).is_err() {
+        return Err(AppError::not_found("Calendar not found"));
+    }
 
     if calendar_id.is_empty() {
         return Err(AppError::bad_request("Calendar ID required in path"));
@@ -857,6 +856,10 @@ async fn handle_proppatch(
 
     let effective_path = strip_username_prefix(path);
     let calendar_id = effective_path.split('/').next().unwrap_or(effective_path);
+
+    if uuid::Uuid::parse_str(calendar_id).is_err() {
+        return Err(AppError::not_found("Calendar not found"));
+    }
 
     if calendar_id.is_empty() {
         return Err(AppError::bad_request("Calendar ID required"));
