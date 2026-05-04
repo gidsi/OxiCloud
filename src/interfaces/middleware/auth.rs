@@ -240,7 +240,8 @@ pub async fn auth_middleware(
                             tracing::warn!("App password verification failed: {}", e);
                             // For WebDAV: include WWW-Authenticate so the client
                             // knows to re-prompt rather than silently failing.
-                            if request.uri().path().starts_with("/webdav") {
+                            let path = request.uri().path();
+                            if path.starts_with("/webdav") || path.starts_with("/caldav") || path.starts_with("/carddav") {
                                 return Ok(Response::builder()
                                     .status(StatusCode::UNAUTHORIZED)
                                     .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
@@ -314,7 +315,8 @@ pub async fn auth_middleware(
     // Windows Explorer, macOS Finder) know to prompt for a username/password.
     // Non-WebDAV routes return the standard AuthError which renders without
     // this header — keeping browser sessions redirecting to /login as before.
-    if request.uri().path().starts_with("/webdav") {
+    let path = request.uri().path();
+                            if path.starts_with("/webdav") || path.starts_with("/caldav") || path.starts_with("/carddav") {
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
