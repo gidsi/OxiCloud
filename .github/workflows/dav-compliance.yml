@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+  OXICLOUD_DB_CONNECTION_STRING: "postgres://postgres:postgres@localhost/oxicloud_test"
 
 jobs:
   dav-compliance:
@@ -52,6 +52,7 @@ jobs:
       # ── Start server ───────────────────────────────────────
       - name: Start OxiCloud
         run: |
+          mkdir -p /tmp/oxicloud-storage
           ./target/release/oxicloud &
           echo "Waiting for server..."
           for i in $(seq 1 30); do
@@ -60,7 +61,7 @@ jobs:
           done
           curl -sf http://localhost:8086/version
         env:
-          DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+          OXICLOUD_DB_CONNECTION_STRING: "postgres://postgres:postgres@localhost/oxicloud_test"
           OXICLOUD_STORAGE_PATH: /tmp/oxicloud-storage
           OXICLOUD_ENABLE_AUTH: "true"
 

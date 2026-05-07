@@ -43,7 +43,7 @@ jobs:
         run: |
           # Start the container in background
           docker run -d --name oxicloud-test \
-            -e DATABASE_URL="postgres://test:test@localhost/test" \
+            -e OXICLOUD_DB_CONNECTION_STRING="postgres://test:test@localhost/test" \
             -p 8080:8080 \
             test/oxicloud:test || true
 
