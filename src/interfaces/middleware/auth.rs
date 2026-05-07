@@ -241,7 +241,10 @@ pub async fn auth_middleware(
                             // For WebDAV: include WWW-Authenticate so the client
                             // knows to re-prompt rather than silently failing.
                             let path = request.uri().path();
-                            if path.starts_with("/webdav") || path.starts_with("/caldav") || path.starts_with("/carddav") {
+                            if path.starts_with("/webdav")
+                                || path.starts_with("/caldav")
+                                || path.starts_with("/carddav")
+                            {
                                 return Ok(Response::builder()
                                     .status(StatusCode::UNAUTHORIZED)
                                     .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
@@ -316,7 +319,7 @@ pub async fn auth_middleware(
     // Non-WebDAV routes return the standard AuthError which renders without
     // this header — keeping browser sessions redirecting to /login as before.
     let path = request.uri().path();
-                            if path.starts_with("/webdav") || path.starts_with("/caldav") || path.starts_with("/carddav") {
+    if path.starts_with("/webdav") || path.starts_with("/caldav") || path.starts_with("/carddav") {
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
