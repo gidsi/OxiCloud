@@ -205,6 +205,7 @@ impl CalDavAdapter {
         request: &PropFindRequest,
         base_href: &str,
         username: &str,
+        user_id: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 
@@ -227,6 +228,7 @@ impl CalDavAdapter {
                 calendar,
                 request,
                 &format!("{}{}/", base_href, calendar.id),
+                user_id,
             )?;
         }
 
@@ -242,6 +244,7 @@ impl CalDavAdapter {
         calendars: &[CalendarDto],
         request: &PropFindRequest,
         base_href: &str,
+        user_id: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 
@@ -261,6 +264,7 @@ impl CalDavAdapter {
                 calendar,
                 request,
                 &format!("{}{}/", base_href, calendar.id),
+                user_id,
             )?;
         }
 
@@ -557,6 +561,7 @@ impl CalDavAdapter {
         calendar: &CalendarDto,
         request: &PropFindRequest,
         href: &str,
+        user_id: &str,
     ) -> Result<()> {
         // Start response element
         xml_writer.write_event(Event::Start(BytesStart::new("D:response")))?;
@@ -576,7 +581,7 @@ impl CalDavAdapter {
         match &request.prop_find_type {
             PropFindType::AllProp => {
                 // Write all standard properties for a calendar
-                Self::write_calendar_standard_props(xml_writer, calendar)?;
+                Self::write_calendar_standard_props(xml_writer, calendar, user_id)?;
             }
             PropFindType::PropName => {
                 // Write only property names (empty elements)
@@ -584,7 +589,7 @@ impl CalDavAdapter {
             }
             PropFindType::Prop(props) => {
                 // Write requested properties
-                Self::write_calendar_requested_props(xml_writer, calendar, props)?;
+                Self::write_calendar_requested_props(xml_writer, calendar, props, user_id)?;
             }
         }
 
@@ -609,6 +614,7 @@ impl CalDavAdapter {
     fn write_calendar_standard_props<W: Write>(
         xml_writer: &mut Writer<W>,
         calendar: &CalendarDto,
+        user_id: &str,
     ) -> Result<()> {
         // Common WebDAV properties
 
@@ -677,8 +683,7 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
 
         // Only add write privilege if user owns the calendar or has write access
-        if calendar.owner_id == "current_user_id" {
-            // This should be replaced with actual user check
+        if calendar.owner_id == user_id {
             xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
             xml_writer.write_event(Event::Empty(BytesStart::new("D:write")))?;
             xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
@@ -735,6 +740,7 @@ impl CalDavAdapter {
         xml_writer: &mut Writer<W>,
         calendar: &CalendarDto,
         props: &[QualifiedName],
+        user_id: &str,
     ) -> Result<()> {
         for prop in props {
             match (prop.namespace.as_str(), prop.name.as_str()) {
@@ -781,8 +787,7 @@ impl CalDavAdapter {
                     xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
 
                     // Only add write privilege if user owns the calendar or has write access
-                    if calendar.owner_id == "current_user_id" {
-                        // This should be replaced with actual user check
+                    if calendar.owner_id == user_id {
                         xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
                         xml_writer.write_event(Event::Empty(BytesStart::new("D:write")))?;
                         xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
@@ -882,6 +887,7 @@ impl CalDavAdapter {
         request: &PropFindRequest,
         base_href: &str,
         depth: &str,
+        user_id: &str,
     ) -> Result<()> {
         let mut xml_writer = Writer::new(writer);
 
@@ -894,7 +900,7 @@ impl CalDavAdapter {
         ))?;
 
         // Write the calendar collection itself
-        Self::write_calendar_response(&mut xml_writer, calendar, request, base_href)?;
+        Self::write_calendar_response(&mut xml_writer, calendar, request, base_href, user_id)?;
 
         // If depth > 0, include event resources
         if depth != "0" {

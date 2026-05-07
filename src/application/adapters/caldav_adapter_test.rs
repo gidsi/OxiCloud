@@ -171,6 +171,7 @@ mod tests {
             &calendars,
             &request,
             "/caldav/",
+            "user-001",
         );
 
         assert!(
@@ -195,6 +196,56 @@ mod tests {
     }
 
     #[test]
+    fn test_write_privilege_granted_when_owner() {
+        let calendars = vec![sample_calendar()]; // owner_id = "user-001"
+        let request = PropFindRequest {
+            prop_find_type: PropFindType::AllProp,
+        };
+
+        let mut output = Vec::new();
+        let result = CalDavAdapter::generate_calendars_propfind_response(
+            &mut output,
+            &calendars,
+            &request,
+            "/caldav/",
+            "user-001", // matches owner_id
+        );
+        assert!(result.is_ok());
+
+        let xml_str = String::from_utf8(output).expect("Invalid UTF-8");
+        assert!(
+            xml_str.contains("D:write"),
+            "Owner should have write privilege, got: {}",
+            xml_str
+        );
+    }
+
+    #[test]
+    fn test_write_privilege_denied_when_not_owner() {
+        let calendars = vec![sample_calendar()]; // owner_id = "user-001"
+        let request = PropFindRequest {
+            prop_find_type: PropFindType::AllProp,
+        };
+
+        let mut output = Vec::new();
+        let result = CalDavAdapter::generate_calendars_propfind_response(
+            &mut output,
+            &calendars,
+            &request,
+            "/caldav/",
+            "other-user", // does NOT match owner_id
+        );
+        assert!(result.is_ok());
+
+        let xml_str = String::from_utf8(output).expect("Invalid UTF-8");
+        assert!(
+            !xml_str.contains("D:write"),
+            "Non-owner should NOT have write privilege, got: {}",
+            xml_str
+        );
+    }
+
+    #[test]
     fn test_generate_calendar_collection_propfind_depth_0() {
         let calendar = sample_calendar();
         let events = vec![sample_event()];
@@ -210,6 +261,7 @@ mod tests {
             &request,
             "/caldav/cal-001",
             "0",
+            "user-001",
         );
 
         assert!(
@@ -240,6 +292,7 @@ mod tests {
             &request,
             "/caldav/cal-001",
             "1",
+            "user-001",
         );
 
         assert!(
@@ -434,6 +487,7 @@ mod tests {
             &request,
             "/caldav/",
             "testuser",
+            "user-001",
         );
         assert!(
             result.is_ok(),
@@ -483,6 +537,7 @@ mod tests {
             &request,
             "/caldav/",
             "testuser",
+            "user-001",
         );
         assert!(result.is_ok());
 
@@ -565,6 +620,7 @@ mod tests {
             &request,
             "/caldav/cal-001/",
             "0",
+            "user-001",
         );
         assert!(result.is_ok(), "Failed: {:?}", result.err());
 

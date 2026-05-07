@@ -255,6 +255,7 @@ async fn handle_propfind(
             &propfind_request,
             base_href,
             &user.username,
+            &user.id.to_string(),
         )
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
@@ -332,6 +333,7 @@ async fn handle_propfind(
                     &propfind_request,
                     base_href,
                     &depth,
+                    &user.id.to_string(),
                 )
                 .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
@@ -358,6 +360,7 @@ async fn handle_propfind(
                     &calendars,
                     &propfind_request,
                     base_href,
+                    &user.id.to_string(),
                 )
                 .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
@@ -406,6 +409,7 @@ async fn handle_propfind(
                         &propfind_request,
                         base_href,
                         &depth,
+                        &user.id.to_string(),
                     )
                     .map_err(|e| {
                         AppError::internal_error(format!("Failed to generate XML: {}", e))
