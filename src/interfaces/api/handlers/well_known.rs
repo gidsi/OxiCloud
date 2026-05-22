@@ -1,24 +1,34 @@
 use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Redirect},
+    body::Body,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
 use std::sync::Arc;
 
-use crate::app::AppState;
+use crate::application::state::AppState;
 
-pub fn well_known_router() -> Router<Arc<AppState>> {
-    Router::new().route("/caldav", get(caldav_discovery))
+const DAV_ROOT_PATH: &str = "/dav/";
+
+pub fn router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/caldav", get(caldav_redirect))
+        .route("/carddav", get(carddav_discovery))
 }
 
-async fn caldav_discovery() -> impl IntoResponse {
-    let mut response = Redirect::permanent("/dav/").into_response();
+async fn caldav_redirect() -> impl IntoResponse {
+    dav_root_redirect_response()
+}
 
-    // Axum 0.8 maps Redirect::permanent to 308 Permanent Redirect.
-    // RFC 6764 CalDAV discovery and the project acceptance criteria require
-    // 301 Moved Permanently with the same hardcoded Location target.
-    *response.status_mut() = StatusCode::MOVED_PERMANENTLY;
+async fn carddav_discovery() -> impl IntoResponse {
+    dav_root_redirect_response()
+}
 
-    response
+fn dav_root_redirect_response() -> Response {
+    Response::builder()
+        .status(StatusCode::MOVED_PERMANENTLY)
+        .header(header::LOCATION, DAV_ROOT_PATH)
+        .body(Body::empty())
+        .expect("static well-known DAV redirect response must be valid")
 }
