@@ -1,24 +1,10 @@
-pub mod auth_ports;
-pub mod authorization_ports;
-pub mod blob_lifecycle;
-pub mod blob_storage_ports;
-pub mod cache_ports;
-pub mod calendar_ports;
-pub mod carddav_ports;
-pub mod chunked_upload_ports;
-pub mod compression_ports;
-pub mod dedup_ports;
-pub mod favorites_ports;
-pub mod file_lifecycle;
-pub mod file_ports;
-pub mod folder_ports;
-pub mod inbound;
-pub mod music_ports;
-pub mod outbound;
-pub mod recent_ports;
-pub mod share_ports;
-pub mod storage_ports;
-pub mod thumbnail_ports;
-pub mod transcode_ports;
-pub mod trash_ports;
-pub mod zip_ports;
+use std::{future::Future, pin::Pin};
+
+use crate::domain::entities::user::User;
+
+pub trait UserRepository {
+    fn find_by_session_token<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<User>, sqlx::Error>> + Send + 'a>>;
+}
