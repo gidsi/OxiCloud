@@ -1,19 +1,17 @@
-use axum::Router;
-use sqlx::PgPool;
+use crate::interfaces::api::handlers::well_known::{caldav_redirect, carddav_redirect};
+use crate::state::AppState;
+use axum::{routing::get, Router};
 use std::sync::Arc;
 
-use crate::interfaces::api::handlers;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db_pool: PgPool,
-}
-
-pub fn create_app_router(state: Arc<AppState>) -> Router {
+pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
-        .nest("/.well-known", handlers::well_known::well_known_router())
-        .nest("/dav", handlers::dav::dav_routes())
-        .nest("/api/v1/auth", handlers::auth::auth_routes())
-        .nest("/api/v1/users", handlers::users::users_routes())
+        .route(
+            "/.well-known/caldav",
+            get(caldav_redirect).head(caldav_redirect),
+        )
+        .route(
+            "/.well-known/carddav",
+            get(carddav_redirect).head(carddav_redirect),
+        )
         .with_state(state)
 }
