@@ -1,37 +1,37 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
+use serde::Serialize;
+
+pub mod cookie_auth;
 pub mod handlers;
 
-use axum::Router;
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
-
-#[derive(OpenApi)]
-#[openapi(
-    info(
-        title = "OxiCloud API",
-        version = "0.1.0",
-        description = "OxiCloud File Sync & Share API"
-    ),
-    tags(
-        (name = "auth", description = "Authentication endpoints"),
-        (name = "files", description = "File management endpoints"),
-        (name = "search", description = "Search endpoints"),
-        (name = "shares", description = "File sharing endpoints")
-    )
-)]
-pub struct ApiDoc;
-
-pub fn router<S>() -> Router<S>
-where
-    S: Clone + Send + Sync + 'static,
-{
-    Router::<S>::new().merge(
-        SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()),
-    )
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    status: &'static str,
 }
 
-pub fn build_router<S>() -> Router<S>
-where
-    S: Clone + Send + Sync + 'static,
-{
-    router()
+async fn health_check() -> Response {
+    (
+        StatusCode::OK,
+        Json(HealthResponse {
+            status: "ok",
+        }),
+    )
+        .into_response()
+}
+
+pub fn create_health_routes() -> Router {
+    Router::new().route("/health", get(health_check))
+}
+
+pub fn create_public_api_routes() -> Router {
+    Router::new()
+}
+
+pub fn create_api_routes() -> Router {
+    Router::new()
 }

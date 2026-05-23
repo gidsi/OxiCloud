@@ -1,177 +1,261 @@
-//! HttpOnly cookie helpers for secure token transport.
-//!
-//! Tokens are set as `HttpOnly; SameSite=Lax` cookies so that
-//! browser-based JavaScript cannot read them (mitigates XSS token theft).
-//! The `Secure` flag is controlled by the `OXICLOUD_COOKIE_SECURE` env var
-//! (default: auto-detect from `OXICLOUD_BASE_URL`).
-//!
-//! A companion **non-HttpOnly** CSRF cookie (`oxicloud_csrf`) is set
-//! alongside the auth cookies.  The frontend must read it and echo its
-//! value back as `X-CSRF-Token` on every state-changing request.
-//! A middleware (`csrf_middleware`) validates the match.
-//!
-//! DAV clients continue to use `Authorization: Basic` with app passwords
-//! and are completely unaffected by this mechanism.
+use axum::http::{
+    header::{COOKIE, SET_COOKIE},
+    HeaderMap, HeaderValue,
+};
+use time::{Duration, OffsetDateTime};
 
-use axum::http::header::SET_COOKIE;
-use axum::http::{HeaderMap, HeaderValue};
+pub const ACCESS_TOKEN_COOKIE: &str = "oxicloud_access_token";
+pub const REFRESH_TOKEN_COOKIE: &str = "oxicloud_refresh_token";
+pub const CSRF_TOKEN_COOKIE: &str = "oxicloud_csrf_token";
 
-/// Cookie name for the JWT access token.
-pub const ACCESS_COOKIE: &str = "oxicloud_access";
-/// Cookie name for the opaque refresh token.
-pub const REFRESH_COOKIE: &str = "oxicloud_refresh";
-/// Cookie name for the CSRF double-submit token (readable by JS).
-pub const CSRF_COOKIE: &str = "oxicloud_csrf";
-/// Header the frontend must send with the CSRF token value.
-pub const CSRF_HEADER: &str = "x-csrf-token";
+pub const ACCESS_TOKEN_COOKIE_NAME: &str = ACCESS_TOKEN_COOKIE;
+pub const REFRESH_TOKEN_COOKIE_NAME: &str = REFRESH_TOKEN_COOKIE;
+pub const CSRF_TOKEN_COOKIE_NAME: &str = CSRF_TOKEN_COOKIE;
 
-/// Whether the `Secure` flag should be set on cookies.
-///
-/// Resolution order:
-/// 1. `OXICLOUD_COOKIE_SECURE=true|false` — explicit override.
-/// 2. `OXICLOUD_BASE_URL` starts with `https` → `true`.
-/// 3. `OXICLOUD_BASE_URL` starts with `http` → `false`.
-/// 4. **Default: `false`** for compatibility with HTTP deployments
-///    (Docker, local development). Set `OXICLOUD_COOKIE_SECURE=true`
-///    explicitly for production HTTPS environments.
-pub fn is_cookie_secure() -> bool {
-    cookie_secure()
+const COOKIE_PATH: &str = "/";
+const SAME_SITE: &str = "Strict";
+
+#[derive(Debug, Clone, Copy)]
+pub struct CookieOptions {
+    pub secure: bool,
+    pub http_only: bool,
+    pub max_age: Option<Duration>,
 }
 
-fn cookie_secure() -> bool {
-    if let Ok(v) = std::env::var("OXICLOUD_COOKIE_SECURE") {
-        let secure = v == "true" || v == "1";
-        if !secure {
-            tracing::warn!(
-                "⚠️  SECURITY: OXICLOUD_COOKIE_SECURE is explicitly disabled — \
-                 cookies will be sent over plain HTTP. \
-                 Do NOT use this in production."
-            );
-        }
-        return secure;
-    }
-    // Auto-detect from base URL, defaulting to insecure for compatibility
-    match std::env::var("OXICLOUD_BASE_URL") {
-        Ok(url) if url.starts_with("https") => true,
-        Ok(url) if url.starts_with("http://") => {
-            tracing::info!(
-                "⚠️  SECURITY: OXICLOUD_BASE_URL is HTTP — cookie Secure flag is OFF. \
-                 Set OXICLOUD_COOKIE_SECURE=true to override if your proxy terminates TLS."
-            );
-            false
-        }
-        _ => {
-            // Default to false for compatibility with HTTP deployments
-            tracing::info!(
-                "⚠️  SECURITY: OXICLOUD_BASE_URL not set — defaulting to non-secure cookies \
-                 for HTTP compatibility. Set OXICLOUD_COOKIE_SECURE=true for HTTPS deployments."
-            );
-            false
+impl Default for CookieOptions {
+    fn default() -> Self {
+        Self {
+            secure: true,
+            http_only: true,
+            max_age: None,
         }
     }
 }
 
-/// Build a `Set-Cookie` header value.
-fn build_cookie(name: &str, value: &str, path: &str, max_age_secs: i64, same_site: &str) -> String {
-    let secure = if cookie_secure() { "; Secure" } else { "" };
-    format!(
-        "{name}={value}; HttpOnly; SameSite={same_site}; Path={path}; Max-Age={max_age_secs}{secure}",
+pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    let cookie_header = headers.get(COOKIE)?.to_str().ok()?;
+
+    cookie_header
+        .split(';')
+        .filter_map(|cookie| {
+            let mut parts = cookie.trim().splitn(2, '=');
+            let cookie_name = parts.next()?.trim();
+            let cookie_value = parts.next()?.trim();
+
+            if cookie_name == name {
+                Some(cookie_value.to_owned())
+            } else {
+                None
+            }
+        })
+        .next()
+}
+
+pub fn get_access_token(headers: &HeaderMap) -> Option<String> {
+    get_cookie(headers, ACCESS_TOKEN_COOKIE)
+}
+
+pub fn get_refresh_token(headers: &HeaderMap) -> Option<String> {
+    get_cookie(headers, REFRESH_TOKEN_COOKIE)
+}
+
+pub fn get_csrf_token(headers: &HeaderMap) -> Option<String> {
+    get_cookie(headers, CSRF_TOKEN_COOKIE)
+}
+
+pub fn extract_access_token(headers: &HeaderMap) -> Option<String> {
+    get_access_token(headers)
+}
+
+pub fn extract_refresh_token(headers: &HeaderMap) -> Option<String> {
+    get_refresh_token(headers)
+}
+
+pub fn extract_csrf_token(headers: &HeaderMap) -> Option<String> {
+    get_csrf_token(headers)
+}
+
+pub fn access_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    get_access_token(headers)
+}
+
+pub fn refresh_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    get_refresh_token(headers)
+}
+
+pub fn csrf_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    get_csrf_token(headers)
+}
+
+pub fn build_cookie(name: &str, value: &str, options: CookieOptions) -> String {
+    let mut cookie = format!(
+        "{}={}; Path={}; SameSite={}",
+        name,
+        encode_cookie_value(value),
+        COOKIE_PATH,
+        SAME_SITE
+    );
+
+    if options.http_only {
+        cookie.push_str("; HttpOnly");
+    }
+
+    if options.secure {
+        cookie.push_str("; Secure");
+    }
+
+    if let Some(max_age) = options.max_age {
+        cookie.push_str(&format!("; Max-Age={}", max_age.whole_seconds()));
+    }
+
+    cookie
+}
+
+pub fn build_access_token_cookie(token: &str, secure: bool, max_age: Option<Duration>) -> String {
+    build_cookie(
+        ACCESS_TOKEN_COOKIE,
+        token,
+        CookieOptions {
+            secure,
+            http_only: true,
+            max_age,
+        },
     )
 }
 
-/// Append `Set-Cookie` headers for both access and refresh tokens.
-///
-/// The access cookie covers all paths (`/`) because the API lives under
-/// `/api`, CalDAV under `/caldav`, WebDAV under `/webdav`, etc.
-///
-/// The refresh cookie is restricted to `/api/auth` so it is only sent
-/// when the client explicitly calls the refresh or logout endpoints.
-pub fn append_auth_cookies(
+pub fn build_refresh_token_cookie(token: &str, secure: bool, max_age: Option<Duration>) -> String {
+    build_cookie(
+        REFRESH_TOKEN_COOKIE,
+        token,
+        CookieOptions {
+            secure,
+            http_only: true,
+            max_age,
+        },
+    )
+}
+
+pub fn build_csrf_token_cookie(token: &str, secure: bool, max_age: Option<Duration>) -> String {
+    build_cookie(
+        CSRF_TOKEN_COOKIE,
+        token,
+        CookieOptions {
+            secure,
+            http_only: false,
+            max_age,
+        },
+    )
+}
+
+pub fn create_access_token_cookie(token: &str, secure: bool, max_age: Option<Duration>) -> String {
+    build_access_token_cookie(token, secure, max_age)
+}
+
+pub fn create_refresh_token_cookie(token: &str, secure: bool, max_age: Option<Duration>) -> String {
+    build_refresh_token_cookie(token, secure, max_age)
+}
+
+pub fn create_csrf_token_cookie(token: &str, secure: bool, max_age: Option<Duration>) -> String {
+    build_csrf_token_cookie(token, secure, max_age)
+}
+
+pub fn append_cookie(headers: &mut HeaderMap, cookie: String) {
+    if let Ok(value) = HeaderValue::from_str(&cookie) {
+        headers.append(SET_COOKIE, value);
+    }
+}
+
+pub fn set_access_token_cookie(
+    headers: &mut HeaderMap,
+    token: &str,
+    secure: bool,
+    max_age: Option<Duration>,
+) {
+    append_cookie(headers, build_access_token_cookie(token, secure, max_age));
+}
+
+pub fn set_refresh_token_cookie(
+    headers: &mut HeaderMap,
+    token: &str,
+    secure: bool,
+    max_age: Option<Duration>,
+) {
+    append_cookie(headers, build_refresh_token_cookie(token, secure, max_age));
+}
+
+pub fn set_csrf_token_cookie(
+    headers: &mut HeaderMap,
+    token: &str,
+    secure: bool,
+    max_age: Option<Duration>,
+) {
+    append_cookie(headers, build_csrf_token_cookie(token, secure, max_age));
+}
+
+pub fn set_auth_cookies(
     headers: &mut HeaderMap,
     access_token: &str,
     refresh_token: &str,
-    access_expiry_secs: i64,
-    refresh_expiry_secs: i64,
+    csrf_token: Option<&str>,
+    secure: bool,
 ) {
-    if let Ok(val) = HeaderValue::from_str(&build_cookie(
-        ACCESS_COOKIE,
-        access_token,
-        "/",
-        access_expiry_secs,
-        "Lax", // Lax: cookie is sent on top-level navigations (links from other sites)
-    )) {
-        headers.append(SET_COOKIE, val);
-    }
-    if let Ok(val) = HeaderValue::from_str(&build_cookie(
-        REFRESH_COOKIE,
-        refresh_token,
-        "/api/auth",
-        refresh_expiry_secs,
-        "Strict", // Strict: refresh endpoint is never reached via cross-site navigation
-    )) {
-        headers.append(SET_COOKIE, val);
+    set_access_token_cookie(headers, access_token, secure, None);
+    set_refresh_token_cookie(headers, refresh_token, secure, None);
+
+    if let Some(csrf_token) = csrf_token {
+        set_csrf_token_cookie(headers, csrf_token, secure, None);
     }
 }
 
-/// Append `Set-Cookie` headers that immediately expire both auth cookies,
-/// effectively logging the user out on the browser side.
-pub fn append_clear_cookies(headers: &mut HeaderMap) {
-    for (name, path) in [(ACCESS_COOKIE, "/"), (REFRESH_COOKIE, "/api/auth")] {
-        let secure = if cookie_secure() { "; Secure" } else { "" };
-        let val = format!("{name}=; HttpOnly; SameSite=Lax; Path={path}; Max-Age=0{secure}",);
-        if let Ok(hv) = HeaderValue::from_str(&val) {
-            headers.append(SET_COOKIE, hv);
-        }
+pub fn expire_cookie(name: &str, secure: bool, http_only: bool) -> String {
+    let expires = OffsetDateTime::UNIX_EPOCH;
+
+    let mut cookie = format!(
+        "{}=; Path={}; SameSite={}; Max-Age=0; Expires={}",
+        name,
+        COOKIE_PATH,
+        SAME_SITE,
+        expires
+            .format(&time::format_description::well_known::Rfc2822)
+            .unwrap_or_else(|_| "Thu, 01 Jan 1970 00:00:00 GMT".to_owned())
+    );
+
+    if http_only {
+        cookie.push_str("; HttpOnly");
     }
-}
 
-/// Extract a named cookie value from the `Cookie` request header.
-pub fn extract_cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
-    let cookie_header = headers.get(axum::http::header::COOKIE)?;
-    let cookie_str = cookie_header.to_str().ok()?;
-
-    for pair in cookie_str.split(';') {
-        let pair = pair.trim();
-        if let Some(val) = pair.strip_prefix(name) {
-            let val = val.strip_prefix('=')?;
-            if !val.is_empty() {
-                return Some(val.to_string());
-            }
-        }
+    if secure {
+        cookie.push_str("; Secure");
     }
-    None
+
+    cookie
 }
 
-// ────────────────────────────────────────────────────────────
-// CSRF double-submit cookie helpers
-// ────────────────────────────────────────────────────────────
-
-/// Generate a cryptographically random CSRF token (128-bit UUIDv4, hex-like).
-pub fn generate_csrf_token() -> String {
-    uuid::Uuid::new_v4().to_string()
+pub fn clear_auth_cookies(headers: &mut HeaderMap, secure: bool) {
+    append_cookie(
+        headers,
+        expire_cookie(ACCESS_TOKEN_COOKIE, secure, true),
+    );
+    append_cookie(
+        headers,
+        expire_cookie(REFRESH_TOKEN_COOKIE, secure, true),
+    );
+    append_cookie(
+        headers,
+        expire_cookie(CSRF_TOKEN_COOKIE, secure, false),
+    );
 }
 
-/// Build a **non-HttpOnly** CSRF cookie so that frontend JS can read it
-/// via `document.cookie` and echo it back in the `X-CSRF-Token` header.
-fn build_csrf_cookie(value: &str, max_age_secs: i64) -> String {
-    let secure = if cookie_secure() { "; Secure" } else { "" };
-    format!("{CSRF_COOKIE}={value}; SameSite=Lax; Path=/; Max-Age={max_age_secs}{secure}",)
-}
-
-/// Append a CSRF double-submit cookie alongside the auth cookies.
-/// Should be called in every endpoint that also sets auth cookies.
-pub fn append_csrf_cookie(headers: &mut HeaderMap, access_expiry_secs: i64) {
-    let token = generate_csrf_token();
-    if let Ok(val) = HeaderValue::from_str(&build_csrf_cookie(&token, access_expiry_secs)) {
-        headers.append(SET_COOKIE, val);
-    }
-}
-
-/// Clear the CSRF cookie (on logout).
-pub fn append_clear_csrf_cookie(headers: &mut HeaderMap) {
-    let secure = if cookie_secure() { "; Secure" } else { "" };
-    let val = format!("{CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0{secure}",);
-    if let Ok(hv) = HeaderValue::from_str(&val) {
-        headers.append(SET_COOKIE, hv);
-    }
+fn encode_cookie_value(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            ';' => "%3B".chars().collect::<Vec<_>>(),
+            ',' => "%2C".chars().collect::<Vec<_>>(),
+            ' ' => "%20".chars().collect::<Vec<_>>(),
+            '"' => "%22".chars().collect::<Vec<_>>(),
+            '\\' => "%5C".chars().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect()
 }
