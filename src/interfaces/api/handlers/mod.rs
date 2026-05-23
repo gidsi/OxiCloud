@@ -1,3 +1,1 @@
-pub mod health;
-pub mod metrics;
-pub mod webdav;
+pub mod well_known;

@@ -1,59 +1,37 @@
+use oxicloud::{app, config::AppConfig, state::AppState};
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-use oxicloud::application::state::AppState;
-use oxicloud::interfaces::api::router::{app_router, build_metrics_router};
+use std::{env, sync::Arc};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let config = AppConfig::from_env();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:password@localhost/oxicloud".to_string());
+    let dev_mode = env::args().any(|arg| arg == "--dev")
+        || env::var("OXICLOUD_DEV")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+    config
+        .validate_base_url(dev_mode)
+        .expect("Invalid OxiCloud base URL configuration");
 
     let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
+        .connect(&config.database_url)
         .await
-        .expect("Failed to connect to Postgres");
+        .expect("Failed to connect to database");
 
-    let state = Arc::new(AppState::new(pool));
+    let state = AppState {
+        config: Arc::new(config.clone()),
+        pool,
+    };
 
-    let metrics_addr =
-        std::env::var("METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9090".to_string());
-    let metrics_listener = TcpListener::bind(&metrics_addr)
+    let app = app(state);
+
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port))
         .await
-        .expect("Failed to bind metrics listener");
+        .expect("Failed to bind TCP listener");
 
-    tokio::spawn(async move {
-        tracing::info!(
-            "Metrics listener running on {}",
-            metrics_listener
-                .local_addr()
-                .map(|addr| addr.to_string())
-                .unwrap_or(metrics_addr)
-        );
-
-        axum::serve(metrics_listener, build_metrics_router())
-            .await
-            .expect("Metrics server failed");
-    });
-
-    let app = app_router(state);
-
-    let app_addr = std::env::var("APP_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
-    let listener = TcpListener::bind(&app_addr)
+    axum::serve(listener, app)
         .await
-        .expect("Failed to bind application listener");
-
-    tracing::info!("Listening on {}", listener.local_addr().unwrap());
-
-    axum::serve(listener, app).await.unwrap();
+        .expect("Failed to serve OxiCloud application");
 }
