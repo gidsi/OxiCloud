@@ -1,30 +1,36 @@
 use axum::{
-    http::header,
+    body::Body,
+    extract::State,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
 };
+use std::sync::Arc;
 
-use crate::interfaces::api::middlewares::metrics::prometheus_handle;
+use crate::{
+    domain::error::AppError,
+    startup::AppState,
+    telemetry::memory::render_prometheus_metrics,
+};
 
-const HTTP_REQUESTS_TOTAL_HELP: &str = "# HELP http_requests_total Total number of HTTP requests processed by OxiCloud.\n# TYPE http_requests_total counter\n";
-const HTTP_REQUEST_DURATION_HELP: &str = "# HELP http_request_duration_seconds HTTP request duration in seconds, grouped by method, static route template, and status.\n# TYPE http_request_duration_seconds histogram\n";
+pub async fn metrics_handler(State(_state): State<Arc<AppState>>) -> Response {
+    let body = render_prometheus_metrics();
 
-pub async fn metrics() -> Response {
-    let mut body = prometheus_handle().render();
-
-    if !body.contains("http_requests_total") {
-        body.push_str(HTTP_REQUESTS_TOTAL_HELP);
-    }
-
-    if !body.contains("http_request_duration_seconds") {
-        body.push_str(HTTP_REQUEST_DURATION_HELP);
-    }
-
-    (
-        [(
+    match Response::builder()
+        .status(StatusCode::OK)
+        .header(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
-        )],
-        body,
-    )
-        .into_response()
+        )
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(body))
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                "failed to build prometheus metrics response"
+            );
+            AppError::InternalServerError.into_response()
+        }
+    }
 }

@@ -1,18 +1,14 @@
-use axum::{routing::any, Router};
+use axum::routing::get;
+use axum::Router;
+use std::sync::Arc;
 
-use crate::state::AppState;
+use crate::interfaces::api::handlers::health::health_check;
+use crate::interfaces::api::handlers::metrics::metrics_handler;
+use crate::startup::AppState;
 
-use super::handlers;
-
-pub fn app(state: AppState) -> Router {
+pub fn app_router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route(
-            "/.well-known/caldav",
-            any(handlers::well_known::redirect_to_dav),
-        )
-        .route(
-            "/.well-known/carddav",
-            any(handlers::well_known::redirect_to_dav),
-        )
+        .route("/health", get(health_check))
+        .route("/metrics", get(metrics_handler))
         .with_state(state)
 }

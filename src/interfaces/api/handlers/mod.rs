@@ -1,1 +1,2 @@
-pub mod well_known;
+pub mod health;
+pub mod metrics;
