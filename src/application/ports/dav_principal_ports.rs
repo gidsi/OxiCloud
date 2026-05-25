@@ -4,10 +4,8 @@ use crate::application::dtos::dav_principal_dto::{DavPrincipalDto, DavPrincipalH
 use crate::common::errors::DomainError;
 
 pub trait DavPrincipalStoragePort: Send + Sync + 'static {
-    async fn get_principal_by_user_id(
-        &self,
-        user_id: Uuid,
-    ) -> Result<DavPrincipalDto, DomainError>;
+    async fn get_principal_by_user_id(&self, user_id: Uuid)
+    -> Result<DavPrincipalDto, DomainError>;
 
     async fn get_principal_by_principal_path(
         &self,
