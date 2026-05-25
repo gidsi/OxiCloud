@@ -88,17 +88,15 @@ log "Server is ready."
 # ── 4. Run Hurl tests ─────────────────────────────────────────────────────────
 
 log "Running Hurl tests..."
-hurl --variables-file "$API_DIR/test.env" --file-root "$REPO_ROOT/tests" --test --jobs 1 \
-  "$API_DIR/setup.hurl" \
-  "$API_DIR/files-folders.hurl" \
-  "$API_DIR/favorites.hurl" \
-  "$API_DIR/trash.hurl" \
-  "$API_DIR/recent.hurl" \
-  "$API_DIR/batch_folder_copy.hurl" \
-  "$API_DIR/dedup_blob_cleanup.hurl" \
-  "$API_DIR/contacts.hurl" \
-  "$API_DIR/permissions.hurl" \
-  "$API_DIR/grants.hurl"
+HURL_FILES=$(find "$REPO_ROOT/tests" -type f -name "*.hurl" | sort)
+hurl --variables-file "$API_DIR/test.env" --test --jobs 1 $HURL_FILES
+
+log "Running Bash E2E tests..."
+SH_FILES=$(find "$REPO_ROOT/tests/e2e" -type f -name "*_test.sh" | sort)
+for f in $SH_FILES; do
+  log "Running $f..."
+  bash "$f" localhost:$SERVER_PORT test_user test_password
+done
 
 #bash "$API_DIR/dedup_bulk_upload.sh"
 
