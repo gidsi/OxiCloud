@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::application::dtos::dav_auth_failure_dto::{
-    CreateDavAuthFailureDto, DavAuthFailureDto,
-};
+use crate::application::dtos::dav_auth_failure_dto::{CreateDavAuthFailureDto, DavAuthFailureDto};
 use crate::common::errors::DomainError;
 
 /// Application storage port for DAV authentication failure auditing.

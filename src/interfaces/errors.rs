@@ -34,7 +34,6 @@ pub struct ErrorResponse {
     pub error_type: String,
 }
 
-
 /// DAV-specific HTTP errors.
 ///
 /// DAV clients must receive protocol-safe responses for authentication
@@ -55,14 +54,23 @@ impl IntoResponse for DavError {
         match self {
             DavError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
-                [(axum::http::header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)],
-                [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                [(
+                    axum::http::header::WWW_AUTHENTICATE,
+                    r#"Basic realm="OxiCloud""#,
+                )],
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/plain; charset=utf-8",
+                )],
                 "Unauthorized",
             )
                 .into_response(),
             DavError::NotFound => (
                 StatusCode::NOT_FOUND,
-                [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/plain; charset=utf-8",
+                )],
                 "Not Found",
             )
                 .into_response(),

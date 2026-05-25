@@ -4,9 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::application::dtos::dav_auth_failure_dto::{
-    CreateDavAuthFailureDto, DavAuthFailureDto,
-};
+use crate::application::dtos::dav_auth_failure_dto::{CreateDavAuthFailureDto, DavAuthFailureDto};
 use crate::application::ports::dav_auth_failure_ports::DavAuthFailureStoragePort;
 use crate::common::errors::DomainError;
 use crate::domain::entities::dav_auth_failure::DavAuthFailure;
