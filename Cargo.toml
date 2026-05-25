@@ -8,6 +8,7 @@ default-run = "oxicloud"
 [dependencies]
 mimalloc = { version = "0.1.48", default-features = false }
 axum = { version = "0.8.9", features = ["multipart", "http1", "http2", "tokio", "macros"] }
+axum-extra = { version = "0.10.3", features = ["typed-header"] }
 tokio = { version = "1.52.0", features = ["rt-multi-thread", "macros", "io-util", "net", "time", "sync", "fs"] }
 tokio-util = { version = "0.7.18", features = ["io", "codec", "compat"] }
 tokio-stream = { version = "0.1.18", features = ["fs"] }

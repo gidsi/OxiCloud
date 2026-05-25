@@ -4,6 +4,10 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use axum_extra::{
+    headers::{authorization::Basic, Authorization},
+    typed_header::TypedHeader,
+};
 use std::convert::Infallible;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -12,7 +16,10 @@ use crate::common::di::AppState;
 
 // Re-export CurrentUser from application layer for use in handlers
 pub use crate::application::dtos::user_dto::CurrentUser;
+use crate::application::dtos::dav_auth_failure_dto::CreateDavAuthFailureDto;
 use crate::application::ports::auth_ports::TokenServicePort;
+use crate::application::ports::dav_auth_failure_ports::DavAuthFailureStoragePort;
+use crate::interfaces::middleware::rate_limit::extract_client_ip;
 
 /// Marker inserted into request extensions when the user was authenticated
 /// via the `oxicloud_access` HttpOnly cookie rather than a Bearer/Basic header.
@@ -142,6 +149,96 @@ impl IntoResponse for AuthError {
     }
 }
 
+
+fn is_dav_path(path: &str) -> bool {
+    path.starts_with("/caldav") || path.starts_with("/carddav") || path.starts_with("/webdav")
+}
+
+fn dav_unauthorized_response() -> Response {
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(axum::body::Body::from("Unauthorized"))
+        .unwrap()
+}
+
+async fn record_dav_auth_failed(
+    state: Arc<AppState>,
+    client_ip: String,
+    username: String,
+    method: String,
+    path: String,
+    user_agent: String,
+    reason: &'static str,
+) {
+    if !is_dav_path(&path) {
+        return;
+    }
+
+    tracing::warn!(
+        target: "audit",
+        event = "AuthFailed",
+        ip = %client_ip,
+        username = %username,
+        method = %method,
+        path = %path,
+        reason = %reason,
+        "DAV authentication failed"
+    );
+
+    if let Some(repo) = state.dav_auth_failure_repository.as_ref() {
+        let failure = CreateDavAuthFailureDto {
+            client_ip,
+            username,
+            method,
+            path,
+            user_agent,
+            reason: reason.to_string(),
+            auth_scheme: "Basic".to_string(),
+            protocol: "DAV".to_string(),
+        };
+
+        if let Err(err) = repo.record_failure(failure).await {
+            tracing::warn!("Failed to persist DAV auth failure audit event: {}", err);
+        }
+    }
+}
+
+fn dav_auth_failure_context(
+    request: &Request,
+    headers: &HeaderMap,
+    username: &str,
+) -> Option<(String, String, String, String, String)> {
+    if !is_dav_path(request.uri().path()) {
+        return None;
+    }
+
+    let client_ip = extract_client_ip(request);
+    let method = request.method().as_str().to_string();
+    let path = request.uri().path().to_string();
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let username = username.to_string();
+
+    Some((client_ip, username, method, path, user_agent))
+}
+
+async fn record_dav_auth_failed_for_request(
+    state: Arc<AppState>,
+    client_ip: String,
+    username: String,
+    method: String,
+    path: String,
+    user_agent: String,
+    reason: &'static str,
+) {
+    record_dav_auth_failed(state, client_ip, username, method, path, user_agent, reason).await;
+}
+
 /// Secure authentication middleware.
 ///
 /// Supports three authentication methods (tried in order):
@@ -155,16 +252,17 @@ impl IntoResponse for AuthError {
 /// then the cookie fallback.
 pub async fn auth_middleware(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     mut request: Request,
     next: Next,
-) -> Result<Response, AuthError> {
+) -> Response {
+    let headers = request.headers().clone();
     let auth_header = headers
         .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok());
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
 
     // ── 1. Try Bearer JWT ────────────────────────────────────────
-    if let Some(header_value) = auth_header {
+    if let Some(header_value) = auth_header.as_deref() {
         if let Some(token_str) = header_value.strip_prefix("Bearer ") {
             let token_str = token_str.trim();
             if !token_str.is_empty() {
@@ -178,9 +276,15 @@ pub async fn auth_middleware(
                                 "Token validated successfully for user: {}",
                                 claims.username
                             );
-                            let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
-                                AuthError::InvalidToken("Invalid user ID in token".to_string())
-                            })?;
+                            let user_id = match Uuid::parse_str(&claims.sub) {
+                                Ok(user_id) => user_id,
+                                Err(_) => {
+                                    return AuthError::InvalidToken(
+                                        "Invalid user ID in token".to_string(),
+                                    )
+                                    .into_response();
+                                }
+                            };
                             let current_user = Arc::new(CurrentUser {
                                 id: user_id,
                                 username: claims.username,
@@ -189,11 +293,11 @@ pub async fn auth_middleware(
                             });
                             request.extensions_mut().insert(current_user);
                             tracing::Span::current().record("user_id", user_id.to_string());
-                            return Ok(next.run(request).await);
+                            return next.run(request).await;
                         }
                         Err(e) => {
                             tracing::warn!("Bearer token validation failed: {}", e);
-                            return Err(AuthError::InvalidToken(format!("Invalid token: {}", e)));
+                            return AuthError::InvalidToken(format!("Invalid token: {}", e)).into_response();
                         }
                     }
                 }
@@ -201,68 +305,115 @@ pub async fn auth_middleware(
         }
 
         // ── 2. Try Basic Auth with App Passwords ─────────────────
-        if let Some(basic_encoded) = header_value.strip_prefix("Basic ") {
-            let basic_encoded = basic_encoded.trim();
-            if !basic_encoded.is_empty() {
-                tracing::debug!("Processing Basic authentication (app password)");
+        if header_value.starts_with("Basic ") {
+            tracing::debug!("Processing Basic authentication (app password)");
+            let dav_request = is_dav_path(request.uri().path());
 
-                // Decode base64(username:password)
-                use base64::Engine;
-                let decoded = base64::engine::general_purpose::STANDARD
-                    .decode(basic_encoded)
-                    .map_err(|_| {
-                        AuthError::InvalidToken("Invalid Basic auth encoding".to_string())
-                    })?;
-                let credentials = String::from_utf8(decoded).map_err(|_| {
-                    AuthError::InvalidToken("Invalid Basic auth encoding".to_string())
-                })?;
+            let (mut parts, body) = request.into_parts();
+            let typed_basic = TypedHeader::<Authorization<Basic>>::from_request_parts(&mut parts, &())
+                .await
+                .ok();
+            request = Request::from_parts(parts, body);
 
-                let (username, password) = credentials.split_once(':').ok_or_else(|| {
-                    AuthError::InvalidToken("Invalid Basic auth format".to_string())
-                })?;
-
-                if let Some(app_pw_service) = state.app_password_service.as_ref() {
-                    match app_pw_service.verify_basic_auth(username, password).await {
-                        Ok((user_id, uname, email, role)) => {
-                            tracing::debug!(
-                                "App password authentication successful for user: {}",
-                                uname
-                            );
-                            let current_user = Arc::new(CurrentUser {
-                                id: user_id,
-                                username: uname,
-                                email,
-                                role,
-                            });
-                            request.extensions_mut().insert(current_user);
-                            tracing::Span::current().record("user_id", user_id.to_string());
-                            return Ok(next.run(request).await);
-                        }
-                        Err(e) => {
-                            tracing::warn!("App password verification failed: {}", e);
-                            // For WebDAV: include WWW-Authenticate so the client
-                            // knows to re-prompt rather than silently failing.
-                            if request.uri().path().starts_with("/webdav") {
-                                return Ok(Response::builder()
-                                    .status(StatusCode::UNAUTHORIZED)
-                                    .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
-                                    .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                                    .body(axum::body::Body::from(
-                                        "Invalid username or app password",
-                                    ))
-                                    .unwrap());
-                            }
-                            return Err(AuthError::InvalidToken(
-                                "Invalid username or app password".to_string(),
-                            ));
-                        }
+            let (username, password) = match typed_basic {
+                Some(TypedHeader(Authorization(credentials))) => (
+                    credentials.username().to_string(),
+                    credentials.password().to_string(),
+                ),
+                None => {
+                    if let Some((client_ip, username, method, path, user_agent)) =
+                        dav_auth_failure_context(&request, &headers, "")
+                    {
+                        record_dav_auth_failed_for_request(
+                            state.clone(),
+                            client_ip,
+                            username,
+                            method,
+                            path,
+                            user_agent,
+                            "malformed_credentials",
+                        )
+                        .await;
                     }
-                } else {
-                    tracing::warn!("Basic auth attempted but app password service not configured");
-                    return Err(AuthError::InvalidToken(
-                        "App passwords are not enabled".to_string(),
-                    ));
+
+                    if dav_request {
+                        return dav_unauthorized_response();
+                    }
+
+                    return AuthError::InvalidToken(
+                        "Invalid Basic auth format".to_string(),
+                    )
+                    .into_response();
                 }
+            };
+
+            if let Some(app_pw_service) = state.app_password_service.as_ref() {
+                match app_pw_service.verify_basic_auth(&username, &password).await {
+                    Ok((user_id, uname, email, role)) => {
+                        tracing::debug!(
+                            "App password authentication successful for user: {}",
+                            uname
+                        );
+                        let current_user = Arc::new(CurrentUser {
+                            id: user_id,
+                            username: uname,
+                            email,
+                            role,
+                        });
+                        request.extensions_mut().insert(current_user);
+                        tracing::Span::current().record("user_id", user_id.to_string());
+                        return next.run(request).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!("App password verification failed: {}", e);
+                        if let Some((client_ip, audit_username, method, path, user_agent)) =
+                            dav_auth_failure_context(&request, &headers, &username)
+                        {
+                            record_dav_auth_failed_for_request(
+                                state.clone(),
+                                client_ip,
+                                audit_username,
+                                method,
+                                path,
+                                user_agent,
+                                "invalid_credentials",
+                            )
+                            .await;
+                        }
+
+                        if dav_request {
+                            return dav_unauthorized_response();
+                        }
+
+                        return AuthError::InvalidToken(
+                            "Invalid username or app password".to_string(),
+                        ).into_response();
+                    }
+                }
+            } else {
+                tracing::warn!("Basic auth attempted but app password service not configured");
+                if let Some((client_ip, audit_username, method, path, user_agent)) =
+                    dav_auth_failure_context(&request, &headers, &username)
+                {
+                    record_dav_auth_failed_for_request(
+                        state.clone(),
+                        client_ip,
+                        audit_username,
+                        method,
+                        path,
+                        user_agent,
+                        "app_passwords_disabled",
+                    )
+                    .await;
+                }
+
+                if dav_request {
+                    return dav_unauthorized_response();
+                }
+
+                return AuthError::InvalidToken(
+                    "App passwords are not enabled".to_string(),
+                ).into_response();
             }
         }
     }
@@ -282,9 +433,15 @@ pub async fn auth_middleware(
                 match token_service.validate_token(&token_str) {
                     Ok(claims) => {
                         tracing::debug!("Cookie token validated for user: {}", claims.username);
-                        let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
-                            AuthError::InvalidToken("Invalid user ID in token".to_string())
-                        })?;
+                        let user_id = match Uuid::parse_str(&claims.sub) {
+                            Ok(user_id) => user_id,
+                            Err(_) => {
+                                return AuthError::InvalidToken(
+                                    "Invalid user ID in token".to_string(),
+                                )
+                                .into_response();
+                            }
+                        };
                         let current_user = Arc::new(CurrentUser {
                             id: user_id,
                             username: claims.username,
@@ -294,7 +451,7 @@ pub async fn auth_middleware(
                         request.extensions_mut().insert(current_user);
                         request.extensions_mut().insert(CookieAuthenticated);
                         tracing::Span::current().record("user_id", user_id.to_string());
-                        return Ok(next.run(request).await);
+                        return next.run(request).await;
                     }
                     Err(e) => {
                         tracing::debug!("Cookie token validation failed: {}", e);
@@ -309,24 +466,30 @@ pub async fn auth_middleware(
     // No valid credentials found via any method.
     if state.auth_service.is_none() {
         tracing::error!("Auth middleware invoked but auth service is not configured");
-        return Err(AuthError::AuthServiceUnavailable);
+        return AuthError::AuthServiceUnavailable.into_response();
     }
 
-    // For WebDAV requests with no credentials at all: return 401 with
-    // WWW-Authenticate so that spec-compliant clients (Nautilus, Cyberduck,
-    // Windows Explorer, macOS Finder) know to prompt for a username/password.
-    // Non-WebDAV routes return the standard AuthError which renders without
-    // this header — keeping browser sessions redirecting to /login as before.
-    if request.uri().path().starts_with("/webdav") {
-        return Ok(Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::WWW_AUTHENTICATE, r#"Basic realm="OxiCloud""#)
-            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(axum::body::Body::from("Authentication required"))
-            .unwrap());
+    // DAV protocol paths must receive a real Basic challenge and must never
+    // fall through to browser-oriented JSON errors or the SPA login page.
+    if is_dav_path(request.uri().path()) {
+        if let Some((client_ip, username, method, path, user_agent)) =
+            dav_auth_failure_context(&request, &headers, "")
+        {
+            record_dav_auth_failed_for_request(
+                state.clone(),
+                client_ip,
+                username,
+                method,
+                path,
+                user_agent,
+                "missing_credentials",
+            )
+            .await;
+        }
+        return dav_unauthorized_response();
     }
 
-    Err(AuthError::TokenNotProvided)
+    AuthError::TokenNotProvided.into_response()
 }
 
 /// Middleware to verify that the authenticated user has an admin role.

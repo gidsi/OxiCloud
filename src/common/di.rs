@@ -812,6 +812,7 @@ impl AppServiceFactory {
             addressbook_use_case: None,
             contact_use_case: None,
             dav_principal_service: None,
+            dav_auth_failure_repository: None,
             music_service: None,
             wopi_token_service: None,
             wopi_lock_service: None,
@@ -823,6 +824,11 @@ impl AppServiceFactory {
                 crate::infrastructure::services::webdav_lock_service::create_webdav_lock_store(),
             authorization,
         };
+
+        app_state.dav_auth_failure_repository = Some(Arc::new(
+            crate::infrastructure::repositories::pg::DavAuthFailurePgRepository::new(pool.clone()),
+        ));
+        tracing::info!("DAV auth failure audit repository initialized");
 
         // 9b. Wire admin settings service when auth is available
         if let Some(auth_svc) = &app_state.auth_service {
@@ -1132,6 +1138,8 @@ pub struct AppState {
     pub addressbook_use_case: Option<Arc<ContactStorageAdapter>>,
     pub contact_use_case: Option<Arc<ContactStorageAdapter>>,
     pub dav_principal_service: Option<Arc<DavPrincipalService>>,
+    pub dav_auth_failure_repository:
+        Option<Arc<crate::infrastructure::repositories::pg::DavAuthFailurePgRepository>>,
     pub music_service: Option<Arc<MusicService>>,
     pub wopi_token_service:
         Option<Arc<crate::application::services::wopi_token_service::WopiTokenService>>,

@@ -39,6 +39,14 @@ const BASIC_AUTH_CACHE_TTL_SECS: u64 = 30;
 /// entries ≈ 1.6 MB — negligible compared to other in-memory caches.
 const BASIC_AUTH_CACHE_MAX_ENTRIES: u64 = 10_000;
 
+/// Fixed Argon2id hash used to equalize Basic Auth timing when a username
+/// does not exist, is inactive, or the submitted token cannot produce a
+/// candidate lookup. The plaintext is never accepted; it is only verified as
+/// dummy work so invalid usernames do not return materially faster than
+/// invalid passwords for existing users.
+const DUMMY_BASIC_AUTH_PASSWORD: &str = "oxicloud-dummy-password";
+const DUMMY_BASIC_AUTH_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$b3hpY2xvdWRkYXZkdW1teQ$4F2+x7RfPThvA8QGgOM1ETQi2zEuS9f9e50+dZh14f4";
+
 /// Cached identity returned after a successful Basic Auth verification.
 #[derive(Clone)]
 struct CachedBasicAuthResult {
@@ -91,6 +99,19 @@ impl AppPasswordService {
             user_repo,
             base_url,
             auth_cache,
+        }
+    }
+
+    /// Execute dummy Argon2 verification for failed Basic Auth paths where no
+    /// real app-password hash is available. This reduces username-enumeration
+    /// timing differences without caching failures.
+    async fn verify_dummy_basic_auth_password(&self) {
+        if let Err(err) = self
+            .hasher
+            .verify_password(DUMMY_BASIC_AUTH_PASSWORD, DUMMY_BASIC_AUTH_HASH)
+            .await
+        {
+            tracing::warn!("Dummy Basic Auth verification failed: {}", err);
         }
     }
 
@@ -294,13 +315,18 @@ impl AppPasswordService {
         }
 
         // ── 3. Cache miss → full verification ────────────────────────
-        let user = self
-            .user_repo
-            .get_user_by_username(username)
-            .await
-            .map_err(|_| DomainError::unauthorized("Invalid username or app password"))?;
+        let user = match self.user_repo.get_user_by_username(username).await {
+            Ok(user) => user,
+            Err(_) => {
+                self.verify_dummy_basic_auth_password().await;
+                return Err(DomainError::unauthorized(
+                    "Invalid username or app password",
+                ));
+            }
+        };
 
         if !user.is_active() {
+            self.verify_dummy_basic_auth_password().await;
             return Err(DomainError::unauthorized(
                 "Invalid username or app password",
             ));
@@ -320,6 +346,7 @@ impl AppPasswordService {
             match nc_token_prefix(&norm) {
                 Ok(pfx) => (norm, pfx),
                 Err(_) => {
+                    self.verify_dummy_basic_auth_password().await;
                     return Err(DomainError::unauthorized(
                         "Invalid username or app password",
                     ));
@@ -334,6 +361,7 @@ impl AppPasswordService {
             .await?;
 
         if candidates.is_empty() {
+            self.verify_dummy_basic_auth_password().await;
             return Err(DomainError::unauthorized(
                 "Invalid username or app password",
             ));

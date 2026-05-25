@@ -7,6 +7,7 @@ pub mod calendar_ports;
 pub mod carddav_ports;
 pub mod chunked_upload_ports;
 pub mod compression_ports;
+pub mod dav_auth_failure_ports;
 pub mod dav_principal_ports;
 pub mod dedup_ports;
 pub mod favorites_ports;
