@@ -146,6 +146,10 @@ pub async fn auth_middleware(
         }
     }
 
+    if path.starts_with("/webdav") || path.starts_with("/caldav") || path.starts_with("/carddav") {
+        return Err(AuthMiddlewareError::BasicUnauthorized);
+    }
+
     Err(AuthMiddlewareError::Unauthorized)
 }
 
