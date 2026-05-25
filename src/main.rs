@@ -272,7 +272,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         use oxicloud::interfaces::middleware::auth::auth_middleware;
         use oxicloud::interfaces::middleware::csrf::csrf_middleware;
         use oxicloud::interfaces::middleware::rate_limit::{
-            RateLimiter, rate_limit_login, rate_limit_refresh, rate_limit_register,
+            RateLimiter, rate_limit_dav_discovery, rate_limit_dav_options, rate_limit_login,
+            rate_limit_refresh, rate_limit_register,
         };
 
         // ── Rate limiters (IP-based, in-memory via moka) ────────────────
@@ -292,6 +293,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             rl.refresh_window_secs,
             100_000,
         ));
+        let dav_discovery_limiter = Arc::new(RateLimiter::new(60, 60, 100_000));
+        let dav_options_limiter = Arc::new(RateLimiter::new(20, 60, 100_000));
         tracing::info!(
             "Rate limiting enabled — login: {}/{} s, register: {}/{} s, refresh: {}/{} s",
             rl.login_max_requests,
@@ -369,14 +372,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
 
         // CalDAV/CardDAV/WebDAV with auth middleware (merged, not nested)
-        let caldav_protected = caldav_router.layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            auth_middleware,
-        ));
-        let carddav_protected = carddav_router.layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            auth_middleware,
-        ));
+        let caldav_protected = caldav_router
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                auth_middleware,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                dav_options_limiter.clone(),
+                rate_limit_dav_options,
+            ));
+        let carddav_protected = carddav_router
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                auth_middleware,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                dav_options_limiter.clone(),
+                rate_limit_dav_options,
+            ));
         let webdav_protected = webdav_router.layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,
@@ -406,7 +419,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // All other API routes are protected by auth middleware
             .nest("/api", protected_api)
             // RFC 6764 well-known discovery (public, no auth — just redirects)
-            .merge(well_known_router.clone())
+            .merge(
+                well_known_router
+                    .clone()
+                    .layer(axum::middleware::from_fn_with_state(
+                        dav_discovery_limiter.clone(),
+                        rate_limit_dav_discovery,
+                    )),
+            )
             // CalDAV/CardDAV/WebDAV protocols merged at top-level for client compatibility
             .merge(caldav_protected)
             .merge(carddav_protected)
@@ -438,14 +458,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .nest("/api/wopi", wopi_api_protected);
         }
     } else {
-        // Auth disabled — no middleware applied
+        // Auth disabled — API routes are public, but DAV discovery probes remain rate-limited.
         tracing::warn!("Authentication is DISABLED — all API routes are publicly accessible");
+
+        let dav_discovery_limiter = Arc::new(
+            oxicloud::interfaces::middleware::rate_limit::RateLimiter::new(60, 60, 100_000),
+        );
+        let dav_options_limiter = Arc::new(
+            oxicloud::interfaces::middleware::rate_limit::RateLimiter::new(20, 60, 100_000),
+        );
+
+        let well_known_router = well_known_router.layer(axum::middleware::from_fn_with_state(
+            dav_discovery_limiter,
+            oxicloud::interfaces::middleware::rate_limit::rate_limit_dav_discovery,
+        ));
+        let caldav_router = caldav_router.layer(axum::middleware::from_fn_with_state(
+            dav_options_limiter.clone(),
+            oxicloud::interfaces::middleware::rate_limit::rate_limit_dav_options,
+        ));
+        let carddav_router = carddav_router.layer(axum::middleware::from_fn_with_state(
+            dav_options_limiter,
+            oxicloud::interfaces::middleware::rate_limit::rate_limit_dav_options,
+        ));
+
         app = Router::new()
             // Health / readiness probes — no auth, mounted at root
             .merge(health_routes)
             .nest("/api", public_api_routes)
             .nest("/api", api_routes)
-            // RFC 6764 well-known discovery (just redirects)
+            // RFC 6764 well-known discovery (public, no auth — just redirects)
             .merge(well_known_router)
             // CalDAV/CardDAV/WebDAV protocols merged at top-level
             .merge(caldav_router)

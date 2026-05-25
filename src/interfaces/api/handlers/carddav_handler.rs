@@ -180,12 +180,24 @@ fn get_contact_service(state: &AppState) -> Result<&Arc<ContactStorageAdapter>, 
     })
 }
 
+fn reject_xml_entities(body: &[u8]) -> Result<(), AppError> {
+    let body = std::str::from_utf8(body)
+        .map_err(|_| AppError::bad_request("XML request body must be valid UTF-8"))?;
+    let upper = body.to_ascii_uppercase();
+    if upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
+        return Err(AppError::bad_request(
+            "DOCTYPE and ENTITY declarations are not allowed in PROPFIND XML",
+        ));
+    }
+    Ok(())
+}
+
 // ─── OPTIONS ─────────────────────────────────────────────────────────
 
 async fn handle_options() -> Result<Response<Body>, AppError> {
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(HEADER_DAV, "1, 2, 3, addressbook")
+        .header(HEADER_DAV, "1, 3, calendar-access, addressbook")
         .header(
             header::ALLOW,
             "OPTIONS, GET, PUT, DELETE, PROPFIND, PROPPATCH, REPORT, MKCOL",
@@ -215,6 +227,10 @@ async fn handle_propfind(
     let body_bytes = body::to_bytes(req.into_body(), MAX_CARDDAV_BODY)
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
+
+    if !body_bytes.is_empty() {
+        reject_xml_entities(&body_bytes)?;
+    }
 
     let propfind_request = if body_bytes.is_empty() {
         PropFindRequest {

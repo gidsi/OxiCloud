@@ -19,7 +19,7 @@ use axum::{
     Router,
     body::{self, Body},
     http::{HeaderName, Request, StatusCode, header},
-    response::Response,
+    response::{Redirect, Response},
 };
 use bytes::Buf;
 use percent_encoding::percent_decode_str;
@@ -32,6 +32,7 @@ use crate::application::dtos::calendar_dto::{
     CreateCalendarDto, CreateEventICalDto, UpdateCalendarDto,
 };
 use crate::application::ports::calendar_ports::CalendarUseCase;
+use crate::application::ports::dav_principal_ports::DavPrincipalDiscoveryUseCase;
 use crate::application::services::calendar_service::CalendarService;
 use crate::common::di::AppState;
 use crate::interfaces::errors::AppError;
@@ -57,18 +58,23 @@ pub fn caldav_routes() -> Router<Arc<AppState>> {
 /// Creates RFC 6764 well-known discovery routes.
 /// These are public (no auth) and simply redirect to the CalDAV root.
 pub fn well_known_routes() -> Router<Arc<AppState>> {
-    Router::new().route(
-        "/.well-known/caldav",
-        axum::routing::any(handle_well_known_caldav),
-    )
+    Router::new()
+        .route(
+            "/.well-known/caldav",
+            axum::routing::get(handle_well_known_caldav),
+        )
+        .route(
+            "/.well-known/carddav",
+            axum::routing::get(handle_well_known_carddav),
+        )
 }
 
-async fn handle_well_known_caldav() -> Response<Body> {
-    Response::builder()
-        .status(StatusCode::MOVED_PERMANENTLY)
-        .header(header::LOCATION, "/caldav/")
-        .body(Body::empty())
-        .unwrap()
+async fn handle_well_known_caldav() -> Redirect {
+    Redirect::permanent("/caldav/")
+}
+
+async fn handle_well_known_carddav() -> Redirect {
+    Redirect::permanent("/carddav/")
 }
 
 async fn handle_caldav_methods_root(
@@ -188,12 +194,37 @@ fn get_calendar_service(state: &AppState) -> Result<&Arc<CalendarService>, AppEr
     })
 }
 
+fn get_dav_principal_service(
+    state: &AppState,
+) -> Result<&Arc<crate::application::services::dav_principal_service::DavPrincipalService>, AppError>
+{
+    state.dav_principal_service.as_ref().ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "DAV principal discovery service is not configured",
+            "NotImplemented",
+        )
+    })
+}
+
+fn reject_xml_entities(body: &[u8]) -> Result<(), AppError> {
+    let body = std::str::from_utf8(body)
+        .map_err(|_| AppError::bad_request("XML request body must be valid UTF-8"))?;
+    let upper = body.to_ascii_uppercase();
+    if upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
+        return Err(AppError::bad_request(
+            "DOCTYPE and ENTITY declarations are not allowed in PROPFIND XML",
+        ));
+    }
+    Ok(())
+}
+
 // ─── OPTIONS ─────────────────────────────────────────────────────────
 
 async fn handle_options() -> Result<Response<Body>, AppError> {
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(HEADER_DAV, "1, 2, calendar-access")
+        .header(HEADER_DAV, "1, 3, calendar-access, addressbook")
         .header(
             header::ALLOW,
             "OPTIONS, GET, PUT, DELETE, PROPFIND, PROPPATCH, REPORT, MKCALENDAR",
@@ -213,15 +244,20 @@ async fn handle_propfind(
         .headers()
         .get("Depth")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("1")
+        .unwrap_or("0")
         .to_string();
 
     let user = extract_user(&req)?;
     let calendar_service = get_calendar_service(&state)?;
+    let dav_principal_service = get_dav_principal_service(&state)?;
 
     let body_bytes = body::to_bytes(req.into_body(), MAX_CALDAV_BODY)
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
+
+    if !body_bytes.is_empty() {
+        reject_xml_entities(&body_bytes)?;
+    }
 
     // Parse PROPFIND request
     let propfind_request = if body_bytes.is_empty() {
@@ -248,13 +284,19 @@ async fn handle_propfind(
         };
 
         let base_href = "/caldav/";
+        let home_sets = dav_principal_service
+            .get_principal_home_sets(user.id)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(format!("Failed to fetch DAV principal: {}", e))
+            })?;
         let mut response_body = Vec::new();
-        CalDavAdapter::generate_root_propfind_response(
+        CalDavAdapter::generate_root_propfind_response_with_home_sets(
             &mut response_body,
             &calendars,
             &propfind_request,
             base_href,
-            &user.username,
+            &home_sets,
         )
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
@@ -272,11 +314,24 @@ async fn handle_propfind(
             username
         };
 
+        let principal_path = format!("/caldav/principals/{}/", username.trim_end_matches('/'));
+        let home_sets = match dav_principal_service
+            .get_principal_home_sets_by_path(&principal_path, user.id)
+            .await
+        {
+            Ok(home_sets) => home_sets,
+            Err(_) => dav_principal_service
+                .get_principal_home_sets(user.id)
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(format!("Failed to fetch DAV principal: {}", e))
+                })?,
+        };
         let mut response_body = Vec::new();
-        CalDavAdapter::generate_principal_propfind_response(
+        CalDavAdapter::generate_principal_propfind_response_with_home_sets(
             &mut response_body,
             &propfind_request,
-            username,
+            &home_sets,
         )
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 

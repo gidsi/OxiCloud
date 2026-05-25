@@ -34,6 +34,50 @@ pub struct ErrorResponse {
     pub error_type: String,
 }
 
+/// DAV-specific HTTP errors.
+///
+/// DAV clients must receive protocol-safe responses for authentication
+/// failures. In particular, missing or invalid Basic credentials must return a
+/// real HTTP authentication challenge rather than the SPA login page or a JSON
+/// API error shape.
+#[derive(Debug, thiserror::Error)]
+pub enum DavError {
+    #[error("Unauthorized")]
+    Unauthorized,
+
+    #[error("Not found")]
+    NotFound,
+}
+
+impl IntoResponse for DavError {
+    fn into_response(self) -> Response {
+        match self {
+            DavError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                [(
+                    axum::http::header::WWW_AUTHENTICATE,
+                    r#"Basic realm="OxiCloud""#,
+                )],
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/plain; charset=utf-8",
+                )],
+                "Unauthorized",
+            )
+                .into_response(),
+            DavError::NotFound => (
+                StatusCode::NOT_FOUND,
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/plain; charset=utf-8",
+                )],
+                "Not Found",
+            )
+                .into_response(),
+        }
+    }
+}
+
 impl AppError {
     /// Create a new AppError with custom status code, message and error type.
     pub fn new(

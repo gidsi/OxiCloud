@@ -1,8 +1,9 @@
 [advisories]
 ignore = [
     # paste unmaintained — transitive via azure_core 0.21.0 (latest available).
-    # No direct security impact; no upgrade path exists.
-    # keep warning "RUSTSEC-2024-0436",
+    # No direct security impact; no upgrade path exists while retaining the current
+    # Azure SDK generation used by azure_storage_blobs 0.21.x.
+    "RUSTSEC-2024-0436",
 
     # rand 0.7.3 unsound — transitive via http-types → azure_core 0.21.0.
     # Only exploitable with a custom logger using rand::rng(); not applicable here.

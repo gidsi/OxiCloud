@@ -44,6 +44,7 @@ use crate::infrastructure::services::trash_cleanup_service::TrashCleanupService;
 use crate::application::services::app_password_service::AppPasswordService;
 use crate::application::services::blob_lifecycle_service::BlobLifecycleService;
 use crate::application::services::calendar_service::CalendarService;
+use crate::application::services::dav_principal_service::DavPrincipalService;
 use crate::application::services::device_auth_service::DeviceAuthService;
 use crate::application::services::file_lifecycle_service::FileLifecycleService;
 use crate::application::services::music_service::MusicService;
@@ -55,8 +56,8 @@ use crate::infrastructure::repositories::AppPasswordPgRepository;
 use crate::infrastructure::repositories::DeviceCodePgRepository;
 use crate::infrastructure::repositories::pg::{
     AddressBookPgRepository, AudioMetadataPgRepository, CalendarEventPgRepository,
-    CalendarPgRepository, ContactGroupPgRepository, ContactPgRepository, PlaylistItemPgRepository,
-    PlaylistPgRepository, SessionPgRepository, UserPgRepository,
+    CalendarPgRepository, ContactGroupPgRepository, ContactPgRepository, DavPrincipalPgRepository,
+    PlaylistItemPgRepository, PlaylistPgRepository, SessionPgRepository, UserPgRepository,
 };
 use crate::infrastructure::services::audio_metadata_service::AudioMetadataService;
 use crate::infrastructure::services::chunked_upload_service::ChunkedUploadService;
@@ -810,6 +811,8 @@ impl AppServiceFactory {
             calendar_use_case: None,
             addressbook_use_case: None,
             contact_use_case: None,
+            dav_principal_service: None,
+            dav_auth_failure_repository: None,
             music_service: None,
             wopi_token_service: None,
             wopi_lock_service: None,
@@ -821,6 +824,11 @@ impl AppServiceFactory {
                 crate::infrastructure::services::webdav_lock_service::create_webdav_lock_store(),
             authorization,
         };
+
+        app_state.dav_auth_failure_repository = Some(Arc::new(
+            crate::infrastructure::repositories::pg::DavAuthFailurePgRepository::new(pool.clone()),
+        ));
+        tracing::info!("DAV auth failure audit repository initialized");
 
         // 9b. Wire admin settings service when auth is available
         if let Some(auth_svc) = &app_state.auth_service {
@@ -969,7 +977,13 @@ impl AppServiceFactory {
             app_state.addressbook_use_case = Some(contact_storage.clone());
             app_state.contact_use_case = Some(contact_storage);
 
-            tracing::info!("CalDAV and CardDAV services initialized with PostgreSQL repositories");
+            let dav_principal_repo = Arc::new(DavPrincipalPgRepository::new(pool.clone()));
+            app_state.dav_principal_service =
+                Some(Arc::new(DavPrincipalService::new(dav_principal_repo)));
+
+            tracing::info!(
+                "CalDAV, CardDAV, and DAV principal discovery services initialized with PostgreSQL repositories"
+            );
         }
 
         // Music service
@@ -1123,6 +1137,9 @@ pub struct AppState {
     pub calendar_use_case: Option<Arc<CalendarService>>,
     pub addressbook_use_case: Option<Arc<ContactStorageAdapter>>,
     pub contact_use_case: Option<Arc<ContactStorageAdapter>>,
+    pub dav_principal_service: Option<Arc<DavPrincipalService>>,
+    pub dav_auth_failure_repository:
+        Option<Arc<crate::infrastructure::repositories::pg::DavAuthFailurePgRepository>>,
     pub music_service: Option<Arc<MusicService>>,
     pub wopi_token_service:
         Option<Arc<crate::application::services::wopi_token_service::WopiTokenService>>,
