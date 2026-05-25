@@ -80,6 +80,7 @@ pub fn create_health_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> 
     Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .route("/api/v1/system/health", get(health))
         .with_state(app_state.clone())
 }
 

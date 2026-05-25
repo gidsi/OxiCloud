@@ -68,6 +68,7 @@ aes-gcm = "0.10.3"
 lru = "0.16.4"
 fastcdc = "4.0.0"
 memmap2 = "0.9.10"
+prometheus = "0.13.4"
 
 [features]
 default = []

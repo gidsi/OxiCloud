@@ -1,6 +1,7 @@
 #![allow(async_fn_in_trait)]
 
 // Export the main project modules
+pub mod app;
 pub mod application;
 pub mod common;
 pub mod domain;
