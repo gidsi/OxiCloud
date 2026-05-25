@@ -88,6 +88,18 @@ impl CalendarUseCase for CalendarService {
         Ok(calendar)
     }
 
+    async fn get_calendar_by_path(
+        &self,
+        path: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self
+            .calendar_storage
+            .get_calendar_by_path(user_id, path)
+            .await?;
+        Ok(calendar)
+    }
+
     async fn list_my_calendars(&self, user_id: Uuid) -> Result<Vec<CalendarDto>, DomainError> {
         self.calendar_storage.list_calendars_by_owner(user_id).await
     }

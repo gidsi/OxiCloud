@@ -13,10 +13,12 @@ mod tests {
         CalendarDto {
             id: "cal-001".to_string(),
             name: "Personal".to_string(),
+            path: "cal-001".to_string(),
             owner_id: "user-001".to_string(),
             description: Some("My personal calendar".to_string()),
             color: Some("#FF0000".to_string()),
             is_public: false,
+            ctag: "ctag-001".to_string(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2025, 1, 15, 12, 0, 0).unwrap(),
             custom_properties: HashMap::new(),

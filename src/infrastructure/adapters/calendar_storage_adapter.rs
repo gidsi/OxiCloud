@@ -49,7 +49,14 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         dto: CreateCalendarDto,
         owner_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        let calendar = Calendar::new(dto.name, owner_id, dto.description, dto.color)?;
+        let calendar = Calendar::new(
+            dto.name,
+            dto.path,
+            owner_id,
+            dto.description,
+            dto.color,
+            dto.is_public.unwrap_or(false),
+        )?;
 
         let created = self.calendar_repository.create_calendar(calendar).await?;
         Ok(CalendarDto::from(created))
@@ -73,11 +80,17 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         if let Some(name) = update.name {
             calendar.update_name(name)?;
         }
+        if let Some(path) = update.path {
+            calendar.update_path(path)?;
+        }
         if let Some(description) = update.description {
             calendar.update_description(Some(description));
         }
         if let Some(color) = update.color {
             calendar.update_color(Some(color))?;
+        }
+        if let Some(is_public) = update.is_public {
+            calendar.update_is_public(is_public);
         }
 
         let updated = self.calendar_repository.update_calendar(calendar).await?;
@@ -112,6 +125,18 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         })?;
 
         let calendar = self.calendar_repository.find_calendar_by_id(&uuid).await?;
+        Ok(CalendarDto::from(calendar))
+    }
+
+    async fn get_calendar_by_path(
+        &self,
+        owner_id: Uuid,
+        path: &str,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self
+            .calendar_repository
+            .find_calendar_by_path_and_owner(path, owner_id)
+            .await?;
         Ok(CalendarDto::from(calendar))
     }
 

@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
  * This module defines the Calendar entity, which represents a calendar in the CalDAV
  * implementation. Calendars contain calendar events and are owned by users.
  *
- * Calendars have properties such as name, color, and description, and they serve as
+ * Calendars have properties such as name, path, color, and description, and they serve as
  * containers for calendar events. Each calendar belongs to a specific user and can
  * have custom properties.
  */
@@ -20,7 +20,7 @@ pub use super::entity_errors::CalendarError;
  * Calendar entity.
  *
  * Represents a calendar container that can hold multiple calendar events.
- * Each calendar is owned by a user and has properties like name, color, and description.
+ * Each calendar is owned by a user and has properties like name, path, color, and description.
  */
 #[derive(Debug, Clone)]
 pub struct Calendar {
@@ -30,14 +30,23 @@ pub struct Calendar {
     /// Display name of the calendar
     name: String,
 
+    /// Stable CalDAV collection path/slug used in /caldav/{username}/{path}/
+    path: String,
+
     /// ID of the user who owns this calendar
     owner_id: Uuid,
 
     /// Optional description of the calendar
     description: Option<String>,
 
-    /// Optional color code for UI display (hex format #RRGGBB)
+    /// Optional color code for UI display (hex format #RRGGBB or #RRGGBBAA)
     color: Option<String>,
+
+    /// Whether this calendar is publicly visible
+    is_public: bool,
+
+    /// CalDAV collection tag used by clients to detect collection changes
+    ctag: String,
 
     /// Time when the calendar was created
     created_at: DateTime<Utc>,
@@ -54,18 +63,21 @@ impl Calendar {
      * Creates a new calendar with the given properties.
      *
      * @param name Display name of the calendar
+     * @param path Stable CalDAV collection path/slug
      * @param owner_id ID of the user who owns this calendar
      * @param description Optional description of the calendar
-     * @param color Optional color code for UI display (#RRGGBB format)
+     * @param color Optional color code for UI display (#RRGGBB or #RRGGBBAA format)
+     * @param is_public Whether this calendar is publicly visible
      * @return Result containing the new Calendar or a domain error
      */
     pub fn new(
         name: String,
+        path: String,
         owner_id: Uuid,
         description: Option<String>,
         color: Option<String>,
+        is_public: bool,
     ) -> Result<Self> {
-        // Validate inputs
         if name.is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
@@ -73,6 +85,8 @@ impl Calendar {
                 "Calendar name cannot be empty",
             ));
         }
+
+        Self::validate_path(&path)?;
 
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
@@ -83,9 +97,12 @@ impl Calendar {
         Ok(Self {
             id: Uuid::new_v4(),
             name,
+            path,
             owner_id,
             description,
             color,
+            is_public,
+            ctag: Self::generate_ctag(),
             created_at: now,
             updated_at: now,
             custom_properties: std::collections::HashMap::new(),
@@ -98,9 +115,12 @@ impl Calendar {
      *
      * @param id Unique identifier for the calendar
      * @param name Display name of the calendar
+     * @param path Stable CalDAV collection path/slug
      * @param owner_id ID of the user who owns this calendar
      * @param description Optional description of the calendar
      * @param color Optional color code for UI display
+     * @param is_public Whether this calendar is publicly visible
+     * @param ctag CalDAV collection tag
      * @param created_at Time when the calendar was created
      * @param updated_at Time when the calendar was last modified
      * @return Result containing the new Calendar or a domain error
@@ -108,18 +128,30 @@ impl Calendar {
     pub fn with_id(
         id: Uuid,
         name: String,
+        path: String,
         owner_id: Uuid,
         description: Option<String>,
         color: Option<String>,
+        is_public: bool,
+        ctag: String,
         created_at: DateTime<Utc>,
         updated_at: DateTime<Utc>,
     ) -> Result<Self> {
-        // Basic validation
         if name.is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "Calendar",
                 "Calendar name cannot be empty",
+            ));
+        }
+
+        Self::validate_path(&path)?;
+
+        if ctag.is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar ctag cannot be empty",
             ));
         }
 
@@ -130,16 +162,17 @@ impl Calendar {
         Ok(Self {
             id,
             name,
+            path,
             owner_id,
             description,
             color,
+            is_public,
+            ctag,
             created_at,
             updated_at,
             custom_properties: std::collections::HashMap::new(),
         })
     }
-
-    // Getters
 
     /// Returns the calendar's unique identifier
     pub fn id(&self) -> &Uuid {
@@ -149,6 +182,11 @@ impl Calendar {
     /// Returns the calendar's display name
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the stable CalDAV collection path/slug
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     /// Returns the ID of the user who owns this calendar
@@ -164,6 +202,16 @@ impl Calendar {
     /// Returns the calendar's color code, if any
     pub fn color(&self) -> Option<&str> {
         self.color.as_deref()
+    }
+
+    /// Returns whether this calendar is publicly visible
+    pub fn is_public(&self) -> bool {
+        self.is_public
+    }
+
+    /// Returns the CalDAV collection tag
+    pub fn ctag(&self) -> &str {
+        &self.ctag
     }
 
     /// Returns the time when the calendar was created
@@ -186,8 +234,6 @@ impl Calendar {
         &self.custom_properties
     }
 
-    // Setters and Mutators
-
     /**
      * Updates the calendar's name.
      *
@@ -204,7 +250,20 @@ impl Calendar {
         }
 
         self.name = name;
-        self.updated_at = Utc::now();
+        self.touch();
+        Ok(())
+    }
+
+    /**
+     * Updates the calendar's CalDAV collection path.
+     *
+     * @param path New stable DAV path/slug
+     * @return Result indicating success or containing a domain error
+     */
+    pub fn update_path(&mut self, path: String) -> Result<()> {
+        Self::validate_path(&path)?;
+        self.path = path;
+        self.touch();
         Ok(())
     }
 
@@ -215,7 +274,7 @@ impl Calendar {
      */
     pub fn update_description(&mut self, description: Option<String>) {
         self.description = description;
-        self.updated_at = Utc::now();
+        self.touch();
     }
 
     /**
@@ -225,17 +284,69 @@ impl Calendar {
      * @return Result indicating success or containing a domain error
      */
     pub fn update_color(&mut self, color: Option<String>) -> Result<()> {
-        // Validate color format if provided
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
         }
 
         self.color = color;
-        self.updated_at = Utc::now();
+        self.touch();
         Ok(())
     }
 
-    /// Validate a calendar color
+    /**
+     * Updates whether this calendar is publicly visible.
+     *
+     * @param is_public New public visibility flag
+     */
+    pub fn update_is_public(&mut self, is_public: bool) {
+        self.is_public = is_public;
+        self.touch();
+    }
+
+    /// Updates the CalDAV collection tag without changing any other field.
+    pub fn bump_ctag(&mut self) {
+        self.ctag = Self::generate_ctag();
+        self.updated_at = Utc::now();
+    }
+
+    /// Validate a calendar DAV path/slug.
+    fn validate_path(path: &str) -> Result<()> {
+        if path.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar path cannot be empty",
+            ));
+        }
+
+        if path.contains('/') || path.contains('\\') {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar path must be a single URI segment",
+            ));
+        }
+
+        if path == "." || path == ".." {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar path cannot be a traversal segment",
+            ));
+        }
+
+        if path.chars().any(|c| c.is_control()) {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar path cannot contain control characters",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate a calendar color.
     fn validate_color(color: &str) -> Result<()> {
         if !color.starts_with('#')
             || !(color.len() == 7 || color.len() == 9)
@@ -250,6 +361,10 @@ impl Calendar {
         Ok(())
     }
 
+    fn generate_ctag() -> String {
+        Uuid::new_v4().to_string()
+    }
+
     /**
      * Sets a custom property for extended CalDAV support.
      *
@@ -258,7 +373,7 @@ impl Calendar {
      */
     pub fn set_custom_property(&mut self, name: String, value: String) {
         self.custom_properties.insert(name, value);
-        self.updated_at = Utc::now();
+        self.touch();
     }
 
     /**
@@ -270,7 +385,7 @@ impl Calendar {
     pub fn remove_custom_property(&mut self, name: &str) -> bool {
         let result = self.custom_properties.remove(name).is_some();
         if result {
-            self.updated_at = Utc::now();
+            self.touch();
         }
         result
     }
@@ -286,10 +401,11 @@ impl Calendar {
     }
 
     /**
-     * Updates the last modification time of the calendar to now.
-     * Called when calendar events are added, modified, or removed.
+     * Updates the last modification time and CalDAV collection tag.
+     * Called when calendar properties or events are added, modified, or removed.
      */
     pub fn touch(&mut self) {
+        self.ctag = Self::generate_ctag();
         self.updated_at = Utc::now();
     }
 }
@@ -301,7 +417,14 @@ mod tests {
     #[test]
     fn test_init() {
         let owner_id = Uuid::new_v4();
-        let res = Calendar::new("Name".to_string(), owner_id, None, None);
+        let res = Calendar::new(
+            "Name".to_string(),
+            "name".to_string(),
+            owner_id,
+            None,
+            None,
+            false,
+        );
         assert!(res.is_ok());
     }
 
@@ -310,9 +433,11 @@ mod tests {
         let owner_id = Uuid::new_v4();
         let res = Calendar::new(
             "Name".to_string(),
+            "name".to_string(),
             owner_id,
             None,
             Some("#84FFa9".to_string()),
+            false,
         );
         assert!(res.is_ok());
     }
@@ -323,9 +448,11 @@ mod tests {
         let owner_id = Uuid::new_v4();
         let res = Calendar::new(
             "Name".to_string(),
+            "name".to_string(),
             owner_id,
             None,
             Some("#abcdef51".to_string()),
+            false,
         );
         assert!(res.is_ok());
     }
@@ -333,7 +460,14 @@ mod tests {
     #[test]
     fn test_init_bad_color_1() {
         let owner_id = Uuid::new_v4();
-        let res = Calendar::new("Name".to_string(), owner_id, None, Some("foo".to_string()));
+        let res = Calendar::new(
+            "Name".to_string(),
+            "name".to_string(),
+            owner_id,
+            None,
+            Some("foo".to_string()),
+            false,
+        );
         assert!(res.is_err());
     }
 
@@ -342,9 +476,25 @@ mod tests {
         let owner_id = Uuid::new_v4();
         let res = Calendar::new(
             "Name".to_string(),
+            "name".to_string(),
             owner_id,
             None,
             Some("#xxjjff".to_string()),
+            false,
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_init_bad_path() {
+        let owner_id = Uuid::new_v4();
+        let res = Calendar::new(
+            "Name".to_string(),
+            "bad/path".to_string(),
+            owner_id,
+            None,
+            None,
+            false,
         );
         assert!(res.is_err());
     }

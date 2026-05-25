@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "SKIP: jq is required by $0" >&2
+    exit 77
+fi
+
 if [ -z "$base_url" ]
 then
     source test.env

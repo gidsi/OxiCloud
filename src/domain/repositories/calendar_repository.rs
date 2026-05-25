@@ -31,6 +31,16 @@ pub trait CalendarRepository: Send + Sync + 'static {
         owner_id: Uuid,
     ) -> CalendarRepositoryResult<Calendar>;
 
+    /// Finds a calendar by DAV collection path and owner.
+    ///
+    /// This is the canonical lookup for CalDAV resource URIs:
+    /// /caldav/{username}/{calendar-path}/
+    async fn find_calendar_by_path_and_owner(
+        &self,
+        path: &str,
+        owner_id: Uuid,
+    ) -> CalendarRepositoryResult<Calendar>;
+
     /// Lists calendars shared with a specific user
     async fn list_calendars_shared_with_user(
         &self,

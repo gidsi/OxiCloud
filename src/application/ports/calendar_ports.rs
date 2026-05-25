@@ -21,6 +21,11 @@ pub trait CalendarStoragePort: Send + Sync + 'static {
     ) -> Result<CalendarDto, DomainError>;
     async fn delete_calendar(&self, calendar_id: &str) -> Result<(), DomainError>;
     async fn get_calendar(&self, calendar_id: &str) -> Result<CalendarDto, DomainError>;
+    async fn get_calendar_by_path(
+        &self,
+        owner_id: Uuid,
+        path: &str,
+    ) -> Result<CalendarDto, DomainError>;
     async fn list_calendars_by_owner(
         &self,
         owner_id: Uuid,
@@ -127,6 +132,11 @@ pub trait CalendarUseCase: Send + Sync + 'static {
     async fn get_calendar(
         &self,
         calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarDto, DomainError>;
+    async fn get_calendar_by_path(
+        &self,
+        path: &str,
         user_id: Uuid,
     ) -> Result<CalendarDto, DomainError>;
     async fn list_my_calendars(&self, user_id: Uuid) -> Result<Vec<CalendarDto>, DomainError>;

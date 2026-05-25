@@ -9,10 +9,12 @@ use std::collections::HashMap;
 pub struct CalendarDto {
     pub id: String,
     pub name: String,
+    pub path: String,
     pub owner_id: String,
     pub description: Option<String>,
     pub color: Option<String>,
     pub is_public: bool,
+    pub ctag: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub custom_properties: HashMap<String, String>,
@@ -23,10 +25,12 @@ impl Default for CalendarDto {
         Self {
             id: String::new(),
             name: String::new(),
+            path: String::new(),
             owner_id: String::new(),
             description: None,
             color: None,
             is_public: false,
+            ctag: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             custom_properties: HashMap::new(),
@@ -39,10 +43,12 @@ impl From<Calendar> for CalendarDto {
         Self {
             id: calendar.id().to_string(),
             name: calendar.name().to_string(),
+            path: calendar.path().to_string(),
             owner_id: calendar.owner_id().to_string(),
             description: calendar.description().map(|s| s.to_string()),
             color: calendar.color().map(|s| s.to_string()),
-            is_public: false, // This needs to be set separately as it's not part of the domain entity
+            is_public: calendar.is_public(),
+            ctag: calendar.ctag().to_string(),
             created_at: *calendar.created_at(),
             updated_at: *calendar.updated_at(),
             custom_properties: calendar.custom_properties().clone(),
@@ -54,6 +60,7 @@ impl From<Calendar> for CalendarDto {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateCalendarDto {
     pub name: String,
+    pub path: String,
     pub description: Option<String>,
     pub color: Option<String>,
     pub is_public: Option<bool>,
@@ -63,6 +70,7 @@ pub struct CreateCalendarDto {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateCalendarDto {
     pub name: Option<String>,
+    pub path: Option<String>,
     pub description: Option<String>,
     pub color: Option<String>,
     pub is_public: Option<bool>,

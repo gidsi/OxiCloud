@@ -20,6 +20,27 @@ source "$WEBDAV_DIR/test.env"
 # Derive server port from base_url (e.g. http://localhost:8087 → 8087)
 SERVER_PORT="${base_url##*:}"
 
+# ── Prerequisite checks ───────────────────────────────────────────────────────
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "SKIP: $0 requires '$1'" >&2
+    exit 77
+  fi
+}
+
+require_cmd docker
+require_cmd cargo
+require_cmd curl
+require_cmd hurl
+require_cmd jq
+require_cmd nc
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "SKIP: $0 requires docker compose" >&2
+  exit 77
+fi
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 log()  { echo "[api-test] $*"; }
@@ -44,7 +65,10 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
-  bash "$COMMON/stop-db.sh"
+  bash "$COMMON/stop-db.sh" || {
+    local status=$?
+    [ "$status" -eq 77 ] || exit "$status"
+  }
 }
 
 trap cleanup EXIT

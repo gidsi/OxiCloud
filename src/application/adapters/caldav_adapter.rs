@@ -9,6 +9,7 @@ use quick_xml::{
  * This module provides conversion between CalDAV protocol XML structures and OxiCloud domain objects.
  * It handles parsing CalDAV request XML and generating CalDAV response XML according to RFC 4791.
  */
+use std::collections::HashMap;
 use std::io::{BufReader, Read, Write};
 use uuid::Uuid;
 
@@ -215,6 +216,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:A", "http://apple.com/ns/ical/"),
                 ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
@@ -228,7 +230,7 @@ impl CalDavAdapter {
                 &mut xml_writer,
                 calendar,
                 request,
-                &format!("{}{}/", base_href, calendar.id),
+                &format!("{}{}/", base_href, calendar.path),
             )?;
         }
 
@@ -253,6 +255,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:A", "http://apple.com/ns/ical/"),
                 ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
@@ -274,7 +277,7 @@ impl CalDavAdapter {
                 &mut xml_writer,
                 calendar,
                 request,
-                &format!("{}{}/", base_href, calendar.id),
+                &format!("{}{}/", base_href, calendar.path),
             )?;
         }
 
@@ -297,6 +300,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:A", "http://apple.com/ns/ical/"),
                 ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
@@ -349,7 +353,7 @@ impl CalDavAdapter {
                 &mut xml_writer,
                 calendar,
                 request,
-                &format!("{}{}/", base_href, calendar.id),
+                &format!("{}{}/", base_href, calendar.path),
             )?;
         }
         xml_writer.write_event(Event::End(BytesEnd::new("d:multistatus")))?;
@@ -934,15 +938,16 @@ impl CalDavAdapter {
         // Calendar timezone (empty for UTC)
         xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-timezone")))?;
 
-        // Calendar color
+        // Calendar color (Apple namespace used by Apple Calendar and iOS)
         if let Some(color) = &calendar.color {
-            xml_writer.write_event(Event::Start(BytesStart::new("CS:calendar-color")))?;
+            xml_writer.write_event(Event::Start(BytesStart::new("A:calendar-color")))?;
             xml_writer.write_event(Event::Text(BytesText::new(color)))?;
-            xml_writer.write_event(Event::End(BytesEnd::new("CS:calendar-color")))?;
+            xml_writer.write_event(Event::End(BytesEnd::new("A:calendar-color")))?;
         }
 
         // Support calendar-access (RFC4791)
         xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-access")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("A:calendar-color")))?;
 
         // Current user privilege set
         xml_writer.write_event(Event::Start(BytesStart::new(
@@ -996,8 +1001,9 @@ impl CalDavAdapter {
             "C:supported-calendar-component-set",
         )))?;
         xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-timezone")))?;
-        xml_writer.write_event(Event::Empty(BytesStart::new("CS:calendar-color")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("A:calendar-color")))?;
         xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-access")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("A:calendar-color")))?;
         xml_writer.write_event(Event::Empty(BytesStart::new(
             "D:current-user-privilege-set",
         )))?;
@@ -1085,6 +1091,7 @@ impl CalDavAdapter {
                 }
                 ("urn:ietf:params:xml:ns:caldav", "calendar-access") => {
                     xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-access")))?;
+                    xml_writer.write_event(Event::Empty(BytesStart::new("A:calendar-color")))?;
                 }
                 ("urn:ietf:params:xml:ns:caldav", "calendar-description") => {
                     if let Some(desc) = &calendar.description {
@@ -1099,7 +1106,18 @@ impl CalDavAdapter {
                     }
                 }
 
-                // CalendarServer namespace properties
+                // Apple / CalendarServer color properties
+                ("http://apple.com/ns/ical/", "calendar-color") => {
+                    if let Some(color) = &calendar.color {
+                        xml_writer
+                            .write_event(Event::Start(BytesStart::new("A:calendar-color")))?;
+                        xml_writer.write_event(Event::Text(BytesText::new(color)))?;
+                        xml_writer.write_event(Event::End(BytesEnd::new("A:calendar-color")))?;
+                    } else {
+                        xml_writer
+                            .write_event(Event::Empty(BytesStart::new("A:calendar-color")))?;
+                    }
+                }
                 ("http://calendarserver.org/ns/", "calendar-color") => {
                     if let Some(color) = &calendar.color {
                         xml_writer
@@ -1166,6 +1184,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:A", "http://apple.com/ns/ical/"),
                 ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
@@ -1239,6 +1258,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:A", "http://apple.com/ns/ical/"),
                 ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
@@ -1466,12 +1486,11 @@ impl CalDavAdapter {
         xml_reader.config_mut().trim_text(true);
 
         let mut buffer = Vec::new();
+        let mut ns_map = HashMap::<String, String>::new();
         let mut in_mkcalendar = false;
         let mut in_set = false;
         let mut in_prop = false;
-        let mut in_displayname = false;
-        let mut in_description = false;
-        let mut in_calendar_color = false;
+        let mut current_property: Option<QualifiedName> = None;
 
         let mut displayname = String::new();
         let mut description = None;
@@ -1480,78 +1499,67 @@ impl CalDavAdapter {
         loop {
             match xml_reader.read_event_into(&mut buffer) {
                 Ok(Event::Start(ref e)) => {
+                    WebDavAdapter::collect_ns_decls(e, &mut ns_map);
                     let name = e.name();
                     let name_str = std::str::from_utf8(name.as_ref()).unwrap_or("");
+                    let qname = WebDavAdapter::resolve_name(name_str, &ns_map);
 
-                    match name_str {
-                        s if s == "mkcalendar" || s.ends_with(":mkcalendar") => {
-                            in_mkcalendar = true
-                        }
-                        s if in_mkcalendar && (s == "set" || s.ends_with(":set")) => in_set = true,
-                        s if in_set && (s == "prop" || s.ends_with(":prop")) => in_prop = true,
-                        s if in_prop && (s == "displayname" || s.ends_with(":displayname")) => {
-                            in_displayname = true
-                        }
-                        s if in_prop
-                            && (s == "calendar-description"
-                                || s.ends_with(":calendar-description")) =>
-                        {
-                            in_description = true
-                        }
-                        s if in_prop
-                            && (s == "calendar-color" || s.ends_with(":calendar-color")) =>
-                        {
-                            in_calendar_color = true
-                        }
-                        _ => (),
+                    match (qname.namespace.as_str(), qname.name.as_str()) {
+                        ("urn:ietf:params:xml:ns:caldav", "mkcalendar") => in_mkcalendar = true,
+                        ("DAV:", "set") if in_mkcalendar => in_set = true,
+                        ("DAV:", "prop") if in_set => in_prop = true,
+                        _ if in_prop => current_property = Some(qname),
+                        _ => {}
                     }
                 }
+                Ok(Event::Empty(ref e)) => {
+                    WebDavAdapter::collect_ns_decls(e, &mut ns_map);
+                }
                 Ok(Event::Text(e)) => {
-                    let text = e.decode().unwrap_or_default();
-
-                    if in_displayname {
-                        displayname = text.to_string();
-                    } else if in_description {
-                        description = Some(text.to_string());
-                    } else if in_calendar_color {
-                        color = Some(text.to_string());
+                    let text = e.decode().unwrap_or_default().to_string();
+                    if let Some(prop) = &current_property {
+                        match (prop.namespace.as_str(), prop.name.as_str()) {
+                            ("DAV:", "displayname") => displayname = text,
+                            ("urn:ietf:params:xml:ns:caldav", "calendar-description") => {
+                                description = Some(text)
+                            }
+                            ("http://apple.com/ns/ical/", "calendar-color")
+                            | ("http://calendarserver.org/ns/", "calendar-color") => {
+                                color = Some(text)
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 Ok(Event::End(ref e)) => {
                     let name = e.name();
                     let name_str = std::str::from_utf8(name.as_ref()).unwrap_or("");
+                    let qname = WebDavAdapter::resolve_name(name_str, &ns_map);
 
-                    match name_str {
-                        s if s == "mkcalendar" || s.ends_with(":mkcalendar") => {
-                            in_mkcalendar = false
-                        }
-                        s if s == "set" || s.ends_with(":set") => in_set = false,
-                        s if s == "prop" || s.ends_with(":prop") => in_prop = false,
-                        s if s == "displayname" || s.ends_with(":displayname") => {
-                            in_displayname = false
-                        }
-                        s if s == "calendar-description"
-                            || s.ends_with(":calendar-description") =>
-                        {
-                            in_description = false
-                        }
-                        s if s == "calendar-color" || s.ends_with(":calendar-color") => {
-                            in_calendar_color = false
-                        }
-                        _ => (),
+                    match (qname.namespace.as_str(), qname.name.as_str()) {
+                        ("urn:ietf:params:xml:ns:caldav", "mkcalendar") => in_mkcalendar = false,
+                        ("DAV:", "set") => in_set = false,
+                        ("DAV:", "prop") => in_prop = false,
+                        _ if current_property.as_ref() == Some(&qname) => current_property = None,
+                        _ => {}
                     }
+                }
+                Ok(Event::DocType(_)) => {
+                    return Err(WebDavError::ParseError(
+                        "DOCTYPE declarations are not allowed in MKCALENDAR XML".to_string(),
+                    ));
+                }
+                Ok(Event::GeneralRef(_)) => {
+                    return Err(WebDavError::ParseError(
+                        "XML entity references are not allowed in MKCALENDAR XML".to_string(),
+                    ));
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => return Err(WebDavError::XmlError(e)),
-                _ => (),
+                _ => {}
             }
 
             buffer.clear();
-        }
-
-        // If no displayname specified, generate a default one based on UUID
-        if displayname.is_empty() {
-            displayname = format!("Calendar {}", Uuid::new_v4());
         }
 
         Ok((displayname, description, color))

@@ -3,6 +3,21 @@ set -euo pipefail
 
 COMPOSE_FILE="$(dirname "$0")/docker-compose.test.yml"
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "SKIP: docker is required to start test postgres" >&2
+  exit 77
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "SKIP: docker compose is required to start test postgres" >&2
+  exit 77
+fi
+
+if ! command -v nc >/dev/null 2>&1; then
+  echo "SKIP: nc is required to wait for test postgres" >&2
+  exit 77
+fi
+
 wait_for_port() {
   local host="$1" port="$2" timeout="${3:-30}"
   local deadline=$(( $(date +%s) + timeout ))

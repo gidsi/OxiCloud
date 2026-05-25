@@ -51,4 +51,22 @@ mod tests {
         assert!(dav_header.contains("calendar-access"));
         assert!(dav_header.contains("addressbook"));
     }
+
+    #[tokio::test]
+    async fn caldav_options_advertises_mkcalendar_support() {
+        let response = super::caldav_handler::handle_options()
+            .await
+            .expect("OPTIONS handler should build a response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let allow_header = response
+            .headers()
+            .get("allow")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+
+        // Must explicitly support and advertise creating calendars to external clients
+        assert!(allow_header.contains("MKCALENDAR"), "Server should advertise MKCALENDAR method support");
+    }
 }
