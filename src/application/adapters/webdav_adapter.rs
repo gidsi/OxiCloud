@@ -282,6 +282,16 @@ impl WebDavAdapter {
                         props.push(qname);
                     }
                 }
+                Ok(Event::DocType(_)) => {
+                    return Err(WebDavError::ParseError(
+                        "DOCTYPE declarations are not allowed in PROPFIND XML".to_string(),
+                    ));
+                }
+                Ok(Event::GeneralRef(_)) => {
+                    return Err(WebDavError::ParseError(
+                        "XML entity references are not allowed in PROPFIND XML".to_string(),
+                    ));
+                }
                 Ok(Event::Eof) => break,
                 Err(e) => return Err(WebDavError::XmlError(e)),
                 _ => (),

@@ -168,4 +168,38 @@ pub async fn rate_limit_refresh(
     }
 }
 
+pub async fn rate_limit_dav_discovery(
+    State(limiter): axum::extract::State<Arc<RateLimiter>>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&req);
+    match limiter.check_and_increment(&ip) {
+        Ok(_) => next.run(req).await,
+        Err(()) => {
+            tracing::warn!(ip = %ip, "Rate limit exceeded on DAV discovery endpoint");
+            too_many_requests(limiter.retry_after())
+        }
+    }
+}
+
+pub async fn rate_limit_dav_options(
+    State(limiter): axum::extract::State<Arc<RateLimiter>>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if req.method() != axum::http::Method::OPTIONS {
+        return next.run(req).await;
+    }
+
+    let ip = extract_client_ip(&req);
+    match limiter.check_and_increment(&ip) {
+        Ok(_) => next.run(req).await,
+        Err(()) => {
+            tracing::warn!(ip = %ip, "Rate limit exceeded on DAV OPTIONS endpoint");
+            too_many_requests(limiter.retry_after())
+        }
+    }
+}
+
 use axum::extract::State;

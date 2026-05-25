@@ -16,6 +16,7 @@ use crate::application::adapters::webdav_adapter::{
     PropFindRequest, PropFindType, QualifiedName, Result, WebDavAdapter, WebDavError,
 };
 use crate::application::dtos::calendar_dto::{CalendarDto, CalendarEventDto};
+use crate::application::dtos::dav_principal_dto::DavPrincipalHomeSetsDto;
 
 /// CalDAV report type
 #[derive(Debug, PartialEq)]
@@ -214,6 +215,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
 
@@ -251,8 +253,20 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
+
+        if base_href == "/caldav/" {
+            let home_sets = DavPrincipalHomeSetsDto {
+                user_id: Uuid::nil(),
+                username: String::new(),
+                principal_path: "/caldav/principals/".to_string(),
+                calendar_home_set_path: "/caldav/".to_string(),
+                addressbook_home_set_path: "/carddav/".to_string(),
+            };
+            Self::write_discovery_response(&mut xml_writer, request, base_href, &home_sets, false)?;
+        }
 
         // Add responses for calendars
         for calendar in calendars {
@@ -283,6 +297,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
 
@@ -316,6 +331,201 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::End(BytesEnd::new("D:response")))?;
         xml_writer.write_event(Event::End(BytesEnd::new("D:multistatus")))?;
 
+        Ok(())
+    }
+
+    pub fn generate_root_propfind_response_with_home_sets<W: Write>(
+        writer: W,
+        calendars: &[CalendarDto],
+        request: &PropFindRequest,
+        base_href: &str,
+        home_sets: &DavPrincipalHomeSetsDto,
+    ) -> Result<()> {
+        let mut xml_writer = Writer::new(writer);
+        Self::write_discovery_multistatus_start(&mut xml_writer)?;
+        Self::write_discovery_response(&mut xml_writer, request, base_href, home_sets, false)?;
+        for calendar in calendars {
+            Self::write_calendar_response(
+                &mut xml_writer,
+                calendar,
+                request,
+                &format!("{}{}/", base_href, calendar.id),
+            )?;
+        }
+        xml_writer.write_event(Event::End(BytesEnd::new("d:multistatus")))?;
+        Ok(())
+    }
+
+    pub fn generate_principal_propfind_response_with_home_sets<W: Write>(
+        writer: W,
+        request: &PropFindRequest,
+        home_sets: &DavPrincipalHomeSetsDto,
+    ) -> Result<()> {
+        let mut xml_writer = Writer::new(writer);
+        Self::write_discovery_multistatus_start(&mut xml_writer)?;
+        Self::write_discovery_response(
+            &mut xml_writer,
+            request,
+            &home_sets.principal_path,
+            home_sets,
+            true,
+        )?;
+        xml_writer.write_event(Event::End(BytesEnd::new("d:multistatus")))?;
+        Ok(())
+    }
+
+    fn write_discovery_multistatus_start<W: Write>(xml_writer: &mut Writer<W>) -> Result<()> {
+        xml_writer.write_event(Event::Start(
+            BytesStart::new("d:multistatus").with_attributes([
+                ("xmlns:d", "DAV:"),
+                ("xmlns:c", "urn:ietf:params:xml:ns:caldav"),
+                ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
+            ]),
+        ))?;
+        Ok(())
+    }
+
+    fn write_discovery_response<W: Write>(
+        xml_writer: &mut Writer<W>,
+        request: &PropFindRequest,
+        href: &str,
+        home_sets: &DavPrincipalHomeSetsDto,
+        include_principal_defaults: bool,
+    ) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new("d:response")))?;
+        Self::write_href(xml_writer, "d", href)?;
+        xml_writer.write_event(Event::Start(BytesStart::new("d:propstat")))?;
+        xml_writer.write_event(Event::Start(BytesStart::new("d:prop")))?;
+
+        match &request.prop_find_type {
+            PropFindType::AllProp => {
+                if include_principal_defaults {
+                    Self::write_discovery_resourcetype(xml_writer, true)?;
+                    Self::write_text_element(xml_writer, "d:displayname", &home_sets.username)?;
+                    Self::write_principal_url(
+                        xml_writer,
+                        "d:principal-URL",
+                        &home_sets.principal_path,
+                    )?;
+                } else {
+                    Self::write_discovery_resourcetype(xml_writer, false)?;
+                }
+                Self::write_principal_url(
+                    xml_writer,
+                    "d:current-user-principal",
+                    &home_sets.principal_path,
+                )?;
+                Self::write_principal_url(
+                    xml_writer,
+                    "c:calendar-home-set",
+                    &home_sets.calendar_home_set_path,
+                )?;
+                Self::write_principal_url(
+                    xml_writer,
+                    "card:addressbook-home-set",
+                    &home_sets.addressbook_home_set_path,
+                )?;
+            }
+            PropFindType::PropName => {
+                xml_writer
+                    .write_event(Event::Empty(BytesStart::new("d:current-user-principal")))?;
+                xml_writer.write_event(Event::Empty(BytesStart::new("c:calendar-home-set")))?;
+                xml_writer
+                    .write_event(Event::Empty(BytesStart::new("card:addressbook-home-set")))?;
+                if include_principal_defaults {
+                    xml_writer.write_event(Event::Empty(BytesStart::new("d:displayname")))?;
+                    xml_writer.write_event(Event::Empty(BytesStart::new("d:principal-URL")))?;
+                }
+            }
+            PropFindType::Prop(props) => {
+                for prop in props {
+                    match (prop.namespace.as_str(), prop.name.as_str()) {
+                        ("DAV:", "resourcetype") => Self::write_discovery_resourcetype(
+                            xml_writer,
+                            include_principal_defaults,
+                        )?,
+                        ("DAV:", "displayname") => Self::write_text_element(
+                            xml_writer,
+                            "d:displayname",
+                            &home_sets.username,
+                        )?,
+                        ("DAV:", "principal-URL") => Self::write_principal_url(
+                            xml_writer,
+                            "d:principal-URL",
+                            &home_sets.principal_path,
+                        )?,
+                        ("DAV:", "current-user-principal") => Self::write_principal_url(
+                            xml_writer,
+                            "d:current-user-principal",
+                            &home_sets.principal_path,
+                        )?,
+                        ("urn:ietf:params:xml:ns:caldav", "calendar-home-set") => {
+                            Self::write_principal_url(
+                                xml_writer,
+                                "c:calendar-home-set",
+                                &home_sets.calendar_home_set_path,
+                            )?
+                        }
+                        ("urn:ietf:params:xml:ns:carddav", "addressbook-home-set") => {
+                            Self::write_principal_url(
+                                xml_writer,
+                                "card:addressbook-home-set",
+                                &home_sets.addressbook_home_set_path,
+                            )?
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        xml_writer.write_event(Event::End(BytesEnd::new("d:prop")))?;
+        Self::write_text_element(xml_writer, "d:status", "HTTP/1.1 200 OK")?;
+        xml_writer.write_event(Event::End(BytesEnd::new("d:propstat")))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("d:response")))?;
+        Ok(())
+    }
+
+    fn write_href<W: Write>(xml_writer: &mut Writer<W>, prefix: &str, href: &str) -> Result<()> {
+        let name = format!("{prefix}:href");
+        xml_writer.write_event(Event::Start(BytesStart::new(&name)))?;
+        xml_writer.write_event(Event::Text(BytesText::new(href)))?;
+        xml_writer.write_event(Event::End(BytesEnd::new(&name)))?;
+        Ok(())
+    }
+
+    fn write_principal_url<W: Write>(
+        xml_writer: &mut Writer<W>,
+        element: &str,
+        href: &str,
+    ) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new(element)))?;
+        Self::write_href(xml_writer, "d", href)?;
+        xml_writer.write_event(Event::End(BytesEnd::new(element)))?;
+        Ok(())
+    }
+
+    fn write_text_element<W: Write>(
+        xml_writer: &mut Writer<W>,
+        element: &str,
+        text: &str,
+    ) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new(element)))?;
+        xml_writer.write_event(Event::Text(BytesText::new(text)))?;
+        xml_writer.write_event(Event::End(BytesEnd::new(element)))?;
+        Ok(())
+    }
+
+    fn write_discovery_resourcetype<W: Write>(
+        xml_writer: &mut Writer<W>,
+        principal: bool,
+    ) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new("d:resourcetype")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("d:collection")))?;
+        if principal {
+            xml_writer.write_event(Event::Empty(BytesStart::new("d:principal")))?;
+        }
+        xml_writer.write_event(Event::End(BytesEnd::new("d:resourcetype")))?;
         Ok(())
     }
 
@@ -362,12 +572,24 @@ impl CalDavAdapter {
                 ))))?;
                 xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
                 xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-home-set")))?;
+
+                xml_writer
+                    .write_event(Event::Start(BytesStart::new("card:addressbook-home-set")))?;
+                xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
+                xml_writer.write_event(Event::Text(BytesText::new(&format!(
+                    "/carddav/{}/",
+                    username
+                ))))?;
+                xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
+                xml_writer.write_event(Event::End(BytesEnd::new("card:addressbook-home-set")))?;
             }
             PropFindType::PropName => {
                 xml_writer.write_event(Event::Empty(BytesStart::new("D:resourcetype")))?;
                 xml_writer
                     .write_event(Event::Empty(BytesStart::new("D:current-user-principal")))?;
                 xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-home-set")))?;
+                xml_writer
+                    .write_event(Event::Empty(BytesStart::new("card:addressbook-home-set")))?;
             }
             PropFindType::Prop(props) => {
                 Self::write_root_requested_props(xml_writer, username, props)?;
@@ -421,6 +643,18 @@ impl CalDavAdapter {
                     xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
                     xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-home-set")))?;
                 }
+                ("urn:ietf:params:xml:ns:carddav", "addressbook-home-set") => {
+                    xml_writer
+                        .write_event(Event::Start(BytesStart::new("card:addressbook-home-set")))?;
+                    xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
+                    xml_writer.write_event(Event::Text(BytesText::new(&format!(
+                        "/carddav/{}/",
+                        username
+                    ))))?;
+                    xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
+                    xml_writer
+                        .write_event(Event::End(BytesEnd::new("card:addressbook-home-set")))?;
+                }
                 ("DAV:", "displayname") => {
                     xml_writer.write_event(Event::Start(BytesStart::new("D:displayname")))?;
                     xml_writer.write_event(Event::Text(BytesText::new("CalDAV Root")))?;
@@ -466,6 +700,26 @@ impl CalDavAdapter {
         ))))?;
         xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
         xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-home-set")))?;
+
+        // addressbook-home-set
+        xml_writer.write_event(Event::Start(BytesStart::new("card:addressbook-home-set")))?;
+        xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
+        xml_writer.write_event(Event::Text(BytesText::new(&format!(
+            "/carddav/{}/",
+            username
+        ))))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("card:addressbook-home-set")))?;
+
+        // principal-URL
+        xml_writer.write_event(Event::Start(BytesStart::new("D:principal-URL")))?;
+        xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
+        xml_writer.write_event(Event::Text(BytesText::new(&format!(
+            "/caldav/principals/{}/",
+            username
+        ))))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:principal-URL")))?;
 
         // current-user-principal (self-reference)
         xml_writer.write_event(Event::Start(BytesStart::new("D:current-user-principal")))?;
@@ -520,6 +774,28 @@ impl CalDavAdapter {
                     ))))?;
                     xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
                     xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-home-set")))?;
+                }
+                ("urn:ietf:params:xml:ns:carddav", "addressbook-home-set") => {
+                    xml_writer
+                        .write_event(Event::Start(BytesStart::new("card:addressbook-home-set")))?;
+                    xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
+                    xml_writer.write_event(Event::Text(BytesText::new(&format!(
+                        "/carddav/{}/",
+                        username
+                    ))))?;
+                    xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
+                    xml_writer
+                        .write_event(Event::End(BytesEnd::new("card:addressbook-home-set")))?;
+                }
+                ("DAV:", "principal-URL") => {
+                    xml_writer.write_event(Event::Start(BytesStart::new("D:principal-URL")))?;
+                    xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
+                    xml_writer.write_event(Event::Text(BytesText::new(&format!(
+                        "/caldav/principals/{}/",
+                        username
+                    ))))?;
+                    xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
+                    xml_writer.write_event(Event::End(BytesEnd::new("D:principal-URL")))?;
                 }
                 ("urn:ietf:params:xml:ns:caldav", "calendar-user-address-set") => {
                     xml_writer.write_event(Event::Start(BytesStart::new(
@@ -890,6 +1166,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
 
@@ -962,6 +1239,7 @@ impl CalDavAdapter {
                 ("xmlns:D", "DAV:"),
                 ("xmlns:C", "urn:ietf:params:xml:ns:caldav"),
                 ("xmlns:CS", "http://calendarserver.org/ns/"),
+                ("xmlns:card", "urn:ietf:params:xml:ns:carddav"),
             ]),
         ))?;
 

@@ -2,6 +2,7 @@ pub mod app_password;
 pub mod calendar;
 pub mod calendar_event;
 pub mod contact;
+pub mod dav_principal;
 pub mod device_code;
 pub mod entity_errors;
 pub mod file;
