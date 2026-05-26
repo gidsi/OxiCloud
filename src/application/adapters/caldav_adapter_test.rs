@@ -12,6 +12,7 @@ mod tests {
     fn sample_calendar() -> CalendarDto {
         CalendarDto {
             id: "cal-001".to_string(),
+            slug: "personal".to_string(),
             name: "Personal".to_string(),
             owner_id: "user-001".to_string(),
             description: Some("My personal calendar".to_string()),

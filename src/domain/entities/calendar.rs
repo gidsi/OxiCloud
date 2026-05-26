@@ -1,110 +1,112 @@
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use uuid::Uuid;
+
 /**
  * Calendar Entity
  *
  * This module defines the Calendar entity, which represents a calendar in the CalDAV
  * implementation. Calendars contain calendar events and are owned by users.
  *
- * Calendars have properties such as name, color, and description, and they serve as
- * containers for calendar events. Each calendar belongs to a specific user and can
- * have custom properties.
+ * Calendars have properties such as name, slug, color, description, supported
+ * components, and custom WebDAV/CalDAV dead properties.
  */
-use uuid::Uuid;
-
 use crate::common::errors::{DomainError, ErrorKind, Result};
 
 // Re-export entity errors from the centralized module
 pub use super::entity_errors::CalendarError;
 
-/**
- * Calendar entity.
- *
- * Represents a calendar container that can hold multiple calendar events.
- * Each calendar is owned by a user and has properties like name, color, and description.
- */
+pub const DAV_DISPLAYNAME_PROPERTY: &str = "{DAV:}displayname";
+pub const DAV_RESOURCETYPE_PROPERTY: &str = "{DAV:}resourcetype";
+pub const CALDAV_CALENDAR_DESCRIPTION_PROPERTY: &str =
+    "{urn:ietf:params:xml:ns:caldav}calendar-description";
+pub const CALDAV_SUPPORTED_COMPONENT_SET_PROPERTY: &str =
+    "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set";
+pub const APPLE_CALENDAR_COLOR_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-color";
+
+const DEFAULT_SUPPORTED_COMPONENT: &str = "VEVENT";
+
 #[derive(Debug, Clone)]
 pub struct Calendar {
-    /// Unique identifier for the calendar
     id: Uuid,
-
-    /// Display name of the calendar
+    slug: String,
     name: String,
-
-    /// ID of the user who owns this calendar
     owner_id: Uuid,
-
-    /// Optional description of the calendar
     description: Option<String>,
-
-    /// Optional color code for UI display (hex format #RRGGBB)
     color: Option<String>,
-
-    /// Time when the calendar was created
+    is_public: bool,
+    supported_components: Vec<String>,
     created_at: DateTime<Utc>,
-
-    /// Time when the calendar was last modified
     updated_at: DateTime<Utc>,
-
-    /// Optional list of custom properties (for extended CalDAV support)
-    custom_properties: std::collections::HashMap<String, String>,
+    custom_properties: HashMap<String, String>,
 }
 
 impl Calendar {
-    /**
-     * Creates a new calendar with the given properties.
-     *
-     * @param name Display name of the calendar
-     * @param owner_id ID of the user who owns this calendar
-     * @param description Optional description of the calendar
-     * @param color Optional color code for UI display (#RRGGBB format)
-     * @return Result containing the new Calendar or a domain error
-     */
     pub fn new(
         name: String,
         owner_id: Uuid,
         description: Option<String>,
         color: Option<String>,
     ) -> Result<Self> {
-        // Validate inputs
-        if name.is_empty() {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "Calendar",
-                "Calendar name cannot be empty",
-            ));
-        }
+        let slug = Self::slug_from_name(&name);
+        Self::new_with_slug(
+            name,
+            slug,
+            owner_id,
+            description,
+            color,
+            false,
+            None,
+            HashMap::new(),
+        )
+    }
+
+    pub fn new_with_slug(
+        name: String,
+        slug: String,
+        owner_id: Uuid,
+        description: Option<String>,
+        color: Option<String>,
+        is_public: bool,
+        supported_components: Option<Vec<String>>,
+        custom_properties: HashMap<String, String>,
+    ) -> Result<Self> {
+        let name = Self::normalize_name(name)?;
+        let slug = Self::normalize_slug(slug)?;
 
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
         }
 
+        let supported_components = Self::normalize_supported_components(
+            supported_components.unwrap_or_else(|| vec![DEFAULT_SUPPORTED_COMPONENT.to_string()]),
+        )?;
+
         let now = Utc::now();
 
-        Ok(Self {
+        let mut calendar = Self {
             id: Uuid::new_v4(),
+            slug,
             name,
             owner_id,
             description,
             color,
+            is_public,
+            supported_components,
             created_at: now,
             updated_at: now,
-            custom_properties: std::collections::HashMap::new(),
-        })
+            custom_properties: HashMap::new(),
+        };
+
+        calendar.refresh_standard_properties();
+
+        for (property_name, property_value) in custom_properties {
+            calendar.set_custom_property(property_name, property_value)?;
+        }
+
+        Ok(calendar)
     }
 
-    /**
-     * Creates a calendar with specific ID and timestamps.
-     * Typically used when reconstructing from storage.
-     *
-     * @param id Unique identifier for the calendar
-     * @param name Display name of the calendar
-     * @param owner_id ID of the user who owns this calendar
-     * @param description Optional description of the calendar
-     * @param color Optional color code for UI display
-     * @param created_at Time when the calendar was created
-     * @param updated_at Time when the calendar was last modified
-     * @return Result containing the new Calendar or a domain error
-     */
     pub fn with_id(
         id: Uuid,
         name: String,
@@ -114,128 +116,281 @@ impl Calendar {
         created_at: DateTime<Utc>,
         updated_at: DateTime<Utc>,
     ) -> Result<Self> {
-        // Basic validation
-        if name.is_empty() {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "Calendar",
-                "Calendar name cannot be empty",
-            ));
-        }
+        let slug = Self::slug_from_name(&name);
+        Self::with_id_and_details(
+            id,
+            name,
+            slug,
+            owner_id,
+            description,
+            color,
+            false,
+            vec![DEFAULT_SUPPORTED_COMPONENT.to_string()],
+            created_at,
+            updated_at,
+            HashMap::new(),
+        )
+    }
+
+    pub fn with_id_and_details(
+        id: Uuid,
+        name: String,
+        slug: String,
+        owner_id: Uuid,
+        description: Option<String>,
+        color: Option<String>,
+        is_public: bool,
+        supported_components: Vec<String>,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+        custom_properties: HashMap<String, String>,
+    ) -> Result<Self> {
+        let name = Self::normalize_name(name)?;
+        let slug = Self::normalize_slug(slug)?;
 
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
         }
 
-        Ok(Self {
+        let supported_components = Self::normalize_supported_components(supported_components)?;
+
+        let mut calendar = Self {
             id,
+            slug,
             name,
             owner_id,
             description,
             color,
+            is_public,
+            supported_components,
             created_at,
             updated_at,
-            custom_properties: std::collections::HashMap::new(),
-        })
+            custom_properties: HashMap::new(),
+        };
+
+        calendar.refresh_standard_properties();
+
+        for (property_name, property_value) in custom_properties {
+            calendar.set_custom_property_without_touch(property_name, property_value)?;
+        }
+
+        Ok(calendar)
     }
 
-    // Getters
-
-    /// Returns the calendar's unique identifier
     pub fn id(&self) -> &Uuid {
         &self.id
     }
 
-    /// Returns the calendar's display name
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the ID of the user who owns this calendar
     pub fn owner_id(&self) -> &Uuid {
         &self.owner_id
     }
 
-    /// Returns the calendar's description, if any
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
 
-    /// Returns the calendar's color code, if any
     pub fn color(&self) -> Option<&str> {
         self.color.as_deref()
     }
 
-    /// Returns the time when the calendar was created
+    pub fn is_public(&self) -> bool {
+        self.is_public
+    }
+
+    pub fn supported_components(&self) -> &[String] {
+        &self.supported_components
+    }
+
     pub fn created_at(&self) -> &DateTime<Utc> {
         &self.created_at
     }
 
-    /// Returns the time when the calendar was last modified
     pub fn updated_at(&self) -> &DateTime<Utc> {
         &self.updated_at
     }
 
-    /// Returns a custom property value by name, if it exists
     pub fn custom_property(&self, name: &str) -> Option<&str> {
         self.custom_properties.get(name).map(|s| s.as_str())
     }
 
-    /// Returns all custom properties
-    pub fn custom_properties(&self) -> &std::collections::HashMap<String, String> {
+    pub fn custom_properties(&self) -> &HashMap<String, String> {
         &self.custom_properties
     }
 
-    // Setters and Mutators
-
-    /**
-     * Updates the calendar's name.
-     *
-     * @param name New display name for the calendar
-     * @return Result indicating success or containing a domain error
-     */
-    pub fn update_name(&mut self, name: String) -> Result<()> {
-        if name.is_empty() {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "Calendar",
-                "Calendar name cannot be empty",
-            ));
-        }
-
-        self.name = name;
+    pub fn update_slug(&mut self, slug: String) -> Result<()> {
+        self.slug = Self::normalize_slug(slug)?;
         self.updated_at = Utc::now();
         Ok(())
     }
 
-    /**
-     * Updates the calendar's description.
-     *
-     * @param description New description for the calendar
-     */
+    pub fn update_name(&mut self, name: String) -> Result<()> {
+        self.name = Self::normalize_name(name)?;
+        self.refresh_standard_properties();
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
     pub fn update_description(&mut self, description: Option<String>) {
         self.description = description;
+        self.refresh_standard_properties();
         self.updated_at = Utc::now();
     }
 
-    /**
-     * Updates the calendar's color.
-     *
-     * @param color New color code for the calendar
-     * @return Result indicating success or containing a domain error
-     */
     pub fn update_color(&mut self, color: Option<String>) -> Result<()> {
-        // Validate color format if provided
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
         }
 
         self.color = color;
+        self.refresh_standard_properties();
         self.updated_at = Utc::now();
         Ok(())
     }
 
-    /// Validate a calendar color
+    pub fn update_public_visibility(&mut self, is_public: bool) {
+        self.is_public = is_public;
+        self.updated_at = Utc::now();
+    }
+
+    pub fn update_supported_components(&mut self, supported_components: Vec<String>) -> Result<()> {
+        self.supported_components = Self::normalize_supported_components(supported_components)?;
+        self.refresh_standard_properties();
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    pub fn set_custom_property(&mut self, name: String, value: String) -> Result<()> {
+        self.set_custom_property_without_touch(name, value)?;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    pub fn remove_custom_property(&mut self, name: &str) -> bool {
+        let result = self.custom_properties.remove(name).is_some();
+        if result {
+            self.updated_at = Utc::now();
+        }
+        result
+    }
+
+    pub fn belongs_to(&self, user_id: &Uuid) -> bool {
+        self.owner_id == *user_id
+    }
+
+    pub fn touch(&mut self) {
+        self.updated_at = Utc::now();
+    }
+
+    pub fn slug_from_name(name: &str) -> String {
+        let mut slug = String::with_capacity(name.len());
+        let mut previous_dash = false;
+
+        for ch in name.trim().chars() {
+            let mapped = if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '~') {
+                previous_dash = false;
+                Some(ch.to_ascii_lowercase())
+            } else if ch == '-' || ch.is_whitespace() {
+                if previous_dash {
+                    None
+                } else {
+                    previous_dash = true;
+                    Some('-')
+                }
+            } else if previous_dash {
+                None
+            } else {
+                previous_dash = true;
+                Some('-')
+            };
+
+            if let Some(mapped) = mapped {
+                slug.push(mapped);
+            }
+        }
+
+        let slug = slug.trim_matches('-').to_string();
+
+        if slug.is_empty() {
+            format!("calendar-{}", Uuid::new_v4())
+        } else {
+            slug
+        }
+    }
+
+    fn normalize_name(name: String) -> Result<String> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar name cannot be empty",
+            ));
+        }
+        Ok(name)
+    }
+
+    fn normalize_slug(slug: String) -> Result<String> {
+        let slug = slug.trim().trim_matches('/').to_string();
+
+        if slug.is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar slug cannot be empty",
+            ));
+        }
+
+        if slug == "." || slug == ".." || slug.contains('/') {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar slug must not contain path segments",
+            ));
+        }
+
+        Ok(slug)
+    }
+
+    fn normalize_supported_components(components: Vec<String>) -> Result<Vec<String>> {
+        let mut normalized = Vec::new();
+
+        for component in components {
+            let component = component.trim().to_ascii_uppercase();
+            if component.is_empty() {
+                continue;
+            }
+
+            if component
+                .chars()
+                .any(|ch| !ch.is_ascii_alphanumeric() && ch != '-')
+            {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "Calendar",
+                    "Supported calendar component names must be ASCII alphanumeric values",
+                ));
+            }
+
+            if !normalized.iter().any(|existing| existing == &component) {
+                normalized.push(component);
+            }
+        }
+
+        if normalized.is_empty() {
+            normalized.push(DEFAULT_SUPPORTED_COMPONENT.to_string());
+        }
+
+        Ok(normalized)
+    }
+
     fn validate_color(color: &str) -> Result<()> {
         if !color.starts_with('#')
             || !(color.len() == 7 || color.len() == 9)
@@ -250,47 +405,55 @@ impl Calendar {
         Ok(())
     }
 
-    /**
-     * Sets a custom property for extended CalDAV support.
-     *
-     * @param name Name of the property
-     * @param value Value of the property
-     */
-    pub fn set_custom_property(&mut self, name: String, value: String) {
-        self.custom_properties.insert(name, value);
-        self.updated_at = Utc::now();
-    }
-
-    /**
-     * Removes a custom property.
-     *
-     * @param name Name of the property to remove
-     * @return true if the property was removed, false if it didn't exist
-     */
-    pub fn remove_custom_property(&mut self, name: &str) -> bool {
-        let result = self.custom_properties.remove(name).is_some();
-        if result {
-            self.updated_at = Utc::now();
+    fn set_custom_property_without_touch(&mut self, name: String, value: String) -> Result<()> {
+        if name.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar property name cannot be empty",
+            ));
         }
-        result
+
+        self.custom_properties.insert(name, value);
+        Ok(())
     }
 
-    /**
-     * Checks if this calendar belongs to the specified user.
-     *
-     * @param user_id ID of the user to check ownership against
-     * @return true if the calendar belongs to the user, false otherwise
-     */
-    pub fn belongs_to(&self, user_id: &Uuid) -> bool {
-        self.owner_id == *user_id
-    }
+    fn refresh_standard_properties(&mut self) {
+        self.custom_properties
+            .insert(DAV_DISPLAYNAME_PROPERTY.to_string(), self.name.clone());
 
-    /**
-     * Updates the last modification time of the calendar to now.
-     * Called when calendar events are added, modified, or removed.
-     */
-    pub fn touch(&mut self) {
-        self.updated_at = Utc::now();
+        self.custom_properties.insert(
+            DAV_RESOURCETYPE_PROPERTY.to_string(),
+            "collection,calendar".to_string(),
+        );
+
+        self.custom_properties.insert(
+            CALDAV_SUPPORTED_COMPONENT_SET_PROPERTY.to_string(),
+            self.supported_components.join(","),
+        );
+
+        match &self.description {
+            Some(description) => {
+                self.custom_properties.insert(
+                    CALDAV_CALENDAR_DESCRIPTION_PROPERTY.to_string(),
+                    description.clone(),
+                );
+            }
+            None => {
+                self.custom_properties
+                    .remove(CALDAV_CALENDAR_DESCRIPTION_PROPERTY);
+            }
+        }
+
+        match &self.color {
+            Some(color) => {
+                self.custom_properties
+                    .insert(APPLE_CALENDAR_COLOR_PROPERTY.to_string(), color.clone());
+            }
+            None => {
+                self.custom_properties.remove(APPLE_CALENDAR_COLOR_PROPERTY);
+            }
+        }
     }
 }
 
@@ -306,6 +469,43 @@ mod tests {
     }
 
     #[test]
+    fn test_init_with_explicit_slug() {
+        let owner_id = Uuid::new_v4();
+        let res = Calendar::new_with_slug(
+            "Work Calendar".to_string(),
+            "work".to_string(),
+            owner_id,
+            Some("Work schedule".to_string()),
+            Some("#84FFa9".to_string()),
+            false,
+            Some(vec!["VEVENT".to_string()]),
+            HashMap::new(),
+        );
+
+        assert!(res.is_ok());
+        let calendar = res.unwrap();
+        assert_eq!(calendar.slug(), "work");
+        assert_eq!(calendar.name(), "Work Calendar");
+        assert_eq!(calendar.description(), Some("Work schedule"));
+        assert_eq!(calendar.color(), Some("#84FFa9"));
+        assert_eq!(calendar.supported_components(), &["VEVENT".to_string()]);
+        assert_eq!(
+            calendar.custom_property(DAV_RESOURCETYPE_PROPERTY),
+            Some("collection,calendar")
+        );
+    }
+
+    #[test]
+    fn test_slug_from_name() {
+        assert_eq!(Calendar::slug_from_name("Work Calendar"), "work-calendar");
+        assert_eq!(
+            Calendar::slug_from_name("  Personal.Calendar  "),
+            "personal.calendar"
+        );
+        assert_eq!(Calendar::slug_from_name("A/B C"), "a-b-c");
+    }
+
+    #[test]
     fn test_init_color_rgb() {
         let owner_id = Uuid::new_v4();
         let res = Calendar::new(
@@ -317,7 +517,6 @@ mod tests {
         assert!(res.is_ok());
     }
 
-    /// Format as used by the android DAVx app
     #[test]
     fn test_init_color_rgba() {
         let owner_id = Uuid::new_v4();
@@ -345,6 +544,38 @@ mod tests {
             owner_id,
             None,
             Some("#xxjjff".to_string()),
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_rejects_empty_slug() {
+        let owner_id = Uuid::new_v4();
+        let res = Calendar::new_with_slug(
+            "Name".to_string(),
+            " ".to_string(),
+            owner_id,
+            None,
+            None,
+            false,
+            None,
+            HashMap::new(),
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_rejects_path_segment_slug() {
+        let owner_id = Uuid::new_v4();
+        let res = Calendar::new_with_slug(
+            "Name".to_string(),
+            "../bad".to_string(),
+            owner_id,
+            None,
+            None,
+            false,
+            None,
+            HashMap::new(),
         );
         assert!(res.is_err());
     }

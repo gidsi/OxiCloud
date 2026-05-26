@@ -42,14 +42,24 @@ impl CalendarStorageAdapter {
 }
 
 impl CalendarStoragePort for CalendarStorageAdapter {
-    // Calendar operations
-
     async fn create_calendar(
         &self,
         dto: CreateCalendarDto,
         owner_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        let calendar = Calendar::new(dto.name, owner_id, dto.description, dto.color)?;
+        let calendar = match dto.slug {
+            Some(slug) => Calendar::new_with_slug(
+                dto.name,
+                slug,
+                owner_id,
+                dto.description,
+                dto.color,
+                dto.is_public.unwrap_or(false),
+                None,
+                HashMap::new(),
+            )?,
+            None => Calendar::new(dto.name, owner_id, dto.description, dto.color)?,
+        };
 
         let created = self.calendar_repository.create_calendar(calendar).await?;
         Ok(CalendarDto::from(created))
@@ -70,6 +80,9 @@ impl CalendarStoragePort for CalendarStorageAdapter {
 
         let mut calendar = self.calendar_repository.find_calendar_by_id(&uuid).await?;
 
+        if let Some(slug) = update.slug {
+            calendar.update_slug(slug)?;
+        }
         if let Some(name) = update.name {
             calendar.update_name(name)?;
         }
@@ -78,6 +91,9 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         }
         if let Some(color) = update.color {
             calendar.update_color(Some(color))?;
+        }
+        if let Some(is_public) = update.is_public {
+            calendar.update_public_visibility(is_public);
         }
 
         let updated = self.calendar_repository.update_calendar(calendar).await?;
@@ -93,12 +109,10 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        // First delete all events in the calendar
         self.event_repository
             .delete_all_events_in_calendar(&uuid)
             .await?;
 
-        // Then delete the calendar itself
         self.calendar_repository.delete_calendar(&uuid).await
     }
 
@@ -123,6 +137,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .list_calendars_by_owner(owner_id)
             .await?;
+
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
@@ -134,6 +149,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .list_calendars_shared_with_user(user_id)
             .await?;
+
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
@@ -146,6 +162,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .list_public_calendars(limit, offset)
             .await?;
+
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
@@ -166,8 +183,6 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .user_has_calendar_access(&uuid, user_id)
             .await
     }
-
-    // Calendar sharing
 
     async fn share_calendar(
         &self,
@@ -220,8 +235,6 @@ impl CalendarStoragePort for CalendarStorageAdapter {
 
         self.calendar_repository.get_calendar_shares(&uuid).await
     }
-
-    // Calendar properties
 
     async fn set_calendar_property(
         &self,
@@ -277,8 +290,6 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .await
     }
 
-    // Event operations
-
     async fn create_event(&self, dto: CreateEventDto) -> Result<CalendarEventDto, DomainError> {
         let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
             DomainError::new(
@@ -288,13 +299,11 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        // Verify calendar exists and user has access
         let _calendar = self
             .calendar_repository
             .find_calendar_by_id(&calendar_id)
             .await?;
 
-        // Generate basic iCal data
         let ical_data = format!(
             "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OxiCloud//EN\nBEGIN:VEVENT\nUID:{}@oxicloud\nDTSTAMP:{}\nDTSTART:{}\nDTEND:{}\nSUMMARY:{}\nEND:VEVENT\nEND:VCALENDAR",
             uuid::Uuid::new_v4(),
@@ -332,13 +341,11 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        // Verify calendar exists
         let _calendar = self
             .calendar_repository
             .find_calendar_by_id(&calendar_id)
             .await?;
 
-        // Parse iCal data and create event
         let event = CalendarEvent::from_ical(calendar_id, dto.ical_data.clone())?;
 
         let created = self.event_repository.create_event(event).await?;
@@ -436,6 +443,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .event_repository
             .list_events_by_calendar_paginated(&uuid, limit, offset)
             .await?;
+
         Ok(events.into_iter().map(CalendarEventDto::from).collect())
     }
 
@@ -457,11 +465,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .event_repository
             .get_events_in_time_range(&uuid, start, end)
             .await?;
+
         Ok(events.into_iter().map(CalendarEventDto::from).collect())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    // Tests would go here using mock repositories
 }

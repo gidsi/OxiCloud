@@ -604,19 +604,27 @@ async fn handle_mkcalendar(
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
 
+    let effective_path = path.trim_matches('/');
+    let slug_segment = effective_path
+        .split('/')
+        .next_back()
+        .filter(|segment| !segment.is_empty())
+        .ok_or_else(|| AppError::bad_request("Calendar slug required in path"))?;
+
+    let slug = percent_decode_str(slug_segment)
+        .decode_utf8()
+        .map_err(|e| AppError::bad_request(format!("Invalid calendar slug encoding: {}", e)))?
+        .to_string();
+
     let (name, description, color) = if body_bytes.is_empty() {
-        let name = path
-            .split('/')
-            .next_back()
-            .unwrap_or("New Calendar")
-            .to_string();
-        (name, None, None)
+        (slug.clone(), None, None)
     } else {
         CalDavAdapter::parse_mkcalendar(body_bytes.reader())
             .map_err(|e| AppError::bad_request(format!("Failed to parse MKCALENDAR: {}", e)))?
     };
 
     let create_dto = CreateCalendarDto {
+        slug: Some(slug.clone()),
         name,
         description,
         color,
@@ -626,7 +634,7 @@ async fn handle_mkcalendar(
     calendar_service
         .create_calendar(create_dto, user.id)
         .await
-        .map_err(|e| AppError::internal_error(format!("Failed to create calendar: {}", e)))?;
+        .map_err(AppError::from)?;
 
     Ok(Response::builder()
         .status(StatusCode::CREATED)
@@ -918,6 +926,7 @@ async fn handle_proppatch(
     }
 
     let mut update = UpdateCalendarDto {
+        slug: None,
         name: None,
         description: None,
         color: None,
