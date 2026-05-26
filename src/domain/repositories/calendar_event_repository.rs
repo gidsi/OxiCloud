@@ -11,6 +11,20 @@ pub enum CalendarEventReplaceResult {
     PreconditionFailed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CalendarEventDeleteCondition {
+    None,
+    IfMatchAny,
+    IfMatch(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CalendarEventDeleteResult {
+    Deleted,
+    NotFound,
+    PreconditionFailed,
+}
+
 pub trait CalendarEventRepository: Send + Sync + 'static {
     async fn create_event(
         &self,
@@ -39,6 +53,13 @@ pub trait CalendarEventRepository: Send + Sync + 'static {
     ) -> CalendarEventRepositoryResult<CalendarEventReplaceResult>;
 
     async fn delete_event(&self, id: &Uuid) -> CalendarEventRepositoryResult<()>;
+
+    async fn delete_event_by_resource_name(
+        &self,
+        calendar_id: &Uuid,
+        resource_name: &str,
+        condition: CalendarEventDeleteCondition,
+    ) -> CalendarEventRepositoryResult<CalendarEventDeleteResult>;
 
     async fn find_event_by_id(&self, id: &Uuid) -> CalendarEventRepositoryResult<CalendarEvent>;
 

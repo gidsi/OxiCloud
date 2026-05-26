@@ -380,6 +380,14 @@ impl CalendarEvent {
         &self.etag
     }
 
+    pub fn etag_matches(&self, etag: &str) -> bool {
+        self.etag == etag
+    }
+
+    pub fn etag_matches_any(&self, etags: &[String]) -> bool {
+        etags.iter().any(|etag| self.etag_matches(etag))
+    }
+
     pub fn quoted_etag(&self) -> String {
         format!("\"{}\"", self.etag)
     }

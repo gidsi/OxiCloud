@@ -1,6 +1,7 @@
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CalendarObjectPutResultDto, CreateCalendarDto, CreateEventDto,
-    CreateEventICalDto, PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
+    CalendarDto, CalendarEventDto, CalendarObjectDeleteResultDto, CalendarObjectPutResultDto,
+    CreateCalendarDto, CreateEventDto, CreateEventICalDto, DeleteCalendarObjectDto,
+    PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::common::errors::DomainError;
 use chrono::{DateTime, Utc};
@@ -99,6 +100,11 @@ pub trait CalendarStoragePort: Send + Sync + 'static {
         &self,
         put: PutCalendarObjectDto,
     ) -> Result<CalendarObjectPutResultDto, DomainError>;
+
+    async fn delete_calendar_object(
+        &self,
+        dto: DeleteCalendarObjectDto,
+    ) -> Result<CalendarObjectDeleteResultDto, DomainError>;
 
     async fn update_event(
         &self,
@@ -213,6 +219,12 @@ pub trait CalendarUseCase: Send + Sync + 'static {
         put: PutCalendarObjectDto,
         user_id: Uuid,
     ) -> Result<CalendarObjectPutResultDto, DomainError>;
+
+    async fn delete_calendar_object(
+        &self,
+        dto: DeleteCalendarObjectDto,
+        user_id: Uuid,
+    ) -> Result<CalendarObjectDeleteResultDto, DomainError>;
 
     async fn update_event(
         &self,

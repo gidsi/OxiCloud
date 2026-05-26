@@ -146,9 +146,7 @@ async fn test_well_known_caldav_redirect_app_oneshot_integration() {
         "Expected CalDAV discovery to redirect to the existing OxiCloud CalDAV root"
     );
 
-    let body = body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
+    let body = body::to_bytes(response.into_body(), 1024).await.unwrap();
 
     assert!(
         body.is_empty(),

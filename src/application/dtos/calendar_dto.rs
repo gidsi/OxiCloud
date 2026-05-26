@@ -191,6 +191,32 @@ pub struct CalendarObjectPutResultDto {
     pub event: CalendarEventDto,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum CalendarObjectDeleteConditionDto {
+    None,
+    IfMatchAny,
+    IfMatch(Vec<String>),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DeleteCalendarObjectDto {
+    pub calendar_id: String,
+    pub resource_name: String,
+    pub condition: CalendarObjectDeleteConditionDto,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum CalendarObjectDeleteStatusDto {
+    Deleted,
+    NotFound,
+    PreconditionFailed,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CalendarObjectDeleteResultDto {
+    pub status: CalendarObjectDeleteStatusDto,
+}
+
 /// DTO for calendar event creation with structured data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateEventDto {

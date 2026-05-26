@@ -29,8 +29,9 @@ use std::sync::Arc;
 use crate::application::adapters::caldav_adapter::{CalDavAdapter, CalDavReportType};
 use crate::application::adapters::webdav_adapter::{PropFindRequest, PropFindType};
 use crate::application::dtos::calendar_dto::{
-    CalendarObjectPutConditionDto, CalendarObjectPutStatusDto, CreateCalendarDto,
-    PutCalendarObjectDto, UpdateCalendarDto,
+    CalendarObjectDeleteConditionDto, CalendarObjectDeleteStatusDto, CalendarObjectPutConditionDto,
+    CalendarObjectPutStatusDto, CreateCalendarDto, DeleteCalendarObjectDto, PutCalendarObjectDto,
+    UpdateCalendarDto,
 };
 use crate::application::ports::calendar_ports::CalendarUseCase;
 use crate::application::ports::dav_principal_ports::DavPrincipalDiscoveryUseCase;
@@ -1030,44 +1031,86 @@ async fn handle_delete(
 ) -> Result<Response<Body>, AppError> {
     let user = extract_user(&req)?;
     let calendar_service = get_calendar_service(&state)?;
+    let condition = delete_condition_from_headers(req.headers())?;
 
-    let effective_path = strip_username_prefix(path);
-    let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
-    let calendar_id = parts[0];
+    let (calendar_key, resource_name) = parse_calendar_object_path(path)?;
 
-    if calendar_id.is_empty() {
-        return Err(AppError::bad_request("Calendar ID required"));
-    }
-
-    if parts.len() < 2 {
-        calendar_service
-            .delete_calendar(calendar_id, user.id)
-            .await
-            .map_err(|e| AppError::internal_error(format!("Failed to delete calendar: {}", e)))?;
+    let calendar_id = if uuid::Uuid::parse_str(&calendar_key).is_ok() {
+        calendar_key
     } else {
-        let event_file = parts[1];
-        let ical_uid = event_file.trim_end_matches(".ics");
-
-        let events = calendar_service
-            .list_events(calendar_id, None, None, user.id)
-            .await
-            .map_err(|e| AppError::internal_error(format!("Failed to list events: {}", e)))?;
-
-        let event = events
-            .iter()
-            .find(|e| e.ical_uid == ical_uid)
-            .ok_or_else(|| AppError::not_found(format!("Event not found: {}", ical_uid)))?;
-
         calendar_service
-            .delete_event(&event.id, user.id)
+            .find_calendar_by_slug_for_owner(&calendar_key, user.id)
             .await
-            .map_err(|e| AppError::internal_error(format!("Failed to delete event: {}", e)))?;
-    }
+            .map_err(AppError::from)?
+            .id
+    };
+
+    let result = calendar_service
+        .delete_calendar_object(
+            DeleteCalendarObjectDto {
+                calendar_id,
+                resource_name,
+                condition,
+            },
+            user.id,
+        )
+        .await
+        .map_err(AppError::from)?;
+
+    let status = match result.status {
+        CalendarObjectDeleteStatusDto::Deleted => StatusCode::NO_CONTENT,
+        CalendarObjectDeleteStatusDto::NotFound => StatusCode::NOT_FOUND,
+        CalendarObjectDeleteStatusDto::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
+    };
 
     Ok(Response::builder()
-        .status(StatusCode::NO_CONTENT)
+        .status(status)
         .body(Body::empty())
         .unwrap())
+}
+
+fn delete_condition_from_headers(
+    headers: &HeaderMap,
+) -> Result<CalendarObjectDeleteConditionDto, AppError> {
+    let Some(if_match) = headers.get(header::IF_MATCH) else {
+        return Ok(CalendarObjectDeleteConditionDto::None);
+    };
+
+    let value = if_match
+        .to_str()
+        .map_err(|_| AppError::bad_request("Invalid If-Match header"))?
+        .trim();
+
+    if value == "*" {
+        return Ok(CalendarObjectDeleteConditionDto::IfMatchAny);
+    }
+
+    let mut etags = Vec::new();
+    for raw in value.split(',') {
+        let candidate = raw.trim();
+        if candidate.starts_with("W/") {
+            return Err(AppError::precondition_failed(
+                "Weak ETags are not valid for CalDAV If-Match",
+            ));
+        }
+
+        let etag = candidate
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .ok_or_else(|| AppError::bad_request("If-Match ETags must be quoted or *"))?;
+
+        if etag.is_empty() {
+            return Err(AppError::bad_request("If-Match ETag must not be empty"));
+        }
+
+        etags.push(etag.to_string());
+    }
+
+    if etags.is_empty() {
+        return Err(AppError::bad_request("If-Match header must not be empty"));
+    }
+
+    Ok(CalendarObjectDeleteConditionDto::IfMatch(etags))
 }
 
 // ─── PROPPATCH ───────────────────────────────────────────────────────

@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::common::errors::DomainError;
 use crate::domain::entities::calendar_event::CalendarEvent;
 use crate::domain::repositories::calendar_event_repository::{
-    CalendarEventReplaceResult, CalendarEventRepository, CalendarEventRepositoryResult,
+    CalendarEventDeleteCondition, CalendarEventDeleteResult, CalendarEventReplaceResult,
+    CalendarEventRepository, CalendarEventRepositoryResult,
 };
 
 pub struct CalendarEventPgRepository {
@@ -258,6 +259,67 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         })?;
 
         Ok(())
+    }
+
+    async fn delete_event_by_resource_name(
+        &self,
+        calendar_id: &Uuid,
+        resource_name: &str,
+        condition: CalendarEventDeleteCondition,
+    ) -> CalendarEventRepositoryResult<CalendarEventDeleteResult> {
+        let rows_affected = match &condition {
+            CalendarEventDeleteCondition::None | CalendarEventDeleteCondition::IfMatchAny => {
+                sqlx::query(
+                    r#"
+                    DELETE FROM caldav.calendar_events
+                    WHERE calendar_id = $1
+                      AND resource_name = $2
+                    "#,
+                )
+                .bind(calendar_id)
+                .bind(resource_name)
+                .execute(&*self.pool)
+                .await
+                .map_err(|e| {
+                    DomainError::database_error(format!(
+                        "Failed to delete calendar event by resource name: {}",
+                        e
+                    ))
+                })?
+                .rows_affected()
+            }
+            CalendarEventDeleteCondition::IfMatch(etags) => sqlx::query(
+                r#"
+                    DELETE FROM caldav.calendar_events
+                    WHERE calendar_id = $1
+                      AND resource_name = $2
+                      AND etag = ANY($3::varchar[])
+                    "#,
+            )
+            .bind(calendar_id)
+            .bind(resource_name)
+            .bind(etags.as_slice())
+            .execute(&*self.pool)
+            .await
+            .map_err(|e| {
+                DomainError::database_error(format!(
+                    "Failed to delete calendar event by resource name and ETag: {}",
+                    e
+                ))
+            })?
+            .rows_affected(),
+        };
+
+        if rows_affected > 0 {
+            return Ok(CalendarEventDeleteResult::Deleted);
+        }
+
+        Ok(match &condition {
+            CalendarEventDeleteCondition::None => CalendarEventDeleteResult::NotFound,
+            CalendarEventDeleteCondition::IfMatchAny | CalendarEventDeleteCondition::IfMatch(_) => {
+                CalendarEventDeleteResult::PreconditionFailed
+            }
+        })
     }
 
     async fn find_event_by_id(&self, id: &Uuid) -> CalendarEventRepositoryResult<CalendarEvent> {

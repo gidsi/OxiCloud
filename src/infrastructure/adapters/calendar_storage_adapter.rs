@@ -10,16 +10,18 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CalendarObjectPutConditionDto, CalendarObjectPutResultDto,
+    CalendarDto, CalendarEventDto, CalendarObjectDeleteConditionDto, CalendarObjectDeleteResultDto,
+    CalendarObjectDeleteStatusDto, CalendarObjectPutConditionDto, CalendarObjectPutResultDto,
     CalendarObjectPutStatusDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
-    PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
+    DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::CalendarStoragePort;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::calendar::Calendar;
 use crate::domain::entities::calendar_event::CalendarEvent;
 use crate::domain::repositories::calendar_event_repository::{
-    CalendarEventReplaceResult, CalendarEventRepository,
+    CalendarEventDeleteCondition, CalendarEventDeleteResult, CalendarEventReplaceResult,
+    CalendarEventRepository,
 };
 use crate::domain::repositories::calendar_repository::CalendarRepository;
 use crate::infrastructure::repositories::pg::CalendarEventPgRepository;
@@ -564,6 +566,44 @@ impl CalendarStoragePort for CalendarStorageAdapter {
                 }
             }
         }
+    }
+
+    async fn delete_calendar_object(
+        &self,
+        dto: DeleteCalendarObjectDto,
+    ) -> Result<CalendarObjectDeleteResultDto, DomainError> {
+        let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarObject",
+                "Invalid calendar ID format",
+            )
+        })?;
+
+        let condition = match dto.condition {
+            CalendarObjectDeleteConditionDto::None => CalendarEventDeleteCondition::None,
+            CalendarObjectDeleteConditionDto::IfMatchAny => {
+                CalendarEventDeleteCondition::IfMatchAny
+            }
+            CalendarObjectDeleteConditionDto::IfMatch(etags) => {
+                CalendarEventDeleteCondition::IfMatch(etags)
+            }
+        };
+
+        let result = self
+            .event_repository
+            .delete_event_by_resource_name(&calendar_id, &dto.resource_name, condition)
+            .await?;
+
+        let status = match result {
+            CalendarEventDeleteResult::Deleted => CalendarObjectDeleteStatusDto::Deleted,
+            CalendarEventDeleteResult::NotFound => CalendarObjectDeleteStatusDto::NotFound,
+            CalendarEventDeleteResult::PreconditionFailed => {
+                CalendarObjectDeleteStatusDto::PreconditionFailed
+            }
+        };
+
+        Ok(CalendarObjectDeleteResultDto { status })
     }
 
     async fn get_event_by_resource_name(
