@@ -8,9 +8,9 @@
 # 3. Asserts that no regular files remain under
 #    $OXICLOUD_STORAGE_PATH/.thumbnails or .blobs.
 #
-# Called by run.sh after all Hurl tests have passed.
+# Discovered and run by the xtask API test runner.
 # Can also be run standalone (server must already be up):
-#   bash tests/api/storage_cleanup_check.sh
+#   bash tests/api/storage_cleanup_check_test.sh
 # =============================================================
 
 set -euo pipefail

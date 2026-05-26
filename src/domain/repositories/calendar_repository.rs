@@ -18,7 +18,6 @@ pub trait CalendarRepository: Send + Sync + 'static {
     /// Finds a calendar by its ID
     async fn find_calendar_by_id(&self, id: &Uuid) -> CalendarRepositoryResult<Calendar>;
 
-
     /// Finds a calendar by stable CalDAV collection slug and owner
     async fn find_calendar_by_slug_and_owner(
         &self,

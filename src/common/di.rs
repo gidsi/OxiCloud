@@ -1180,6 +1180,39 @@ pub struct AppState {
     pub authorization: Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine>,
 }
 
+impl AppState {
+    pub async fn new(
+        pool: PgPool,
+        storage_path: crate::domain::services::path_service::StoragePath,
+        jwt_secret: String,
+        host: String,
+    ) -> Arc<Self> {
+        let mut config = AppConfig::default();
+        config.auth.jwt_secret = jwt_secret;
+        config.server_host = host;
+        config.features.enable_auth = false;
+
+        let storage_root = if storage_path.is_empty() {
+            PathBuf::from("/")
+        } else {
+            PathBuf::from(storage_path.to_string())
+        };
+        let locales_root = PathBuf::from("./static/locales");
+        let factory = AppServiceFactory::with_config(storage_root, locales_root, config);
+
+        let maintenance_pool = pool.clone();
+        let app_state = factory
+            .build_app_state(Some(DbPools {
+                primary: pool,
+                maintenance: maintenance_pool,
+            }))
+            .await
+            .expect("failed to build application state from supplied database pool");
+
+        Arc::new(app_state)
+    }
+}
+
 // All AppState construction is done via struct literal in build_app_state().
 
 /// Builds the authorization engine. Today this only constructs `PgAclEngine`;

@@ -13,7 +13,6 @@ pub struct CalendarPgRepository {
     pool: Arc<PgPool>,
 }
 
-
 fn parse_supported_components(properties: &HashMap<String, String>) -> Vec<String> {
     properties
         .get("{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set")
@@ -28,11 +27,15 @@ fn parse_supported_components(properties: &HashMap<String, String>) -> Vec<Strin
         .unwrap_or_else(|| vec!["VEVENT".to_string()])
 }
 
-fn calendar_from_row(row: &sqlx::postgres::PgRow, properties: HashMap<String, String>) -> CalendarRepositoryResult<Calendar> {
+fn calendar_from_row(
+    row: &sqlx::postgres::PgRow,
+    properties: HashMap<String, String>,
+) -> CalendarRepositoryResult<Calendar> {
     Calendar::with_id_and_details(
         row.get("id"),
         row.try_get("name").unwrap_or_else(|_| String::new()),
-        row.try_get("slug").unwrap_or_else(|_| row.get::<Uuid, _>("id").to_string()),
+        row.try_get("slug")
+            .unwrap_or_else(|_| row.get::<Uuid, _>("id").to_string()),
         row.get("owner_id"),
         row.get("description"),
         row.get("color"),
@@ -50,7 +53,10 @@ impl CalendarPgRepository {
         Self { pool }
     }
 
-    async fn load_calendar_properties(&self, calendar_id: &Uuid) -> CalendarRepositoryResult<HashMap<String, String>> {
+    async fn load_calendar_properties(
+        &self,
+        calendar_id: &Uuid,
+    ) -> CalendarRepositoryResult<HashMap<String, String>> {
         let rows = sqlx::query(
             r#"
             SELECT name, value
@@ -61,7 +67,9 @@ impl CalendarPgRepository {
         .bind(calendar_id)
         .fetch_all(&*self.pool)
         .await
-        .map_err(|e| DomainError::database_error(format!("Failed to get calendar properties: {}", e)))?;
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to get calendar properties: {}", e))
+        })?;
 
         let mut properties = HashMap::new();
         for row in rows {
@@ -70,7 +78,10 @@ impl CalendarPgRepository {
         Ok(properties)
     }
 
-    async fn persist_calendar_properties(&self, calendar: &Calendar) -> CalendarRepositoryResult<()> {
+    async fn persist_calendar_properties(
+        &self,
+        calendar: &Calendar,
+    ) -> CalendarRepositoryResult<()> {
         for (name, value) in calendar.custom_properties() {
             sqlx::query(
                 r#"
@@ -84,7 +95,9 @@ impl CalendarPgRepository {
             .bind(value)
             .execute(&*self.pool)
             .await
-            .map_err(|e| DomainError::database_error(format!("Failed to set calendar property: {}", e)))?;
+            .map_err(|e| {
+                DomainError::database_error(format!("Failed to set calendar property: {}", e))
+            })?;
         }
         Ok(())
     }
@@ -181,7 +194,6 @@ impl CalendarRepository for CalendarPgRepository {
         Ok(calendar)
     }
 
-
     async fn find_calendar_by_slug_and_owner(
         &self,
         slug: &str,
@@ -198,8 +210,12 @@ impl CalendarRepository for CalendarPgRepository {
         .bind(owner_id)
         .fetch_optional(&*self.pool)
         .await
-        .map_err(|e| DomainError::database_error(format!("Failed to find calendar by slug and owner: {}", e)))?
-        .ok_or_else(|| DomainError::not_found("Calendar", format!("{} (owned by {})", slug, owner_id)))?;
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to find calendar by slug and owner: {}", e))
+        })?
+        .ok_or_else(|| {
+            DomainError::not_found("Calendar", format!("{} (owned by {})", slug, owner_id))
+        })?;
 
         let properties = self.load_calendar_properties(&row.get("id")).await?;
         calendar_from_row(&row, properties)
@@ -221,7 +237,9 @@ impl CalendarRepository for CalendarPgRepository {
         .bind(owner_id)
         .fetch_one(&*self.pool)
         .await
-        .map_err(|e| DomainError::database_error(format!("Failed to check calendar existence: {}", e)))?;
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to check calendar existence: {}", e))
+        })?;
 
         Ok(row.get("exists"))
     }
@@ -247,8 +265,8 @@ impl CalendarRepository for CalendarPgRepository {
 
         let mut calendars = Vec::new();
         for row in rows {
-        let properties = self.load_calendar_properties(&row.get("id")).await?;
-        let calendar = calendar_from_row(&row, properties)?;
+            let properties = self.load_calendar_properties(&row.get("id")).await?;
+            let calendar = calendar_from_row(&row, properties)?;
             calendars.push(calendar);
         }
 
@@ -303,8 +321,8 @@ impl CalendarRepository for CalendarPgRepository {
 
         let mut calendars = Vec::new();
         for row in rows {
-        let properties = self.load_calendar_properties(&row.get("id")).await?;
-        let calendar = calendar_from_row(&row, properties)?;
+            let properties = self.load_calendar_properties(&row.get("id")).await?;
+            let calendar = calendar_from_row(&row, properties)?;
             calendars.push(calendar);
         }
 
@@ -335,8 +353,8 @@ impl CalendarRepository for CalendarPgRepository {
 
         let mut calendars = Vec::new();
         for row in rows {
-        let properties = self.load_calendar_properties(&row.get("id")).await?;
-        let calendar = calendar_from_row(&row, properties)?;
+            let properties = self.load_calendar_properties(&row.get("id")).await?;
+            let calendar = calendar_from_row(&row, properties)?;
             calendars.push(calendar);
         }
 
