@@ -4,6 +4,11 @@ use uuid::Uuid;
 
 pub type CalendarRepositoryResult<T> = Result<T, DomainError>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CalendarCollectionDeletePrecondition {
+    None,
+}
+
 /// Repository interface for Calendar entity operations
 pub trait CalendarRepository: Send + Sync + 'static {
     /// Creates a new calendar
@@ -14,6 +19,13 @@ pub trait CalendarRepository: Send + Sync + 'static {
 
     /// Deletes a calendar by ID
     async fn delete_calendar(&self, id: &Uuid) -> CalendarRepositoryResult<()>;
+
+    /// Deletes a CalDAV calendar collection and all dependent resources atomically.
+    async fn delete_calendar_collection(
+        &self,
+        id: &Uuid,
+        precondition: CalendarCollectionDeletePrecondition,
+    ) -> CalendarRepositoryResult<Calendar>;
 
     /// Finds a calendar by its ID
     async fn find_calendar_by_id(&self, id: &Uuid) -> CalendarRepositoryResult<Calendar>;

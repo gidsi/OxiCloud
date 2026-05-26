@@ -29,7 +29,8 @@ use std::sync::Arc;
 use crate::application::adapters::caldav_adapter::{CalDavAdapter, CalDavReportType};
 use crate::application::adapters::webdav_adapter::{PropFindRequest, PropFindType};
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CreateCalendarDto, EventPutPreconditionDto, PutEventICalDto, UpdateCalendarDto,
+    CalendarDeletePreconditionDto, CalendarDto, CreateCalendarDto, DeleteCalendarCollectionDto,
+    EventPutPreconditionDto, PutEventICalDto, UpdateCalendarDto,
 };
 use crate::application::ports::calendar_ports::CalendarUseCase;
 use crate::application::ports::dav_principal_ports::DavPrincipalDiscoveryUseCase;
@@ -705,12 +706,15 @@ async fn handle_put(
         .map_err(caldav_put_error)?;
 
     Ok(Response::builder()
-        .status(if result.created { StatusCode::CREATED } else { StatusCode::NO_CONTENT })
+        .status(if result.created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::NO_CONTENT
+        })
         .header(header::ETAG, quoted_etag(&result.event.etag))
         .body(Body::empty())
         .unwrap())
 }
-
 
 // ─── GET (.ics) ──────────────────────────────────────────────────────
 
@@ -761,7 +765,8 @@ fn generate_full_calendar_ical(
     calendar_name: &str,
     events: &[crate::application::dtos::calendar_dto::CalendarEventDto],
 ) -> String {
-    let mut buf = String::with_capacity(256 + events.iter().map(|e| e.ical_data.len()).sum::<usize>());
+    let mut buf =
+        String::with_capacity(256 + events.iter().map(|e| e.ical_data.len()).sum::<usize>());
     buf.push_str("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OxiCloud//NONSGML Calendar//EN\r\n");
     buf.push_str(&format!("X-WR-CALNAME:{}\r\n", calendar_name));
     for event in events {
@@ -794,44 +799,79 @@ fn quoted_etag(etag: &str) -> String {
 
 fn parse_put_precondition(req: &Request<Body>) -> Result<EventPutPreconditionDto, AppError> {
     if let Some(value) = req.headers().get(header::IF_NONE_MATCH) {
-        let value = value.to_str().map_err(|_| AppError::bad_request("Invalid If-None-Match header"))?;
+        let value = value
+            .to_str()
+            .map_err(|_| AppError::bad_request("Invalid If-None-Match header"))?;
         if value.trim() == "*" {
             return Ok(EventPutPreconditionDto::IfNoneMatchAny);
         }
     }
     if let Some(value) = req.headers().get(header::IF_MATCH) {
-        let value = value.to_str().map_err(|_| AppError::bad_request("Invalid If-Match header"))?;
+        let value = value
+            .to_str()
+            .map_err(|_| AppError::bad_request("Invalid If-Match header"))?;
         let trimmed = value.trim();
         if trimmed == "*" {
             return Ok(EventPutPreconditionDto::IfMatchAny);
         }
-        return Ok(EventPutPreconditionDto::IfMatch(trimmed.trim_matches('"').to_string()));
+        return Ok(EventPutPreconditionDto::IfMatch(
+            trimmed.trim_matches('"').to_string(),
+        ));
     }
     Ok(EventPutPreconditionDto::None)
 }
 
-fn caldav_calendar_body_allowed(content_type: Option<&axum::http::HeaderValue>) -> Result<(), AppError> {
+fn caldav_calendar_body_allowed(
+    content_type: Option<&axum::http::HeaderValue>,
+) -> Result<(), AppError> {
     let Some(value) = content_type else {
-        return Err(caldav_xml_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "supported-calendar-data"));
+        return Err(caldav_xml_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "supported-calendar-data",
+        ));
     };
-    let value = value.to_str().map_err(|_| caldav_xml_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "supported-calendar-data"))?.to_ascii_lowercase();
+    let value = value
+        .to_str()
+        .map_err(|_| {
+            caldav_xml_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "supported-calendar-data",
+            )
+        })?
+        .to_ascii_lowercase();
     if value.split(';').next().map(str::trim) == Some("text/calendar") {
         Ok(())
     } else {
-        Err(caldav_xml_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "supported-calendar-data"))
+        Err(caldav_xml_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "supported-calendar-data",
+        ))
     }
 }
 
 fn validate_calendar_object_for_put(ical_data: &str) -> Result<(), AppError> {
-    if !ical_data.contains("BEGIN:VCALENDAR") || !ical_data.contains("END:VCALENDAR") || !ical_data.contains("BEGIN:VEVENT") || !ical_data.contains("END:VEVENT") {
-        return Err(caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource"));
+    if !ical_data.contains("BEGIN:VCALENDAR")
+        || !ical_data.contains("END:VCALENDAR")
+        || !ical_data.contains("BEGIN:VEVENT")
+        || !ical_data.contains("END:VEVENT")
+    {
+        return Err(caldav_xml_error(
+            StatusCode::FORBIDDEN,
+            "valid-calendar-object-resource",
+        ));
     }
     if ical_data.contains("BEGIN:VTODO") || ical_data.contains("BEGIN:VJOURNAL") {
-        return Err(caldav_xml_error(StatusCode::FORBIDDEN, "supported-calendar-component"));
+        return Err(caldav_xml_error(
+            StatusCode::FORBIDDEN,
+            "supported-calendar-component",
+        ));
     }
     for required in ["UID", "DTSTAMP", "DTSTART", "DTEND", "SUMMARY"] {
         if extract_ical_property_for_put(ical_data, required).is_none() {
-            return Err(caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource"));
+            return Err(caldav_xml_error(
+                StatusCode::FORBIDDEN,
+                "valid-calendar-object-resource",
+            ));
         }
     }
     Ok(())
@@ -840,7 +880,13 @@ fn validate_calendar_object_for_put(ical_data: &str) -> Result<(), AppError> {
 fn extract_ical_property_for_put(ical_data: &str, property_name: &str) -> Option<String> {
     for line in ical_data.replace("\r\n", "\n").lines() {
         let (name, value) = line.trim().split_once(':')?;
-        if name.split(';').next().unwrap_or(name).eq_ignore_ascii_case(property_name) && !value.trim().is_empty() {
+        if name
+            .split(';')
+            .next()
+            .unwrap_or(name)
+            .eq_ignore_ascii_case(property_name)
+            && !value.trim().is_empty()
+        {
             return Some(value.trim().to_string());
         }
     }
@@ -850,17 +896,28 @@ fn extract_ical_property_for_put(ical_data: &str, property_name: &str) -> Option
 fn caldav_xml_error(status: StatusCode, element: &str) -> AppError {
     AppError::new(
         status,
-        format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:{}/></D:error>", element),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:{}/></D:error>",
+            element
+        ),
         "CalDavError",
     )
 }
 
 fn caldav_put_error(e: crate::common::errors::DomainError) -> AppError {
     match e.kind {
-        ErrorKind::InvalidInput if e.entity_type == "Precondition" => AppError::precondition_failed(e.message),
-        ErrorKind::InvalidInput => caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource"),
-        ErrorKind::UnsupportedOperation => caldav_xml_error(StatusCode::FORBIDDEN, "supported-calendar-component"),
-        ErrorKind::AccessDenied if e.entity_type == "CalendarEvent" => caldav_xml_error(StatusCode::FORBIDDEN, "no-uid-conflict"),
+        ErrorKind::InvalidInput if e.entity_type == "Precondition" => {
+            AppError::precondition_failed(e.message)
+        }
+        ErrorKind::InvalidInput => {
+            caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource")
+        }
+        ErrorKind::UnsupportedOperation => {
+            caldav_xml_error(StatusCode::FORBIDDEN, "supported-calendar-component")
+        }
+        ErrorKind::AccessDenied if e.entity_type == "CalendarEvent" => {
+            caldav_xml_error(StatusCode::FORBIDDEN, "no-uid-conflict")
+        }
         ErrorKind::AccessDenied => AppError::forbidden(e.message),
         ErrorKind::NotFound => AppError::not_found(e.message),
         _ => AppError::from(e),
@@ -885,7 +942,7 @@ async fn handle_delete(
         let events = calendar_service
             .list_events(calendar_id, None, None, user.id)
             .await
-            .map_err(|e| AppError::internal_error(format!("Failed to list events: {}", e)))?;
+            .map_err(AppError::from)?;
 
         let event = events
             .iter()
@@ -895,12 +952,18 @@ async fn handle_delete(
         calendar_service
             .delete_event(&event.id, user.id)
             .await
-            .map_err(|e| AppError::internal_error(format!("Failed to delete event: {}", e)))?;
+            .map_err(AppError::from)?;
     } else {
         calendar_service
-            .delete_calendar(calendar_id, user.id)
+            .delete_calendar_collection(
+                DeleteCalendarCollectionDto {
+                    calendar_id: calendar_id.to_string(),
+                    precondition: CalendarDeletePreconditionDto::None,
+                },
+                user.id,
+            )
             .await
-            .map_err(|e| AppError::internal_error(format!("Failed to delete calendar: {}", e)))?;
+            .map_err(AppError::from)?;
     }
 
     Ok(Response::builder()

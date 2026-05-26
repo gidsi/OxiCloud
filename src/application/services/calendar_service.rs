@@ -4,8 +4,8 @@ use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
     CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
-    DeleteEventResourceDto, PutEventICalDto, PutEventICalResultDto, UpdateCalendarDto,
-    UpdateEventDto,
+    DeleteCalendarCollectionDto, DeleteEventResourceDto, PutEventICalDto, PutEventICalResultDto,
+    UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::{CalendarStoragePort, CalendarUseCase};
 use crate::common::errors::{DomainError, ErrorKind};
@@ -67,6 +67,23 @@ impl CalendarUseCase for CalendarService {
             ));
         }
         self.calendar_storage.delete_calendar(calendar_id).await
+    }
+
+    async fn delete_calendar_collection(
+        &self,
+        dto: DeleteCalendarCollectionDto,
+        user_id: Uuid,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self.calendar_storage.get_calendar(&dto.calendar_id).await?;
+        if calendar.owner_id != user_id.to_string() {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Calendar",
+                "Only the calendar owner can delete this calendar collection",
+            ));
+        }
+
+        self.calendar_storage.delete_calendar_collection(dto).await
     }
 
     async fn get_calendar(
@@ -331,7 +348,6 @@ impl CalendarUseCase for CalendarService {
         }
         Ok(event)
     }
-
 
     async fn get_event_by_resource_path(
         &self,

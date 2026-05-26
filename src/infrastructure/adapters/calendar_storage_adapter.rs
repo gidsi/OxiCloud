@@ -10,9 +10,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
-    DeleteEventResourceDto, EventDeletePreconditionDto, EventPutPreconditionDto, PutEventICalDto,
-    PutEventICalResultDto, UpdateCalendarDto, UpdateEventDto,
+    CalendarDeletePreconditionDto, CalendarDto, CalendarEventDto, CreateCalendarDto,
+    CreateEventDto, CreateEventICalDto, DeleteCalendarCollectionDto, DeleteEventResourceDto,
+    EventDeletePreconditionDto, EventPutPreconditionDto, PutEventICalDto, PutEventICalResultDto,
+    UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::CalendarStoragePort;
 use crate::common::errors::{DomainError, ErrorKind};
@@ -21,7 +22,9 @@ use crate::domain::entities::calendar_event::CalendarEvent;
 use crate::domain::repositories::calendar_event_repository::{
     CalendarEventDeletePrecondition, CalendarEventPutPrecondition, CalendarEventRepository,
 };
-use crate::domain::repositories::calendar_repository::CalendarRepository;
+use crate::domain::repositories::calendar_repository::{
+    CalendarCollectionDeletePrecondition, CalendarRepository,
+};
 use crate::infrastructure::repositories::pg::CalendarEventPgRepository;
 use crate::infrastructure::repositories::pg::CalendarPgRepository;
 
@@ -41,6 +44,14 @@ impl CalendarStorageAdapter {
             calendar_repository,
             event_repository,
         }
+    }
+}
+
+fn map_calendar_delete_precondition(
+    precondition: CalendarDeletePreconditionDto,
+) -> CalendarCollectionDeletePrecondition {
+    match precondition {
+        CalendarDeletePreconditionDto::None => CalendarCollectionDeletePrecondition::None,
     }
 }
 
@@ -116,6 +127,26 @@ impl CalendarStoragePort for CalendarStorageAdapter {
 
         // Then delete the calendar itself
         self.calendar_repository.delete_calendar(&uuid).await
+    }
+
+    async fn delete_calendar_collection(
+        &self,
+        dto: DeleteCalendarCollectionDto,
+    ) -> Result<CalendarDto, DomainError> {
+        let uuid = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Invalid calendar ID format",
+            )
+        })?;
+
+        let deleted = self
+            .calendar_repository
+            .delete_calendar_collection(&uuid, map_calendar_delete_precondition(dto.precondition))
+            .await?;
+
+        Ok(CalendarDto::from(deleted))
     }
 
     async fn get_calendar(&self, calendar_id: &str) -> Result<CalendarDto, DomainError> {
@@ -367,7 +398,11 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .await?;
 
         let event = if let Some(resource_path) = dto.resource_path {
-            CalendarEvent::from_ical_with_resource_path(calendar_id, resource_path, dto.ical_data.clone())?
+            CalendarEvent::from_ical_with_resource_path(
+                calendar_id,
+                resource_path,
+                dto.ical_data.clone(),
+            )?
         } else {
             CalendarEvent::from_ical(calendar_id, dto.ical_data.clone())?
         };
@@ -381,18 +416,35 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         dto: PutEventICalDto,
     ) -> Result<PutEventICalResultDto, DomainError> {
         let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
-            DomainError::new(ErrorKind::InvalidInput, "Event", "Invalid calendar ID format")
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "Event",
+                "Invalid calendar ID format",
+            )
         })?;
-        let _calendar = self.calendar_repository.find_calendar_by_id(&calendar_id).await?;
-        let event = CalendarEvent::from_ical_with_resource_path(calendar_id, dto.resource_path, dto.ical_data)?;
+        let _calendar = self
+            .calendar_repository
+            .find_calendar_by_id(&calendar_id)
+            .await?;
+        let event = CalendarEvent::from_ical_with_resource_path(
+            calendar_id,
+            dto.resource_path,
+            dto.ical_data,
+        )?;
         let precondition = match dto.precondition {
             EventPutPreconditionDto::None => CalendarEventPutPrecondition::None,
             EventPutPreconditionDto::IfMatch(etag) => CalendarEventPutPrecondition::IfMatch(etag),
             EventPutPreconditionDto::IfMatchAny => CalendarEventPutPrecondition::IfMatchAny,
             EventPutPreconditionDto::IfNoneMatchAny => CalendarEventPutPrecondition::IfNoneMatchAny,
         };
-        let result = self.event_repository.put_event_by_resource_path(event, precondition).await?;
-        Ok(PutEventICalResultDto { event: CalendarEventDto::from(result.event), created: result.created })
+        let result = self
+            .event_repository
+            .put_event_by_resource_path(event, precondition)
+            .await?;
+        Ok(PutEventICalResultDto {
+            event: CalendarEventDto::from(result.event),
+            created: result.created,
+        })
     }
 
     async fn update_event(
@@ -490,9 +542,16 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         resource_path: &str,
     ) -> Result<CalendarEventDto, DomainError> {
         let uuid = Uuid::parse_str(calendar_id).map_err(|_| {
-            DomainError::new(ErrorKind::InvalidInput, "Event", "Invalid calendar ID format")
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "Event",
+                "Invalid calendar ID format",
+            )
         })?;
-        let event = self.event_repository.find_event_by_resource_path(&uuid, resource_path).await?
+        let event = self
+            .event_repository
+            .find_event_by_resource_path(&uuid, resource_path)
+            .await?
             .ok_or_else(|| DomainError::not_found("Calendar Event", resource_path.to_string()))?;
         Ok(CalendarEventDto::from(event))
     }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::common::errors::DomainError;
 use crate::domain::entities::calendar::Calendar;
 use crate::domain::repositories::calendar_repository::{
-    CalendarRepository, CalendarRepositoryResult,
+    CalendarCollectionDeletePrecondition, CalendarRepository, CalendarRepositoryResult,
 };
 
 pub struct CalendarPgRepository {
@@ -114,6 +114,58 @@ impl CalendarRepository for CalendarPgRepository {
         .map_err(|e| DomainError::database_error(format!("Failed to delete calendar: {}", e)))?;
 
         Ok(())
+    }
+
+    async fn delete_calendar_collection(
+        &self,
+        id: &Uuid,
+        precondition: CalendarCollectionDeletePrecondition,
+    ) -> CalendarRepositoryResult<Calendar> {
+        match precondition {
+            CalendarCollectionDeletePrecondition::None => {}
+        }
+
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            DomainError::database_error(format!(
+                "Failed to begin calendar delete transaction: {}",
+                e
+            ))
+        })?;
+
+        let row = sqlx::query(
+            r#"
+            DELETE FROM caldav.calendars
+            WHERE id = $1
+            RETURNING id, name, path, owner_id, description, color, is_public, ctag, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to delete calendar collection: {}", e))
+        })?;
+
+        let Some(row) = row else {
+            tx.rollback().await.map_err(|e| {
+                DomainError::database_error(format!(
+                    "Failed to rollback calendar delete transaction: {}",
+                    e
+                ))
+            })?;
+            return Err(DomainError::not_found("Calendar", id.to_string()));
+        };
+
+        let calendar = Self::calendar_from_row(&row)?;
+
+        tx.commit().await.map_err(|e| {
+            DomainError::database_error(format!(
+                "Failed to commit calendar delete transaction: {}",
+                e
+            ))
+        })?;
+
+        Ok(calendar)
     }
 
     async fn find_calendar_by_id(&self, id: &Uuid) -> CalendarRepositoryResult<Calendar> {

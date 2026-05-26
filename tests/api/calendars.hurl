@@ -347,3 +347,50 @@ GET {{base_url}}/caldav/{{username}}/work-calendar/event-to-delete.ics
 {{username}}: {{dav_password}}
 
 HTTP 404
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 18 – MKCALENDAR creates a temporary calendar to be deleted
+# ─────────────────────────────────────────────────────────────
+MKCALENDAR {{base_url}}/caldav/{{username}}/2023-holidays/
+[BasicAuth]
+{{username}}: {{dav_password}}
+Content-Type: text/xml; charset=utf-8
+`<?xml version="1.0" encoding="UTF-8"?>
+<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:set>
+    <D:prop>
+      <D:displayname>2023 Holidays</D:displayname>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>`
+
+HTTP 201
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 19 – DELETE the entire calendar
+# ─────────────────────────────────────────────────────────────
+DELETE {{base_url}}/caldav/{{username}}/2023-holidays/
+[BasicAuth]
+{{username}}: {{dav_password}}
+
+HTTP 204
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 20 – Verify the deleted calendar is gone (PROPFIND returns HTTP 404)
+# ─────────────────────────────────────────────────────────────
+PROPFIND {{base_url}}/caldav/{{username}}/2023-holidays/
+[BasicAuth]
+{{username}}: {{dav_password}}
+Depth: 0
+Content-Type: text/xml; charset=utf-8
+`<?xml version="1.0" encoding="UTF-8"?>
+<D:propfind xmlns:D="DAV:">
+  <D:prop>
+    <D:displayname/>
+  </D:prop>
+</D:propfind>`
+
+HTTP 404

@@ -53,7 +53,10 @@ impl CalendarEventPgRepository {
 }
 
 impl CalendarEventRepository for CalendarEventPgRepository {
-    async fn create_event(&self, event: CalendarEvent) -> CalendarEventRepositoryResult<CalendarEvent> {
+    async fn create_event(
+        &self,
+        event: CalendarEvent,
+    ) -> CalendarEventRepositoryResult<CalendarEvent> {
         let row = sqlx::query(&format!(
             r#"
             INSERT INTO caldav.calendar_events (
@@ -84,11 +87,18 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         .await
         .map_err(|e| {
             if let sqlx::Error::Database(db_err) = &e {
-                if db_err.constraint() == Some("idx_calendar_events_calendar_resource_path_unique") {
-                    return DomainError::already_exists("CalendarEvent", event.resource_path().to_string());
+                if db_err.constraint() == Some("idx_calendar_events_calendar_resource_path_unique")
+                {
+                    return DomainError::already_exists(
+                        "CalendarEvent",
+                        event.resource_path().to_string(),
+                    );
                 }
                 if db_err.constraint() == Some("idx_calendar_events_calendar_ical_uid_unique") {
-                    return DomainError::already_exists("CalendarEvent", event.ical_uid().to_string());
+                    return DomainError::already_exists(
+                        "CalendarEvent",
+                        event.ical_uid().to_string(),
+                    );
                 }
             }
             DomainError::database_error(format!("Failed to create calendar event: {}", e))
@@ -97,7 +107,10 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         Self::event_from_row(&row)
     }
 
-    async fn update_event(&self, event: CalendarEvent) -> CalendarEventRepositoryResult<CalendarEvent> {
+    async fn update_event(
+        &self,
+        event: CalendarEvent,
+    ) -> CalendarEventRepositoryResult<CalendarEvent> {
         let row = sqlx::query(&format!(
             r#"
             UPDATE caldav.calendar_events
@@ -133,7 +146,9 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         .bind(event.id())
         .fetch_optional(&*self.pool)
         .await
-        .map_err(|e| DomainError::database_error(format!("Failed to update calendar event: {}", e)))?
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to update calendar event: {}", e))
+        })?
         .ok_or_else(|| DomainError::not_found("Calendar Event", event.id().to_string()))?;
 
         Self::event_from_row(&row)
@@ -184,7 +199,8 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         let event = Self::event_from_row(&row)?;
 
         match precondition {
-            CalendarEventDeletePrecondition::None | CalendarEventDeletePrecondition::IfMatchAny => {}
+            CalendarEventDeletePrecondition::None | CalendarEventDeletePrecondition::IfMatchAny => {
+            }
             CalendarEventDeletePrecondition::IfMatch(expected_etag) => {
                 if event.etag() != expected_etag.trim_matches('"') {
                     return Err(Self::precondition_failed("If-Match precondition failed"));
@@ -221,35 +237,64 @@ impl CalendarEventRepository for CalendarEventPgRepository {
     }
 
     async fn find_event_by_id(&self, id: &Uuid) -> CalendarEventRepositoryResult<CalendarEvent> {
-        let row = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE id = $1", Self::select_columns()))
-            .bind(id)
-            .fetch_optional(&*self.pool)
-            .await
-            .map_err(|e| DomainError::database_error(format!("Failed to get calendar event by id: {}", e)))?
-            .ok_or_else(|| DomainError::not_found("Calendar Event", id.to_string()))?;
+        let row = sqlx::query(&format!(
+            "SELECT {} FROM caldav.calendar_events WHERE id = $1",
+            Self::select_columns()
+        ))
+        .bind(id)
+        .fetch_optional(&*self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to get calendar event by id: {}", e))
+        })?
+        .ok_or_else(|| DomainError::not_found("Calendar Event", id.to_string()))?;
         Self::event_from_row(&row)
     }
 
-    async fn find_event_by_resource_path(&self, calendar_id: &Uuid, resource_path: &str) -> CalendarEventRepositoryResult<Option<CalendarEvent>> {
-        let row = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND resource_path = $2", Self::select_columns()))
-            .bind(calendar_id)
-            .bind(resource_path)
-            .fetch_optional(&*self.pool)
-            .await
-            .map_err(|e| DomainError::database_error(format!("Failed to get calendar event by resource path: {}", e)))?;
+    async fn find_event_by_resource_path(
+        &self,
+        calendar_id: &Uuid,
+        resource_path: &str,
+    ) -> CalendarEventRepositoryResult<Option<CalendarEvent>> {
+        let row = sqlx::query(&format!(
+            "SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND resource_path = $2",
+            Self::select_columns()
+        ))
+        .bind(calendar_id)
+        .bind(resource_path)
+        .fetch_optional(&*self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!(
+                "Failed to get calendar event by resource path: {}",
+                e
+            ))
+        })?;
         row.map(|row| Self::event_from_row(&row)).transpose()
     }
 
-    async fn list_events_by_calendar(&self, calendar_id: &Uuid) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
-        let rows = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 ORDER BY start_time", Self::select_columns()))
-            .bind(calendar_id)
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| DomainError::database_error(format!("Failed to get events by calendar: {}", e)))?;
+    async fn list_events_by_calendar(
+        &self,
+        calendar_id: &Uuid,
+    ) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 ORDER BY start_time",
+            Self::select_columns()
+        ))
+        .bind(calendar_id)
+        .fetch_all(&*self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to get events by calendar: {}", e))
+        })?;
         rows.iter().map(Self::event_from_row).collect()
     }
 
-    async fn find_events_by_summary(&self, calendar_id: &Uuid, summary: &str) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
+    async fn find_events_by_summary(
+        &self,
+        calendar_id: &Uuid,
+        summary: &str,
+    ) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
         let search_pattern = super::like_escape(summary);
         let rows = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND summary ILIKE $2 ORDER BY start_time", Self::select_columns()))
             .bind(calendar_id)
@@ -260,7 +305,12 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         rows.iter().map(Self::event_from_row).collect()
     }
 
-    async fn get_events_in_time_range(&self, calendar_id: &Uuid, start: &DateTime<Utc>, end: &DateTime<Utc>) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
+    async fn get_events_in_time_range(
+        &self,
+        calendar_id: &Uuid,
+        start: &DateTime<Utc>,
+        end: &DateTime<Utc>,
+    ) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
         let rows = sqlx::query(&format!(
             r#"SELECT {} FROM caldav.calendar_events
                WHERE calendar_id = $1
@@ -277,18 +327,33 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         rows.iter().map(Self::event_from_row).collect()
     }
 
-    async fn find_event_by_ical_uid(&self, calendar_id: &Uuid, ical_uid: &str) -> CalendarEventRepositoryResult<Option<CalendarEvent>> {
-        let row = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND ical_uid = $2", Self::select_columns()))
-            .bind(calendar_id)
-            .bind(ical_uid)
-            .fetch_optional(&*self.pool)
-            .await
-            .map_err(|e| DomainError::database_error(format!("Failed to get calendar event by UID: {}", e)))?;
+    async fn find_event_by_ical_uid(
+        &self,
+        calendar_id: &Uuid,
+        ical_uid: &str,
+    ) -> CalendarEventRepositoryResult<Option<CalendarEvent>> {
+        let row = sqlx::query(&format!(
+            "SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND ical_uid = $2",
+            Self::select_columns()
+        ))
+        .bind(calendar_id)
+        .bind(ical_uid)
+        .fetch_optional(&*self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to get calendar event by UID: {}", e))
+        })?;
         row.map(|row| Self::event_from_row(&row)).transpose()
     }
 
-    async fn put_event_by_resource_path(&self, event: CalendarEvent, precondition: CalendarEventPutPrecondition) -> CalendarEventRepositoryResult<CalendarEventPutResult> {
-        let mut tx = self.pool.begin().await.map_err(|e| DomainError::database_error(format!("Failed to begin event PUT transaction: {}", e)))?;
+    async fn put_event_by_resource_path(
+        &self,
+        event: CalendarEvent,
+        precondition: CalendarEventPutPrecondition,
+    ) -> CalendarEventRepositoryResult<CalendarEventPutResult> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            DomainError::database_error(format!("Failed to begin event PUT transaction: {}", e))
+        })?;
 
         let existing_row = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND resource_path = $2 FOR UPDATE", Self::select_columns()))
             .bind(event.calendar_id())
@@ -297,15 +362,26 @@ impl CalendarEventRepository for CalendarEventPgRepository {
             .await
             .map_err(|e| DomainError::database_error(format!("Failed to lock calendar event: {}", e)))?;
 
-        let existing = existing_row.as_ref().map(Self::event_from_row).transpose()?;
+        let existing = existing_row
+            .as_ref()
+            .map(Self::event_from_row)
+            .transpose()?;
 
         match existing {
             Some(existing_event) => {
                 match &precondition {
-                    CalendarEventPutPrecondition::None | CalendarEventPutPrecondition::IfMatchAny => {}
-                    CalendarEventPutPrecondition::IfNoneMatchAny => return Err(Self::precondition_failed("If-None-Match precondition failed")),
-                    CalendarEventPutPrecondition::IfMatch(expected) if expected == existing_event.etag() => {}
-                    CalendarEventPutPrecondition::IfMatch(_) => return Err(Self::precondition_failed("If-Match precondition failed")),
+                    CalendarEventPutPrecondition::None
+                    | CalendarEventPutPrecondition::IfMatchAny => {}
+                    CalendarEventPutPrecondition::IfNoneMatchAny => {
+                        return Err(Self::precondition_failed(
+                            "If-None-Match precondition failed",
+                        ));
+                    }
+                    CalendarEventPutPrecondition::IfMatch(expected)
+                        if expected == existing_event.etag() => {}
+                    CalendarEventPutPrecondition::IfMatch(_) => {
+                        return Err(Self::precondition_failed("If-Match precondition failed"));
+                    }
                 }
 
                 let uid_conflict = sqlx::query_scalar::<_, bool>(
@@ -318,7 +394,9 @@ impl CalendarEventRepository for CalendarEventPgRepository {
                 .await
                 .map_err(|e| DomainError::database_error(format!("Failed to check UID conflict: {}", e)))?;
                 if uid_conflict {
-                    return Err(Self::uid_conflict("Calendar object UID conflicts with another resource"));
+                    return Err(Self::uid_conflict(
+                        "Calendar object UID conflicts with another resource",
+                    ));
                 }
 
                 let row = sqlx::query(&format!(
@@ -343,13 +421,25 @@ impl CalendarEventRepository for CalendarEventPgRepository {
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| DomainError::database_error(format!("Failed to update calendar event resource: {}", e)))?;
-                tx.commit().await.map_err(|e| DomainError::database_error(format!("Failed to commit event PUT transaction: {}", e)))?;
-                Ok(CalendarEventPutResult { event: Self::event_from_row(&row)?, created: false })
+                tx.commit().await.map_err(|e| {
+                    DomainError::database_error(format!(
+                        "Failed to commit event PUT transaction: {}",
+                        e
+                    ))
+                })?;
+                Ok(CalendarEventPutResult {
+                    event: Self::event_from_row(&row)?,
+                    created: false,
+                })
             }
             None => {
                 match &precondition {
-                    CalendarEventPutPrecondition::None | CalendarEventPutPrecondition::IfNoneMatchAny => {}
-                    CalendarEventPutPrecondition::IfMatch(_) | CalendarEventPutPrecondition::IfMatchAny => return Err(Self::precondition_failed("If-Match precondition failed")),
+                    CalendarEventPutPrecondition::None
+                    | CalendarEventPutPrecondition::IfNoneMatchAny => {}
+                    CalendarEventPutPrecondition::IfMatch(_)
+                    | CalendarEventPutPrecondition::IfMatchAny => {
+                        return Err(Self::precondition_failed("If-Match precondition failed"));
+                    }
                 }
 
                 let uid_conflict = sqlx::query_scalar::<_, bool>(
@@ -361,7 +451,9 @@ impl CalendarEventRepository for CalendarEventPgRepository {
                 .await
                 .map_err(|e| DomainError::database_error(format!("Failed to check UID conflict: {}", e)))?;
                 if uid_conflict {
-                    return Err(Self::uid_conflict("Calendar object UID conflicts with another resource"));
+                    return Err(Self::uid_conflict(
+                        "Calendar object UID conflicts with another resource",
+                    ));
                 }
 
                 let row = sqlx::query(&format!(
@@ -388,31 +480,59 @@ impl CalendarEventRepository for CalendarEventPgRepository {
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| DomainError::database_error(format!("Failed to create calendar event resource: {}", e)))?;
-                tx.commit().await.map_err(|e| DomainError::database_error(format!("Failed to commit event PUT transaction: {}", e)))?;
-                Ok(CalendarEventPutResult { event: Self::event_from_row(&row)?, created: true })
+                tx.commit().await.map_err(|e| {
+                    DomainError::database_error(format!(
+                        "Failed to commit event PUT transaction: {}",
+                        e
+                    ))
+                })?;
+                Ok(CalendarEventPutResult {
+                    event: Self::event_from_row(&row)?,
+                    created: true,
+                })
             }
         }
     }
 
-    async fn count_events_in_calendar(&self, calendar_id: &Uuid) -> CalendarEventRepositoryResult<i64> {
-        let row = sqlx::query("SELECT COUNT(*) as count FROM caldav.calendar_events WHERE calendar_id = $1")
-            .bind(calendar_id)
-            .fetch_one(&*self.pool)
-            .await
-            .map_err(|e| DomainError::database_error(format!("Failed to count events in calendar: {}", e)))?;
+    async fn count_events_in_calendar(
+        &self,
+        calendar_id: &Uuid,
+    ) -> CalendarEventRepositoryResult<i64> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as count FROM caldav.calendar_events WHERE calendar_id = $1",
+        )
+        .bind(calendar_id)
+        .fetch_one(&*self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!("Failed to count events in calendar: {}", e))
+        })?;
         Ok(row.get::<i64, _>("count"))
     }
 
-    async fn delete_all_events_in_calendar(&self, calendar_id: &Uuid) -> CalendarEventRepositoryResult<i64> {
+    async fn delete_all_events_in_calendar(
+        &self,
+        calendar_id: &Uuid,
+    ) -> CalendarEventRepositoryResult<i64> {
         let result = sqlx::query("DELETE FROM caldav.calendar_events WHERE calendar_id = $1")
             .bind(calendar_id)
             .execute(&*self.pool)
             .await
-            .map_err(|e| DomainError::database_error(format!("Failed to delete all events in calendar: {}", e)))?;
+            .map_err(|e| {
+                DomainError::database_error(format!(
+                    "Failed to delete all events in calendar: {}",
+                    e
+                ))
+            })?;
         Ok(result.rows_affected() as i64)
     }
 
-    async fn list_events_by_calendar_paginated(&self, calendar_id: &Uuid, limit: i64, offset: i64) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
+    async fn list_events_by_calendar_paginated(
+        &self,
+        calendar_id: &Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
         let rows = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 ORDER BY start_time LIMIT $2 OFFSET $3", Self::select_columns()))
             .bind(calendar_id)
             .bind(limit)
@@ -423,7 +543,12 @@ impl CalendarEventRepository for CalendarEventPgRepository {
         rows.iter().map(Self::event_from_row).collect()
     }
 
-    async fn find_recurring_events_in_range(&self, calendar_id: &Uuid, start: &DateTime<Utc>, end: &DateTime<Utc>) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
+    async fn find_recurring_events_in_range(
+        &self,
+        calendar_id: &Uuid,
+        start: &DateTime<Utc>,
+        end: &DateTime<Utc>,
+    ) -> CalendarEventRepositoryResult<Vec<CalendarEvent>> {
         let rows = sqlx::query(&format!("SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND rrule IS NOT NULL AND end_time >= $2 AND start_time <= $3 ORDER BY start_time", Self::select_columns()))
             .bind(calendar_id)
             .bind(start)

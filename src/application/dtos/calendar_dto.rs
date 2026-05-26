@@ -193,6 +193,17 @@ pub struct DeleteEventResourceDto {
     pub precondition: EventDeletePreconditionDto,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum CalendarDeletePreconditionDto {
+    None,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DeleteCalendarCollectionDto {
+    pub calendar_id: String,
+    pub precondition: CalendarDeletePreconditionDto,
+}
+
 /// DTO for calendar event creation with structured data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateEventDto {
