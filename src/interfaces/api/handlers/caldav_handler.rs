@@ -1030,6 +1030,20 @@ async fn handle_delete(
     path: &str,
 ) -> Result<Response<Body>, AppError> {
     let user = extract_user(&req)?;
+
+    if let Some(collection_path) = parse_calendar_collection_path(path)? {
+        return handle_delete_calendar_collection(state, req, user, collection_path).await;
+    }
+
+    handle_delete_calendar_object(state, req, user, path).await
+}
+
+async fn handle_delete_calendar_object(
+    state: Arc<AppState>,
+    req: Request<Body>,
+    user: AuthUser,
+    path: &str,
+) -> Result<Response<Body>, AppError> {
     let calendar_service = get_calendar_service(&state)?;
     let condition = delete_condition_from_headers(req.headers())?;
 
@@ -1067,6 +1081,249 @@ async fn handle_delete(
         .status(status)
         .body(Body::empty())
         .unwrap())
+}
+
+async fn handle_delete_calendar_collection(
+    state: Arc<AppState>,
+    req: Request<Body>,
+    user: AuthUser,
+    collection_path: CalendarCollectionPath,
+) -> Result<Response<Body>, AppError> {
+    if !is_valid_delete_collection_depth(req.headers())? {
+        return Ok(xml_error_response(
+            StatusCode::BAD_REQUEST,
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:">
+  <D:valid-depth/>
+</D:error>"#,
+        ));
+    }
+
+    if let Some(username) = collection_path.username.as_deref() {
+        if username != user.username {
+            return Ok(xml_error_response(
+                StatusCode::FORBIDDEN,
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:">
+  <D:need-privileges/>
+</D:error>"#,
+            ));
+        }
+    }
+
+    let condition = delete_condition_from_headers(req.headers())?;
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "Database pool is not configured",
+            "NotImplemented",
+        )
+    })?;
+
+    let calendar_id = match uuid::Uuid::parse_str(&collection_path.calendar_key) {
+        Ok(calendar_id) => sqlx::query_scalar::<_, uuid::Uuid>(
+            r#"
+            SELECT id
+            FROM caldav.calendars
+            WHERE id = $1
+              AND owner_id = $2
+            "#,
+        )
+        .bind(calendar_id)
+        .bind(user.id)
+        .fetch_optional(&**pool)
+        .await
+        .map_err(|e| AppError::internal_error(format!("Failed to look up calendar: {e}")))?,
+        Err(_) => sqlx::query_scalar::<_, uuid::Uuid>(
+            r#"
+            SELECT id
+            FROM caldav.calendars
+            WHERE slug = $1
+              AND owner_id = $2
+            "#,
+        )
+        .bind(&collection_path.calendar_key)
+        .bind(user.id)
+        .fetch_optional(&**pool)
+        .await
+        .map_err(|e| AppError::internal_error(format!("Failed to look up calendar: {e}")))?,
+    };
+
+    let Some(calendar_id) = calendar_id else {
+        return Ok(xml_error_response(
+            StatusCode::NOT_FOUND,
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:"/>"#,
+        ));
+    };
+
+    if !collection_if_match_satisfied(&condition, &calendar_id) {
+        return Ok(xml_error_response(
+            StatusCode::PRECONDITION_FAILED,
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:"/>"#,
+        ));
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::internal_error(format!("Failed to begin calendar delete: {e}")))?;
+
+    sqlx::query(
+        r#"
+        DELETE FROM caldav.calendar_events
+        WHERE calendar_id = $1
+        "#,
+    )
+    .bind(calendar_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| AppError::internal_error(format!("Failed to delete calendar events: {e}")))?;
+
+    sqlx::query(
+        r#"
+        DELETE FROM caldav.calendar_properties
+        WHERE calendar_id = $1
+        "#,
+    )
+    .bind(calendar_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| AppError::internal_error(format!("Failed to delete calendar properties: {e}")))?;
+
+    sqlx::query(
+        r#"
+        DELETE FROM caldav.calendar_shares
+        WHERE calendar_id = $1
+        "#,
+    )
+    .bind(calendar_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| AppError::internal_error(format!("Failed to delete calendar shares: {e}")))?;
+
+    let result = sqlx::query(
+        r#"
+        DELETE FROM caldav.calendars
+        WHERE id = $1
+          AND owner_id = $2
+        "#,
+    )
+    .bind(calendar_id)
+    .bind(user.id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| AppError::internal_error(format!("Failed to delete calendar: {e}")))?;
+
+    if result.rows_affected() != 1 {
+        tx.rollback().await.map_err(|e| {
+            AppError::internal_error(format!("Failed to roll back calendar delete: {e}"))
+        })?;
+        return Ok(xml_error_response(
+            StatusCode::NOT_FOUND,
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:"/>"#,
+        ));
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::internal_error(format!("Failed to commit calendar delete: {e}")))?;
+
+    Ok(Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())
+        .unwrap())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CalendarCollectionPath {
+    username: Option<String>,
+    calendar_key: String,
+}
+
+fn parse_calendar_collection_path(path: &str) -> Result<Option<CalendarCollectionPath>, AppError> {
+    let trimmed = path.trim_matches('/');
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let segments: Vec<&str> = trimmed
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+
+    let collection_path = match segments.as_slice() {
+        ["calendars", username, calendar_key] => Some(CalendarCollectionPath {
+            username: Some((*username).to_string()),
+            calendar_key: (*calendar_key).to_string(),
+        }),
+        [username, calendar_key] if !calendar_key.to_ascii_lowercase().ends_with(".ics") => {
+            Some(CalendarCollectionPath {
+                username: Some((*username).to_string()),
+                calendar_key: (*calendar_key).to_string(),
+            })
+        }
+        [calendar_key] if uuid::Uuid::parse_str(calendar_key).is_ok() => {
+            Some(CalendarCollectionPath {
+                username: None,
+                calendar_key: (*calendar_key).to_string(),
+            })
+        }
+        _ => None,
+    };
+
+    if let Some(collection_path) = &collection_path {
+        validate_calendar_collection_segment(&collection_path.calendar_key)?;
+        if let Some(username) = &collection_path.username {
+            validate_calendar_collection_segment(username)?;
+        }
+    }
+
+    Ok(collection_path)
+}
+
+fn validate_calendar_collection_segment(segment: &str) -> Result<(), AppError> {
+    if segment.trim().is_empty()
+        || segment.contains('/')
+        || segment.contains('\\')
+        || segment == "."
+        || segment == ".."
+    {
+        return Err(AppError::bad_request(
+            "Calendar collection path segment is invalid",
+        ));
+    }
+
+    Ok(())
+}
+
+fn is_valid_delete_collection_depth(headers: &HeaderMap) -> Result<bool, AppError> {
+    let Some(depth) = headers.get("Depth") else {
+        return Ok(true);
+    };
+
+    let depth = depth
+        .to_str()
+        .map_err(|_| AppError::bad_request("Invalid Depth header"))?
+        .trim();
+
+    Ok(depth.eq_ignore_ascii_case("infinity"))
+}
+
+fn collection_if_match_satisfied(
+    condition: &CalendarObjectDeleteConditionDto,
+    calendar_id: &uuid::Uuid,
+) -> bool {
+    match condition {
+        CalendarObjectDeleteConditionDto::None => true,
+        CalendarObjectDeleteConditionDto::IfMatchAny => true,
+        CalendarObjectDeleteConditionDto::IfMatch(etags) => {
+            let collection_etag = calendar_id.to_string();
+            etags.iter().any(|etag| etag == &collection_etag)
+        }
+    }
 }
 
 fn delete_condition_from_headers(
