@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto, PutEventICalDto, PutEventICalResultDto,
     UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::{CalendarStoragePort, CalendarUseCase};
@@ -228,6 +228,25 @@ impl CalendarUseCase for CalendarService {
         self.calendar_storage.create_event_from_ical(event).await
     }
 
+    async fn put_event_from_ical(
+        &self,
+        event: PutEventICalDto,
+        user_id: Uuid,
+    ) -> Result<PutEventICalResultDto, DomainError> {
+        let has_access = self
+            .calendar_storage
+            .check_calendar_access(&event.calendar_id, user_id)
+            .await?;
+        if !has_access {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Calendar",
+                "You don't have permission to write events in this calendar",
+            ));
+        }
+        self.calendar_storage.put_event_from_ical(event).await
+    }
+
     async fn update_event(
         &self,
         event_id: &str,
@@ -287,6 +306,30 @@ impl CalendarUseCase for CalendarService {
             ));
         }
         Ok(event)
+    }
+
+
+    async fn get_event_by_resource_path(
+        &self,
+        calendar_id: &str,
+        resource_path: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarEventDto, DomainError> {
+        let has_access = self
+            .calendar_storage
+            .check_calendar_access(calendar_id, user_id)
+            .await?;
+        let calendar = self.calendar_storage.get_calendar(calendar_id).await?;
+        if !has_access && !calendar.is_public {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Calendar",
+                "You don't have permission to view events in this calendar",
+            ));
+        }
+        self.calendar_storage
+            .get_event_by_resource_path(calendar_id, resource_path)
+            .await
     }
 
     async fn list_events(

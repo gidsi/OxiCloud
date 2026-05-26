@@ -10,14 +10,14 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto, EventPutPreconditionDto, PutEventICalDto, PutEventICalResultDto,
     UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::CalendarStoragePort;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::calendar::Calendar;
 use crate::domain::entities::calendar_event::CalendarEvent;
-use crate::domain::repositories::calendar_event_repository::CalendarEventRepository;
+use crate::domain::repositories::calendar_event_repository::{CalendarEventPutPrecondition, CalendarEventRepository};
 use crate::domain::repositories::calendar_repository::CalendarRepository;
 use crate::infrastructure::repositories::pg::CalendarEventPgRepository;
 use crate::infrastructure::repositories::pg::CalendarPgRepository;
@@ -363,11 +363,33 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .find_calendar_by_id(&calendar_id)
             .await?;
 
-        // Parse iCal data and create event
-        let event = CalendarEvent::from_ical(calendar_id, dto.ical_data.clone())?;
+        let event = if let Some(resource_path) = dto.resource_path {
+            CalendarEvent::from_ical_with_resource_path(calendar_id, resource_path, dto.ical_data.clone())?
+        } else {
+            CalendarEvent::from_ical(calendar_id, dto.ical_data.clone())?
+        };
 
         let created = self.event_repository.create_event(event).await?;
         Ok(CalendarEventDto::from(created))
+    }
+
+    async fn put_event_from_ical(
+        &self,
+        dto: PutEventICalDto,
+    ) -> Result<PutEventICalResultDto, DomainError> {
+        let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(ErrorKind::InvalidInput, "Event", "Invalid calendar ID format")
+        })?;
+        let _calendar = self.calendar_repository.find_calendar_by_id(&calendar_id).await?;
+        let event = CalendarEvent::from_ical_with_resource_path(calendar_id, dto.resource_path, dto.ical_data)?;
+        let precondition = match dto.precondition {
+            EventPutPreconditionDto::None => CalendarEventPutPrecondition::None,
+            EventPutPreconditionDto::IfMatch(etag) => CalendarEventPutPrecondition::IfMatch(etag),
+            EventPutPreconditionDto::IfMatchAny => CalendarEventPutPrecondition::IfMatchAny,
+            EventPutPreconditionDto::IfNoneMatchAny => CalendarEventPutPrecondition::IfNoneMatchAny,
+        };
+        let result = self.event_repository.put_event_by_resource_path(event, precondition).await?;
+        Ok(PutEventICalResultDto { event: CalendarEventDto::from(result.event), created: result.created })
     }
 
     async fn update_event(
@@ -405,6 +427,12 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         if let Some(rrule) = update.rrule {
             event.update_rrule(Some(rrule))?;
         }
+        if let Some(resource_path) = update.resource_path {
+            event.update_resource_path(resource_path)?;
+        }
+        if let Some(ical_data) = update.ical_data {
+            event.update_ical_data(ical_data)?;
+        }
 
         let updated = self.event_repository.update_event(event).await?;
         Ok(CalendarEventDto::from(updated))
@@ -424,6 +452,19 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         })?;
 
         let event = self.event_repository.find_event_by_id(&uuid).await?;
+        Ok(CalendarEventDto::from(event))
+    }
+
+    async fn get_event_by_resource_path(
+        &self,
+        calendar_id: &str,
+        resource_path: &str,
+    ) -> Result<CalendarEventDto, DomainError> {
+        let uuid = Uuid::parse_str(calendar_id).map_err(|_| {
+            DomainError::new(ErrorKind::InvalidInput, "Event", "Invalid calendar ID format")
+        })?;
+        let event = self.event_repository.find_event_by_resource_path(&uuid, resource_path).await?
+            .ok_or_else(|| DomainError::not_found("Calendar Event", resource_path.to_string()))?;
         Ok(CalendarEventDto::from(event))
     }
 

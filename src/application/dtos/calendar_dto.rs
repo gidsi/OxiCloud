@@ -97,6 +97,9 @@ pub struct CalendarEventDto {
     pub all_day: bool,
     pub rrule: Option<String>,
     pub ical_uid: String,
+    pub resource_path: String,
+    pub ical_data: String,
+    pub etag: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -114,6 +117,9 @@ impl Default for CalendarEventDto {
             all_day: false,
             rrule: None,
             ical_uid: String::new(),
+            resource_path: String::new(),
+            ical_data: String::new(),
+            etag: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -133,6 +139,9 @@ impl From<CalendarEvent> for CalendarEventDto {
             all_day: event.all_day(),
             rrule: event.rrule().map(|s| s.to_string()),
             ical_uid: event.ical_uid().to_string(),
+            resource_path: event.resource_path().to_string(),
+            ical_data: event.ical_data().to_string(),
+            etag: event.etag().to_string(),
             created_at: *event.created_at(),
             updated_at: *event.updated_at(),
         }
@@ -143,7 +152,31 @@ impl From<CalendarEvent> for CalendarEventDto {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateEventICalDto {
     pub calendar_id: String,
+    #[serde(default)]
+    pub resource_path: Option<String>,
     pub ical_data: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum EventPutPreconditionDto {
+    None,
+    IfMatch(String),
+    IfMatchAny,
+    IfNoneMatchAny,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutEventICalDto {
+    pub calendar_id: String,
+    pub resource_path: String,
+    pub ical_data: String,
+    pub precondition: EventPutPreconditionDto,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PutEventICalResultDto {
+    pub event: CalendarEventDto,
+    pub created: bool,
 }
 
 /// DTO for calendar event creation with structured data
@@ -157,6 +190,9 @@ pub struct CreateEventDto {
     pub end_time: DateTime<Utc>,
     pub all_day: Option<bool>,
     pub rrule: Option<String>,
+    pub ical_data: Option<String>,
+    pub resource_path: Option<String>,
+    pub expected_etag: Option<String>,
     pub user_id: String, // Added for authorization
 }
 
@@ -170,6 +206,9 @@ pub struct UpdateEventDto {
     pub end_time: Option<DateTime<Utc>>,
     pub all_day: Option<bool>,
     pub rrule: Option<String>,
+    pub ical_data: Option<String>,
+    pub resource_path: Option<String>,
+    pub expected_etag: Option<String>,
     pub user_id: String, // Added for authorization
 }
 

@@ -1,5 +1,5 @@
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto, PutEventICalDto, PutEventICalResultDto,
     UpdateCalendarDto, UpdateEventDto,
 };
 use crate::common::errors::DomainError;
@@ -85,6 +85,10 @@ pub trait CalendarStoragePort: Send + Sync + 'static {
         &self,
         event: CreateEventICalDto,
     ) -> Result<CalendarEventDto, DomainError>;
+    async fn put_event_from_ical(
+        &self,
+        event: PutEventICalDto,
+    ) -> Result<PutEventICalResultDto, DomainError>;
     async fn update_event(
         &self,
         event_id: &str,
@@ -92,6 +96,11 @@ pub trait CalendarStoragePort: Send + Sync + 'static {
     ) -> Result<CalendarEventDto, DomainError>;
     async fn delete_event(&self, event_id: &str) -> Result<(), DomainError>;
     async fn get_event(&self, event_id: &str) -> Result<CalendarEventDto, DomainError>;
+    async fn get_event_by_resource_path(
+        &self,
+        calendar_id: &str,
+        resource_path: &str,
+    ) -> Result<CalendarEventDto, DomainError>;
     async fn list_events_by_calendar(
         &self,
         calendar_id: &str,
@@ -178,6 +187,11 @@ pub trait CalendarUseCase: Send + Sync + 'static {
         event: CreateEventICalDto,
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError>;
+    async fn put_event_from_ical(
+        &self,
+        event: PutEventICalDto,
+        user_id: Uuid,
+    ) -> Result<PutEventICalResultDto, DomainError>;
     async fn update_event(
         &self,
         event_id: &str,
@@ -188,6 +202,12 @@ pub trait CalendarUseCase: Send + Sync + 'static {
     async fn get_event(
         &self,
         event_id: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarEventDto, DomainError>;
+    async fn get_event_by_resource_path(
+        &self,
+        calendar_id: &str,
+        resource_path: &str,
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError>;
     async fn list_events(

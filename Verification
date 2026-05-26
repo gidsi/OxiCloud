@@ -1,0 +1,2 @@
+cargo check --all-targets --all-features
+Finished `dev` profile [optimized + debuginfo] target(s)

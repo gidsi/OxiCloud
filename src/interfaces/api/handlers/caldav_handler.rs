@@ -24,13 +24,12 @@ use axum::{
 };
 use bytes::Buf;
 use percent_encoding::percent_decode_str;
-use std::fmt::Write;
 use std::sync::Arc;
 
 use crate::application::adapters::caldav_adapter::{CalDavAdapter, CalDavReportType};
 use crate::application::adapters::webdav_adapter::{PropFindRequest, PropFindType};
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CreateCalendarDto, CreateEventICalDto, UpdateCalendarDto,
+    CalendarDto, CreateCalendarDto, EventPutPreconditionDto, PutEventICalDto, UpdateCalendarDto,
 };
 use crate::application::ports::calendar_ports::CalendarUseCase;
 use crate::application::ports::dav_principal_ports::DavPrincipalDiscoveryUseCase;
@@ -675,12 +674,14 @@ async fn handle_put(
     let calendar_service = get_calendar_service(&state)?;
     let target = resolve_calendar_target(calendar_service, path, &user).await?;
     let calendar_id = target.calendar.id.as_str();
-
-    if target.event_path.is_none() {
-        return Err(AppError::bad_request(
+    let resource_path = target.event_path.clone().ok_or_else(|| {
+        AppError::bad_request(
             "Path must be {calendar_id}/{uid}.ics or {username}/{calendar_path}/{uid}.ics",
-        ));
-    }
+        )
+    })?;
+
+    caldav_calendar_body_allowed(req.headers().get(header::CONTENT_TYPE))?;
+    let precondition = parse_put_precondition(&req)?;
 
     let body_bytes = body::to_bytes(req.into_body(), MAX_CALDAV_BODY)
         .await
@@ -689,68 +690,27 @@ async fn handle_put(
     let ical_data = String::from_utf8(body_bytes.to_vec())
         .map_err(|e| AppError::bad_request(format!("Invalid UTF-8 in iCalendar data: {}", e)))?;
 
-    let ical_uid = extract_uid_from_ical(&ical_data);
+    validate_calendar_object_for_put(&ical_data)?;
 
-    let existing = if let Some(ref uid) = ical_uid {
-        let events = calendar_service
-            .list_events(calendar_id, None, None, user.id)
-            .await
-            .unwrap_or_default();
-        events.into_iter().find(|e| e.ical_uid == *uid)
-    } else {
-        None
+    let put_dto = PutEventICalDto {
+        calendar_id: calendar_id.to_string(),
+        resource_path,
+        ical_data,
+        precondition,
     };
 
-    if let Some(existing_event) = existing {
-        // Update existing event — re-create from iCal for full fidelity
-        calendar_service
-            .delete_event(&existing_event.id, user.id)
-            .await
-            .map_err(|e| AppError::internal_error(format!("Failed to update event: {}", e)))?;
+    let result = calendar_service
+        .put_event_from_ical(put_dto, user.id)
+        .await
+        .map_err(caldav_put_error)?;
 
-        let create_dto = CreateEventICalDto {
-            calendar_id: calendar_id.to_string(),
-            ical_data,
-        };
-        let event = calendar_service
-            .create_event_from_ical(create_dto, user.id)
-            .await
-            .map_err(|e| AppError::internal_error(format!("Failed to recreate event: {}", e)))?;
-
-        Ok(Response::builder()
-            .status(StatusCode::NO_CONTENT)
-            .header(header::ETAG, format!("\"{}\"", event.id))
-            .body(Body::empty())
-            .unwrap())
-    } else {
-        let create_dto = CreateEventICalDto {
-            calendar_id: calendar_id.to_string(),
-            ical_data,
-        };
-
-        let event = calendar_service
-            .create_event_from_ical(create_dto, user.id)
-            .await
-            .map_err(|e| AppError::internal_error(format!("Failed to create event: {}", e)))?;
-
-        Ok(Response::builder()
-            .status(StatusCode::CREATED)
-            .header(header::ETAG, format!("\"{}\"", event.id))
-            .body(Body::empty())
-            .unwrap())
-    }
+    Ok(Response::builder()
+        .status(if result.created { StatusCode::CREATED } else { StatusCode::NO_CONTENT })
+        .header(header::ETAG, quoted_etag(&result.event.etag))
+        .body(Body::empty())
+        .unwrap())
 }
 
-/// Extract UID from iCalendar data
-fn extract_uid_from_ical(ical_data: &str) -> Option<String> {
-    for line in ical_data.lines() {
-        let trimmed = line.trim();
-        if let Some(stripped) = trimmed.strip_prefix("UID:") {
-            return Some(stripped.trim().to_string());
-        }
-    }
-    None
-}
 
 // ─── GET (.ics) ──────────────────────────────────────────────────────
 
@@ -765,25 +725,20 @@ async fn handle_get(
     let calendar_id = target.calendar.id.as_str();
 
     if let Some(event_file) = target.event_path.as_deref() {
-        let ical_uid = event_file.trim_end_matches(".ics");
-
-        let events = calendar_service
-            .list_events(calendar_id, None, None, user.id)
+        let event = calendar_service
+            .get_event_by_resource_path(calendar_id, event_file, user.id)
             .await
-            .map_err(|e| AppError::internal_error(format!("Failed to list events: {}", e)))?;
-
-        let event = events
-            .iter()
-            .find(|e| e.ical_uid == ical_uid)
-            .ok_or_else(|| AppError::not_found(format!("Event not found: {}", ical_uid)))?;
-
-        let ical = generate_event_ical(event);
+            .map_err(|e| match e.kind {
+                ErrorKind::NotFound => AppError::not_found(e.message),
+                ErrorKind::AccessDenied => AppError::forbidden(e.message),
+                _ => AppError::from(e),
+            })?;
 
         Ok(Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
-            .header(header::ETAG, format!("\"{}\"", event.id))
-            .body(Body::from(ical))
+            .header(header::ETAG, quoted_etag(&event.etag))
+            .body(Body::from(event.ical_data))
             .unwrap())
     } else {
         let events = calendar_service
@@ -796,7 +751,7 @@ async fn handle_get(
         Ok(Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
-            .header(header::ETAG, format!("\"{}\"", target.calendar.id))
+            .header(header::ETAG, format!("\"{}\"", target.calendar.ctag))
             .body(Body::from(ical))
             .unwrap())
     }
@@ -806,57 +761,110 @@ fn generate_full_calendar_ical(
     calendar_name: &str,
     events: &[crate::application::dtos::calendar_dto::CalendarEventDto],
 ) -> String {
-    // Pre-estimate: ~200 bytes header + ~320 bytes per event
-    let mut buf = String::with_capacity(256 + events.len() * 320);
-    let _ = write!(
-        buf,
-        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OxiCloud//NONSGML Calendar//EN\r\nX-WR-CALNAME:{}\r\n",
-        calendar_name
-    );
-    for event in events {
-        write_vevent(&mut buf, event);
-    }
-    buf.push_str("END:VCALENDAR\r\n");
-    buf
-}
-
-fn generate_event_ical(event: &crate::application::dtos::calendar_dto::CalendarEventDto) -> String {
-    let mut buf = String::with_capacity(512);
+    let mut buf = String::with_capacity(256 + events.iter().map(|e| e.ical_data.len()).sum::<usize>());
     buf.push_str("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OxiCloud//NONSGML Calendar//EN\r\n");
-    write_vevent(&mut buf, event);
+    buf.push_str(&format!("X-WR-CALNAME:{}\r\n", calendar_name));
+    for event in events {
+        append_vevent_from_stored_ical(&mut buf, &event.ical_data);
+    }
     buf.push_str("END:VCALENDAR\r\n");
     buf
 }
 
-/// Writes a VEVENT block directly into `buf` — zero intermediate allocations.
-fn write_vevent(
-    buf: &mut String,
-    event: &crate::application::dtos::calendar_dto::CalendarEventDto,
-) {
-    let _ = write!(
-        buf,
-        "BEGIN:VEVENT\r\nUID:{}\r\nSUMMARY:{}\r\nDTSTART:{}\r\nDTEND:{}\r\n",
-        event.ical_uid,
-        event.summary.replace('\n', "\\n"),
-        event.start_time.format("%Y%m%dT%H%M%SZ"),
-        event.end_time.format("%Y%m%dT%H%M%SZ"),
-    );
-    if let Some(ref desc) = event.description {
-        let _ = write!(buf, "DESCRIPTION:{}\r\n", desc.replace('\n', "\\n"));
+fn append_vevent_from_stored_ical(buf: &mut String, ical_data: &str) {
+    let normalized = ical_data.replace("\r\n", "\n");
+    let mut in_vevent = false;
+    for line in normalized.lines() {
+        if line.trim().eq_ignore_ascii_case("BEGIN:VEVENT") {
+            in_vevent = true;
+        }
+        if in_vevent {
+            buf.push_str(line);
+            buf.push_str("\r\n");
+        }
+        if line.trim().eq_ignore_ascii_case("END:VEVENT") {
+            in_vevent = false;
+        }
     }
-    if let Some(ref loc) = event.location {
-        let _ = write!(buf, "LOCATION:{}\r\n", loc);
+}
+
+fn quoted_etag(etag: &str) -> String {
+    format!("\"{}\"", etag.trim_matches('"'))
+}
+
+fn parse_put_precondition(req: &Request<Body>) -> Result<EventPutPreconditionDto, AppError> {
+    if let Some(value) = req.headers().get(header::IF_NONE_MATCH) {
+        let value = value.to_str().map_err(|_| AppError::bad_request("Invalid If-None-Match header"))?;
+        if value.trim() == "*" {
+            return Ok(EventPutPreconditionDto::IfNoneMatchAny);
+        }
     }
-    if let Some(ref rrule) = event.rrule {
-        let _ = write!(buf, "RRULE:{}\r\n", rrule);
+    if let Some(value) = req.headers().get(header::IF_MATCH) {
+        let value = value.to_str().map_err(|_| AppError::bad_request("Invalid If-Match header"))?;
+        let trimmed = value.trim();
+        if trimmed == "*" {
+            return Ok(EventPutPreconditionDto::IfMatchAny);
+        }
+        return Ok(EventPutPreconditionDto::IfMatch(trimmed.trim_matches('"').to_string()));
     }
-    let _ = write!(
-        buf,
-        "DTSTAMP:{}\r\nCREATED:{}\r\nLAST-MODIFIED:{}\r\nEND:VEVENT\r\n",
-        event.updated_at.format("%Y%m%dT%H%M%SZ"),
-        event.created_at.format("%Y%m%dT%H%M%SZ"),
-        event.updated_at.format("%Y%m%dT%H%M%SZ"),
-    );
+    Ok(EventPutPreconditionDto::None)
+}
+
+fn caldav_calendar_body_allowed(content_type: Option<&axum::http::HeaderValue>) -> Result<(), AppError> {
+    let Some(value) = content_type else {
+        return Err(caldav_xml_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "supported-calendar-data"));
+    };
+    let value = value.to_str().map_err(|_| caldav_xml_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "supported-calendar-data"))?.to_ascii_lowercase();
+    if value.split(';').next().map(str::trim) == Some("text/calendar") {
+        Ok(())
+    } else {
+        Err(caldav_xml_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "supported-calendar-data"))
+    }
+}
+
+fn validate_calendar_object_for_put(ical_data: &str) -> Result<(), AppError> {
+    if !ical_data.contains("BEGIN:VCALENDAR") || !ical_data.contains("END:VCALENDAR") || !ical_data.contains("BEGIN:VEVENT") || !ical_data.contains("END:VEVENT") {
+        return Err(caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource"));
+    }
+    if ical_data.contains("BEGIN:VTODO") || ical_data.contains("BEGIN:VJOURNAL") {
+        return Err(caldav_xml_error(StatusCode::FORBIDDEN, "supported-calendar-component"));
+    }
+    for required in ["UID", "DTSTAMP", "DTSTART", "DTEND", "SUMMARY"] {
+        if extract_ical_property_for_put(ical_data, required).is_none() {
+            return Err(caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource"));
+        }
+    }
+    Ok(())
+}
+
+fn extract_ical_property_for_put(ical_data: &str, property_name: &str) -> Option<String> {
+    for line in ical_data.replace("\r\n", "\n").lines() {
+        let (name, value) = line.trim().split_once(':')?;
+        if name.split(';').next().unwrap_or(name).eq_ignore_ascii_case(property_name) && !value.trim().is_empty() {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
+}
+
+fn caldav_xml_error(status: StatusCode, element: &str) -> AppError {
+    AppError::new(
+        status,
+        format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:{}/></D:error>", element),
+        "CalDavError",
+    )
+}
+
+fn caldav_put_error(e: crate::common::errors::DomainError) -> AppError {
+    match e.kind {
+        ErrorKind::InvalidInput if e.entity_type == "Precondition" => AppError::precondition_failed(e.message),
+        ErrorKind::InvalidInput => caldav_xml_error(StatusCode::FORBIDDEN, "valid-calendar-object-resource"),
+        ErrorKind::UnsupportedOperation => caldav_xml_error(StatusCode::FORBIDDEN, "supported-calendar-component"),
+        ErrorKind::AccessDenied if e.entity_type == "CalendarEvent" => caldav_xml_error(StatusCode::FORBIDDEN, "no-uid-conflict"),
+        ErrorKind::AccessDenied => AppError::forbidden(e.message),
+        ErrorKind::NotFound => AppError::not_found(e.message),
+        _ => AppError::from(e),
+    }
 }
 
 // ─── DELETE ──────────────────────────────────────────────────────────

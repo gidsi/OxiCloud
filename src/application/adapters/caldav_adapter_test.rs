@@ -37,6 +37,21 @@ mod tests {
             all_day: false,
             rrule: None,
             ical_uid: "uid-evt-001@oxicloud".to_string(),
+            resource_path: "uid-evt-001@oxicloud.ics".to_string(),
+            ical_data: "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OxiCloud//NONSGML v1.0//EN
+BEGIN:VEVENT
+UID:uid-evt-001@oxicloud
+DTSTAMP:20250101T000000Z
+DTSTART:20250615T100000Z
+DTEND:20250615T110000Z
+SUMMARY:Team Meeting
+DESCRIPTION:Weekly team sync
+LOCATION:Conference Room A
+END:VEVENT
+END:VCALENDAR".to_string(),
+            etag: "sample-event-etag".to_string(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
         }

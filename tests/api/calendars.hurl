@@ -176,3 +176,130 @@ header "Content-Type" contains "xml"
 body contains "/caldav/{{username}}/work-calendar/"
 body contains "Work Calendar"
 body contains "Calendar created by the MKCALENDAR Hurl test"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 9 – PUT an event to the calendar (Create)
+# ─────────────────────────────────────────────────────────────
+PUT {{base_url}}/caldav/{{username}}/work-calendar/event1.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+Content-Type: text/calendar; charset=utf-8
+`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OxiCloud//NONSGML v1.0//EN
+BEGIN:VEVENT
+UID:event1
+DTSTAMP:20230526T000000Z
+DTSTART:20230526T100000Z
+DTEND:20230526T110000Z
+SUMMARY:Test Event
+END:VEVENT
+END:VCALENDAR`
+
+HTTP 201
+[Captures]
+event_etag: header "ETag"
+[Asserts]
+header "ETag" exists
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 10 – GET the event to verify creation
+# ─────────────────────────────────────────────────────────────
+GET {{base_url}}/caldav/{{username}}/work-calendar/event1.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+
+HTTP 200
+[Asserts]
+header "Content-Type" contains "text/calendar"
+header "ETag" == {{event_etag}}
+body contains "SUMMARY:Test Event"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 11 – PUT update the event successfully with matching If-Match
+# ─────────────────────────────────────────────────────────────
+PUT {{base_url}}/caldav/{{username}}/work-calendar/event1.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+If-Match: {{event_etag}}
+Content-Type: text/calendar; charset=utf-8
+`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OxiCloud//NONSGML v1.0//EN
+BEGIN:VEVENT
+UID:event1
+DTSTAMP:20230526T000000Z
+DTSTART:20230526T100000Z
+DTEND:20230526T110000Z
+SUMMARY:Updated Test Event
+END:VEVENT
+END:VCALENDAR`
+
+HTTP 204
+[Captures]
+new_event_etag: header "ETag"
+[Asserts]
+header "ETag" exists
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 12 – GET the event to verify update
+# ─────────────────────────────────────────────────────────────
+GET {{base_url}}/caldav/{{username}}/work-calendar/event1.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+
+HTTP 200
+[Asserts]
+header "Content-Type" contains "text/calendar"
+header "ETag" == {{new_event_etag}}
+body contains "SUMMARY:Updated Test Event"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 13 – PUT update fails with incorrect If-Match (Concurrency Control)
+# ─────────────────────────────────────────────────────────────
+PUT {{base_url}}/caldav/{{username}}/work-calendar/event1.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+If-Match: "wrong-etag"
+Content-Type: text/calendar; charset=utf-8
+`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OxiCloud//NONSGML v1.0//EN
+BEGIN:VEVENT
+UID:event1
+DTSTAMP:20230526T000000Z
+DTSTART:20230526T100000Z
+DTEND:20230526T110000Z
+SUMMARY:Hacked Event
+END:VEVENT
+END:VCALENDAR`
+
+HTTP 412
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 14 – PUT create fails if event already exists and If-None-Match: * (Concurrency Control)
+# ─────────────────────────────────────────────────────────────
+PUT {{base_url}}/caldav/{{username}}/work-calendar/event1.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+If-None-Match: *
+Content-Type: text/calendar; charset=utf-8
+`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OxiCloud//NONSGML v1.0//EN
+BEGIN:VEVENT
+UID:event1
+DTSTAMP:20230526T000000Z
+DTSTART:20230526T100000Z
+DTEND:20230526T110000Z
+SUMMARY:Another Event
+END:VEVENT
+END:VCALENDAR`
+
+HTTP 412
