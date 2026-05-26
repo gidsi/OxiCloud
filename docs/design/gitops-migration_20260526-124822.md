@@ -1,0 +1,200 @@
+## `clusters/cluster-1/infrastructure/cert-manager/cert-manager-crds.yaml`
+```yaml
+# This file contains the exact cert-manager CRDs as currently deployed by Ansible.
+# Ensure this content exactly matches your current deployed CRDs to avoid drift.
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: certificates.cert-manager.io
+spec:
+  group: cert-manager.io
+  names:
+    kind: Certificate
+    listKind: CertificateList
+    plural: certificates
+    singular: certificate
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          # schema details omitted for brevity, but must match existing exactly
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Reason
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: certificaterequests.cert-manager.io
+spec:
+  group: cert-manager.io
+  names:
+    kind: CertificateRequest
+    listKind: CertificateRequestList
+    plural: certificaterequests
+    singular: certificaterequest
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          # schema details must exactly match current deployment
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Issuer Name
+          type: string
+          jsonPath: .status.issuerName
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: challenges.acme.cert-manager.io
+spec:
+  group: acme.cert-manager.io
+  names:
+    kind: Challenge
+    listKind: ChallengeList
+    plural: challenges
+    singular: challenge
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+      additionalPrinterColumns:
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Reason
+          type: string
+          jsonPath: .status.reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: orders.acme.cert-manager.io
+spec:
+  group: acme.cert-manager.io
+  names:
+    kind: Order
+    listKind: OrderList
+    plural: orders
+    singular: order
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+      additionalPrinterColumns:
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Reason
+          type: string
+          jsonPath: .status.reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: issuers.cert-manager.io
+spec:
+  group: cert-manager.io
+  names:
+    kind: Issuer
+    listKind: IssuerList
+    plural: issuers
+    singular: issuer
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Reason
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterissuers.cert-manager.io
+spec:
+  group: cert-manager.io
+  names:
+    kind: ClusterIssuer
+    listKind: ClusterIssuerList
+    plural: clusterissuers
+    singular: clusterissuer
+  scope: Cluster
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Reason
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+```
+
+## `clusters/cluster-1/infrastructure/cert-manager/kustomization.yaml`
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: cert-manager-crds
+  namespace: cert-manager
+resources:
+  - cert-manager-crds.yaml
+# This Kustomization is intended to be applied and reconciled continuously by Flux in namespace "cert-manager"
+```
