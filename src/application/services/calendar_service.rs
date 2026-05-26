@@ -88,6 +88,29 @@ impl CalendarUseCase for CalendarService {
         Ok(calendar)
     }
 
+    async fn get_calendar_by_name(
+        &self,
+        name: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self
+            .calendar_storage
+            .get_calendar_by_name(name, user_id)
+            .await?;
+        let has_access = self
+            .calendar_storage
+            .check_calendar_access(&calendar.id, user_id)
+            .await?;
+        if !has_access && !calendar.is_public {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Calendar",
+                "You don't have permission to view this calendar",
+            ));
+        }
+        Ok(calendar)
+    }
+
     async fn list_my_calendars(&self, user_id: Uuid) -> Result<Vec<CalendarDto>, DomainError> {
         self.calendar_storage.list_calendars_by_owner(user_id).await
     }

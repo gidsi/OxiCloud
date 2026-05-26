@@ -896,7 +896,7 @@ impl CalDavAdapter {
 
         // Display name
         xml_writer.write_event(Event::Start(BytesStart::new("D:displayname")))?;
-        xml_writer.write_event(Event::Text(BytesText::new(&calendar.name)))?;
+        xml_writer.write_event(Event::Text(BytesText::new(&calendar.display_name)))?;
         xml_writer.write_event(Event::End(BytesEnd::new("D:displayname")))?;
 
         // Last modified
@@ -1023,7 +1023,7 @@ impl CalDavAdapter {
                 }
                 ("DAV:", "displayname") => {
                     xml_writer.write_event(Event::Start(BytesStart::new("D:displayname")))?;
-                    xml_writer.write_event(Event::Text(BytesText::new(&calendar.name)))?;
+                    xml_writer.write_event(Event::Text(BytesText::new(&calendar.display_name)))?;
                     xml_writer.write_event(Event::End(BytesEnd::new("D:displayname")))?;
                 }
                 ("DAV:", "getlastmodified") => {

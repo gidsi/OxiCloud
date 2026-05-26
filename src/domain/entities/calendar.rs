@@ -86,8 +86,32 @@ impl Calendar {
         description: Option<String>,
         color: Option<String>,
     ) -> Result<Self> {
-        // Validate inputs
-        if name.is_empty() {
+        Self::new_with_display_name(
+            name.clone(),
+            name,
+            owner_id,
+            description,
+            color,
+            false,
+            vec!["VEVENT".to_string(), "VTODO".to_string()],
+            None,
+            0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_display_name(
+        name: String,
+        display_name: String,
+        owner_id: Uuid,
+        description: Option<String>,
+        color: Option<String>,
+        is_public: bool,
+        supported_components: Vec<String>,
+        timezone: Option<String>,
+        calendar_order: i32,
+    ) -> Result<Self> {
+        if name.trim().is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "Calendar",
@@ -95,25 +119,35 @@ impl Calendar {
             ));
         }
 
+        if display_name.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar display name cannot be empty",
+            ));
+        }
+
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
         }
+
+        Self::validate_supported_components(&supported_components)?;
 
         let now = Utc::now();
 
         Ok(Self {
             id: Uuid::new_v4(),
-            display_name: name.clone(),
             name,
+            display_name,
             owner_id,
             description,
             color,
-            is_public: false,
+            is_public,
             ctag: "1".to_string(),
             sync_version: 1,
-            supported_components: vec!["VEVENT".to_string(), "VTODO".to_string()],
-            timezone: None,
-            calendar_order: 0,
+            supported_components,
+            timezone,
+            calendar_order,
             created_at: now,
             updated_at: now,
             custom_properties: std::collections::HashMap::new(),
@@ -142,36 +176,22 @@ impl Calendar {
         created_at: DateTime<Utc>,
         updated_at: DateTime<Utc>,
     ) -> Result<Self> {
-        // Basic validation
-        if name.is_empty() {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "Calendar",
-                "Calendar name cannot be empty",
-            ));
-        }
-
-        if let Some(color_str) = &color {
-            Self::validate_color(color_str)?;
-        }
-
-        Ok(Self {
+        Self::with_dav_metadata(
             id,
-            display_name: name.clone(),
+            name.clone(),
             name,
             owner_id,
             description,
             color,
-            is_public: false,
-            ctag: "1".to_string(),
-            sync_version: 1,
-            supported_components: vec!["VEVENT".to_string(), "VTODO".to_string()],
-            timezone: None,
-            calendar_order: 0,
+            false,
+            "1".to_string(),
+            1,
+            vec!["VEVENT".to_string(), "VTODO".to_string()],
+            None,
+            0,
             created_at,
             updated_at,
-            custom_properties: std::collections::HashMap::new(),
-        })
+        )
     }
 
     /// Creates a calendar with all DAV persistence metadata.

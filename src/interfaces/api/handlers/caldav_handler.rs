@@ -604,23 +604,33 @@ async fn handle_mkcalendar(
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
 
-    let (name, description, color) = if body_bytes.is_empty() {
-        let name = path
-            .split('/')
-            .next_back()
-            .unwrap_or("New Calendar")
-            .to_string();
-        (name, None, None)
+    let path_calendar_name = strip_username_prefix(path)
+        .trim_matches('/')
+        .split('/')
+        .next_back()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or("calendar")
+        .to_string();
+
+    let (display_name, description, color) = if body_bytes.is_empty() {
+        (Some(path_calendar_name.clone()), None, None)
     } else {
-        CalDavAdapter::parse_mkcalendar(body_bytes.reader())
-            .map_err(|e| AppError::bad_request(format!("Failed to parse MKCALENDAR: {}", e)))?
+        let (parsed_display_name, description, color) =
+            CalDavAdapter::parse_mkcalendar(body_bytes.reader())
+                .map_err(|e| AppError::bad_request(format!("Failed to parse MKCALENDAR: {}", e)))?;
+
+        (Some(parsed_display_name), description, color)
     };
 
     let create_dto = CreateCalendarDto {
-        name,
+        name: path_calendar_name,
+        display_name,
         description,
         color,
         is_public: Some(false),
+        supported_components: Some(vec!["VEVENT".to_string(), "VTODO".to_string()]),
+        timezone: None,
+        calendar_order: Some(0),
     };
 
     calendar_service
@@ -919,21 +929,33 @@ async fn handle_proppatch(
 
     let mut update = UpdateCalendarDto {
         name: None,
+        display_name: None,
         description: None,
         color: None,
         is_public: None,
+        supported_components: None,
+        timezone: None,
+        calendar_order: None,
     };
 
     for prop in &props_to_set {
         match prop.name.name.as_str() {
-            "displayname" => update.name = Some(prop.value.clone().unwrap_or_default()),
+            "displayname" => update.display_name = Some(prop.value.clone().unwrap_or_default()),
             "calendar-description" => update.description = prop.value.clone(),
             "calendar-color" => update.color = prop.value.clone(),
             _ => {}
         }
     }
 
-    if update.name.is_some() || update.description.is_some() || update.color.is_some() {
+    if update.name.is_some()
+        || update.display_name.is_some()
+        || update.description.is_some()
+        || update.color.is_some()
+        || update.is_public.is_some()
+        || update.supported_components.is_some()
+        || update.timezone.is_some()
+        || update.calendar_order.is_some()
+    {
         calendar_service
             .update_calendar(calendar_id, update, user.id)
             .await

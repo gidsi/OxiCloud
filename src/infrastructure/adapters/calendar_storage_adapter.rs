@@ -49,7 +49,26 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         dto: CreateCalendarDto,
         owner_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        let calendar = Calendar::new(dto.name, owner_id, dto.description, dto.color)?;
+        let display_name = dto
+            .display_name
+            .filter(|display_name| !display_name.trim().is_empty())
+            .unwrap_or_else(|| dto.name.clone());
+
+        let supported_components = dto
+            .supported_components
+            .unwrap_or_else(|| vec!["VEVENT".to_string(), "VTODO".to_string()]);
+
+        let calendar = Calendar::new_with_display_name(
+            dto.name,
+            display_name,
+            owner_id,
+            dto.description,
+            dto.color,
+            dto.is_public.unwrap_or(false),
+            supported_components,
+            dto.timezone,
+            dto.calendar_order.unwrap_or(0),
+        )?;
 
         let created = self.calendar_repository.create_calendar(calendar).await?;
         Ok(CalendarDto::from(created))
@@ -73,11 +92,26 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         if let Some(name) = update.name {
             calendar.update_name(name)?;
         }
+        if let Some(display_name) = update.display_name {
+            calendar.update_display_name(display_name)?;
+        }
         if let Some(description) = update.description {
             calendar.update_description(Some(description));
         }
         if let Some(color) = update.color {
             calendar.update_color(Some(color))?;
+        }
+        if let Some(is_public) = update.is_public {
+            calendar.update_is_public(is_public);
+        }
+        if let Some(supported_components) = update.supported_components {
+            calendar.update_supported_components(supported_components)?;
+        }
+        if update.timezone.is_some() {
+            calendar.update_timezone(update.timezone);
+        }
+        if let Some(calendar_order) = update.calendar_order {
+            calendar.update_calendar_order(calendar_order);
         }
 
         let updated = self.calendar_repository.update_calendar(calendar).await?;
@@ -112,6 +146,19 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         })?;
 
         let calendar = self.calendar_repository.find_calendar_by_id(&uuid).await?;
+        Ok(CalendarDto::from(calendar))
+    }
+
+    async fn get_calendar_by_name(
+        &self,
+        name: &str,
+        owner_id: Uuid,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self
+            .calendar_repository
+            .find_calendar_by_name_and_owner(name, owner_id)
+            .await?;
+
         Ok(CalendarDto::from(calendar))
     }
 
