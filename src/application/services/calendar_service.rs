@@ -3,8 +3,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto, PutEventICalDto, PutEventICalResultDto,
-    UpdateCalendarDto, UpdateEventDto,
+    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    DeleteEventResourceDto, PutEventICalDto, PutEventICalResultDto, UpdateCalendarDto,
+    UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::{CalendarStoragePort, CalendarUseCase};
 use crate::common::errors::{DomainError, ErrorKind};
@@ -282,6 +283,29 @@ impl CalendarUseCase for CalendarService {
             ));
         }
         self.calendar_storage.delete_event(event_id).await
+    }
+
+    async fn delete_event_by_resource_path(
+        &self,
+        event: DeleteEventResourceDto,
+        user_id: Uuid,
+    ) -> Result<(), DomainError> {
+        let has_access = self
+            .calendar_storage
+            .check_calendar_access(&event.calendar_id, user_id)
+            .await?;
+
+        if !has_access {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Calendar",
+                "You don't have permission to delete events in this calendar",
+            ));
+        }
+
+        self.calendar_storage
+            .delete_event_by_resource_path(event)
+            .await
     }
 
     async fn get_event(

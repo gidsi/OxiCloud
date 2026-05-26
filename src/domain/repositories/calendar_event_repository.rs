@@ -19,6 +19,13 @@ pub struct CalendarEventPutResult {
     pub created: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CalendarEventDeletePrecondition {
+    None,
+    IfMatch(String),
+    IfMatchAny,
+}
+
 pub trait CalendarEventRepository: Send + Sync + 'static {
     async fn create_event(
         &self,
@@ -31,6 +38,13 @@ pub trait CalendarEventRepository: Send + Sync + 'static {
     ) -> CalendarEventRepositoryResult<CalendarEvent>;
 
     async fn delete_event(&self, id: &Uuid) -> CalendarEventRepositoryResult<()>;
+
+    async fn delete_event_by_resource_path(
+        &self,
+        calendar_id: &Uuid,
+        resource_path: &str,
+        precondition: CalendarEventDeletePrecondition,
+    ) -> CalendarEventRepositoryResult<CalendarEvent>;
 
     async fn find_event_by_id(&self, id: &Uuid) -> CalendarEventRepositoryResult<CalendarEvent>;
 

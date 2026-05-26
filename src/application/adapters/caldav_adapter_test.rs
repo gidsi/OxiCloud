@@ -50,7 +50,8 @@ SUMMARY:Team Meeting
 DESCRIPTION:Weekly team sync
 LOCATION:Conference Room A
 END:VEVENT
-END:VCALENDAR".to_string(),
+END:VCALENDAR"
+                .to_string(),
             etag: "sample-event-etag".to_string(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),

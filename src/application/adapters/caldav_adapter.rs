@@ -915,6 +915,19 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::Text(BytesText::new(&format!("\"{}\"", calendar.id))))?;
         xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
 
+        // CalendarServer collection tag used by CalDAV clients to detect collection changes
+        xml_writer.write_event(Event::Start(BytesStart::new("CS:getctag")))?;
+        xml_writer.write_event(Event::Text(BytesText::new(&calendar.ctag)))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("CS:getctag")))?;
+
+        // WebDAV sync token derived from the collection change tag
+        xml_writer.write_event(Event::Start(BytesStart::new("D:sync-token")))?;
+        xml_writer.write_event(Event::Text(BytesText::new(&format!(
+            "urn:oxicloud:caldav:sync:{}",
+            calendar.ctag
+        ))))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:sync-token")))?;
+
         // Content type for calendar collection
         xml_writer.write_event(Event::Start(BytesStart::new("D:getcontenttype")))?;
         xml_writer.write_event(Event::Text(BytesText::new(
@@ -994,6 +1007,8 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::Empty(BytesStart::new("D:displayname")))?;
         xml_writer.write_event(Event::Empty(BytesStart::new("D:getlastmodified")))?;
         xml_writer.write_event(Event::Empty(BytesStart::new("D:getetag")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("CS:getctag")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("D:sync-token")))?;
         xml_writer.write_event(Event::Empty(BytesStart::new("D:getcontenttype")))?;
 
         // CalDAV specific property names
@@ -1046,6 +1061,14 @@ impl CalDavAdapter {
                         calendar.id
                     ))))?;
                     xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
+                }
+                ("DAV:", "sync-token") => {
+                    xml_writer.write_event(Event::Start(BytesStart::new("D:sync-token")))?;
+                    xml_writer.write_event(Event::Text(BytesText::new(&format!(
+                        "urn:oxicloud:caldav:sync:{}",
+                        calendar.ctag
+                    ))))?;
+                    xml_writer.write_event(Event::End(BytesEnd::new("D:sync-token")))?;
                 }
                 ("DAV:", "getcontenttype") => {
                     xml_writer.write_event(Event::Start(BytesStart::new("D:getcontenttype")))?;
@@ -1104,6 +1127,13 @@ impl CalDavAdapter {
                         xml_writer
                             .write_event(Event::Empty(BytesStart::new("C:calendar-description")))?;
                     }
+                }
+
+                // CalendarServer collection change marker
+                ("http://calendarserver.org/ns/", "getctag") => {
+                    xml_writer.write_event(Event::Start(BytesStart::new("CS:getctag")))?;
+                    xml_writer.write_event(Event::Text(BytesText::new(&calendar.ctag)))?;
+                    xml_writer.write_event(Event::End(BytesEnd::new("CS:getctag")))?;
                 }
 
                 // Apple / CalendarServer color properties

@@ -239,7 +239,8 @@ impl CalendarEvent {
         let description = Self::extract_ical_property(&ical_data, "DESCRIPTION");
         let location = Self::extract_ical_property(&ical_data, "LOCATION");
         let rrule = Self::extract_ical_property(&ical_data, "RRULE");
-        let all_day = dtstart.contains("VALUE=DATE") || (!dtstart.contains('T') && dtstart.len() == 8);
+        let all_day =
+            dtstart.contains("VALUE=DATE") || (!dtstart.contains('T') && dtstart.len() == 8);
         let etag = Self::generate_etag(&ical_data);
         let now = Utc::now();
 
@@ -475,7 +476,8 @@ impl CalendarEvent {
         self.description = Self::extract_ical_property(&ical_data, "DESCRIPTION");
         self.location = Self::extract_ical_property(&ical_data, "LOCATION");
         self.rrule = Self::extract_ical_property(&ical_data, "RRULE");
-        self.all_day = dtstart.contains("VALUE=DATE") || (!dtstart.contains('T') && dtstart.len() == 8);
+        self.all_day =
+            dtstart.contains("VALUE=DATE") || (!dtstart.contains('T') && dtstart.len() == 8);
         self.ical_data = ical_data;
         self.refresh_etag();
 

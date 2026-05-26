@@ -10,14 +10,17 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto, EventPutPreconditionDto, PutEventICalDto, PutEventICalResultDto,
-    UpdateCalendarDto, UpdateEventDto,
+    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    DeleteEventResourceDto, EventDeletePreconditionDto, EventPutPreconditionDto, PutEventICalDto,
+    PutEventICalResultDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::CalendarStoragePort;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::calendar::Calendar;
 use crate::domain::entities::calendar_event::CalendarEvent;
-use crate::domain::repositories::calendar_event_repository::{CalendarEventPutPrecondition, CalendarEventRepository};
+use crate::domain::repositories::calendar_event_repository::{
+    CalendarEventDeletePrecondition, CalendarEventPutPrecondition, CalendarEventRepository,
+};
 use crate::domain::repositories::calendar_repository::CalendarRepository;
 use crate::infrastructure::repositories::pg::CalendarEventPgRepository;
 use crate::infrastructure::repositories::pg::CalendarPgRepository;
@@ -444,6 +447,32 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         })?;
 
         self.event_repository.delete_event(&uuid).await
+    }
+
+    async fn delete_event_by_resource_path(
+        &self,
+        dto: DeleteEventResourceDto,
+    ) -> Result<(), DomainError> {
+        let calendar_uuid = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "Event",
+                "Invalid calendar ID format",
+            )
+        })?;
+
+        let precondition = match dto.precondition {
+            EventDeletePreconditionDto::None => CalendarEventDeletePrecondition::None,
+            EventDeletePreconditionDto::IfMatch(etag) => {
+                CalendarEventDeletePrecondition::IfMatch(etag)
+            }
+            EventDeletePreconditionDto::IfMatchAny => CalendarEventDeletePrecondition::IfMatchAny,
+        };
+
+        self.event_repository
+            .delete_event_by_resource_path(&calendar_uuid, &dto.resource_path, precondition)
+            .await
+            .map(|_| ())
     }
 
     async fn get_event(&self, event_id: &str) -> Result<CalendarEventDto, DomainError> {

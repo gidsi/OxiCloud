@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::calendar_event::CalendarEvent;
 use crate::domain::repositories::calendar_event_repository::{
-    CalendarEventPutPrecondition, CalendarEventPutResult, CalendarEventRepository,
-    CalendarEventRepositoryResult,
+    CalendarEventDeletePrecondition, CalendarEventPutPrecondition, CalendarEventPutResult,
+    CalendarEventRepository, CalendarEventRepositoryResult,
 };
 
 pub struct CalendarEventPgRepository {
@@ -140,12 +140,84 @@ impl CalendarEventRepository for CalendarEventPgRepository {
     }
 
     async fn delete_event(&self, id: &Uuid) -> CalendarEventRepositoryResult<()> {
-        sqlx::query("DELETE FROM caldav.calendar_events WHERE id = $1")
+        let result = sqlx::query("DELETE FROM caldav.calendar_events WHERE id = $1")
             .bind(id)
             .execute(&*self.pool)
             .await
-            .map_err(|e| DomainError::database_error(format!("Failed to delete calendar event: {}", e)))?;
+            .map_err(|e| {
+                DomainError::database_error(format!("Failed to delete calendar event: {}", e))
+            })?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::not_found("Calendar Event", id.to_string()));
+        }
+
         Ok(())
+    }
+
+    async fn delete_event_by_resource_path(
+        &self,
+        calendar_id: &Uuid,
+        resource_path: &str,
+        precondition: CalendarEventDeletePrecondition,
+    ) -> CalendarEventRepositoryResult<CalendarEvent> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            DomainError::database_error(format!("Failed to begin delete transaction: {}", e))
+        })?;
+
+        let row = sqlx::query(&format!(
+            "SELECT {} FROM caldav.calendar_events WHERE calendar_id = $1 AND resource_path = $2 FOR UPDATE",
+            Self::select_columns()
+        ))
+        .bind(calendar_id)
+        .bind(resource_path)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!(
+                "Failed to get calendar event by resource path for delete: {}",
+                e
+            ))
+        })?
+        .ok_or_else(|| DomainError::not_found("Calendar Event", resource_path.to_string()))?;
+
+        let event = Self::event_from_row(&row)?;
+
+        match precondition {
+            CalendarEventDeletePrecondition::None | CalendarEventDeletePrecondition::IfMatchAny => {}
+            CalendarEventDeletePrecondition::IfMatch(expected_etag) => {
+                if event.etag() != expected_etag.trim_matches('"') {
+                    return Err(Self::precondition_failed("If-Match precondition failed"));
+                }
+            }
+        }
+
+        let result = sqlx::query(
+            "DELETE FROM caldav.calendar_events WHERE calendar_id = $1 AND resource_path = $2",
+        )
+        .bind(calendar_id)
+        .bind(resource_path)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            DomainError::database_error(format!(
+                "Failed to delete calendar event by resource path: {}",
+                e
+            ))
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::not_found(
+                "Calendar Event",
+                resource_path.to_string(),
+            ));
+        }
+
+        tx.commit().await.map_err(|e| {
+            DomainError::database_error(format!("Failed to commit delete transaction: {}", e))
+        })?;
+
+        Ok(event)
     }
 
     async fn find_event_by_id(&self, id: &Uuid) -> CalendarEventRepositoryResult<CalendarEvent> {

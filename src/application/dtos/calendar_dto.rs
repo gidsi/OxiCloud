@@ -179,6 +179,20 @@ pub struct PutEventICalResultDto {
     pub created: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum EventDeletePreconditionDto {
+    None,
+    IfMatch(String),
+    IfMatchAny,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeleteEventResourceDto {
+    pub calendar_id: String,
+    pub resource_path: String,
+    pub precondition: EventDeletePreconditionDto,
+}
+
 /// DTO for calendar event creation with structured data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateEventDto {

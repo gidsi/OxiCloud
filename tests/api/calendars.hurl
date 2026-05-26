@@ -303,3 +303,47 @@ END:VEVENT
 END:VCALENDAR`
 
 HTTP 412
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 15 – PUT an event to the calendar to be deleted
+# ─────────────────────────────────────────────────────────────
+PUT {{base_url}}/caldav/{{username}}/work-calendar/event-to-delete.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+Content-Type: text/calendar; charset=utf-8
+`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OxiCloud//NONSGML v1.0//EN
+BEGIN:VEVENT
+UID:event-to-delete
+DTSTAMP:20230526T000000Z
+DTSTART:20230526T100000Z
+DTEND:20230526T110000Z
+SUMMARY:Delete Me Event
+END:VEVENT
+END:VCALENDAR`
+
+HTTP 201
+[Asserts]
+header "ETag" exists
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 16 – DELETE the event
+# ─────────────────────────────────────────────────────────────
+DELETE {{base_url}}/caldav/{{username}}/work-calendar/event-to-delete.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+
+HTTP 204
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 17 – GET the deleted event to verify it is gone (HTTP 404)
+# ─────────────────────────────────────────────────────────────
+GET {{base_url}}/caldav/{{username}}/work-calendar/event-to-delete.ics
+[BasicAuth]
+{{username}}: {{dav_password}}
+
+HTTP 404
