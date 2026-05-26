@@ -27,8 +27,11 @@ pub struct Calendar {
     /// Unique identifier for the calendar
     id: Uuid,
 
-    /// Display name of the calendar
+    /// Stable collection name used in URLs
     name: String,
+
+    /// Human-readable display name exposed through DAV `displayname`.
+    display_name: String,
 
     /// ID of the user who owns this calendar
     owner_id: Uuid,
@@ -36,8 +39,26 @@ pub struct Calendar {
     /// Optional description of the calendar
     description: Option<String>,
 
-    /// Optional color code for UI display (hex format #RRGGBB)
+    /// Optional color code for UI display (hex format #RRGGBB or #RRGGBBAA)
     color: Option<String>,
+
+    /// Whether this calendar is publicly visible.
+    is_public: bool,
+
+    /// Calendar collection change tag used by CalDAV clients.
+    ctag: String,
+
+    /// Monotonic sync version used for DAV sync-token generation.
+    sync_version: i64,
+
+    /// Supported iCalendar component types for this collection.
+    supported_components: Vec<String>,
+
+    /// Optional calendar timezone payload.
+    timezone: Option<String>,
+
+    /// Client-visible ordering hint.
+    calendar_order: i32,
 
     /// Time when the calendar was created
     created_at: DateTime<Utc>,
@@ -82,10 +103,17 @@ impl Calendar {
 
         Ok(Self {
             id: Uuid::new_v4(),
+            display_name: name.clone(),
             name,
             owner_id,
             description,
             color,
+            is_public: false,
+            ctag: "1".to_string(),
+            sync_version: 1,
+            supported_components: vec!["VEVENT".to_string(), "VTODO".to_string()],
+            timezone: None,
+            calendar_order: 0,
             created_at: now,
             updated_at: now,
             custom_properties: std::collections::HashMap::new(),
@@ -129,10 +157,73 @@ impl Calendar {
 
         Ok(Self {
             id,
+            display_name: name.clone(),
             name,
             owner_id,
             description,
             color,
+            is_public: false,
+            ctag: "1".to_string(),
+            sync_version: 1,
+            supported_components: vec!["VEVENT".to_string(), "VTODO".to_string()],
+            timezone: None,
+            calendar_order: 0,
+            created_at,
+            updated_at,
+            custom_properties: std::collections::HashMap::new(),
+        })
+    }
+
+    /// Creates a calendar with all DAV persistence metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_dav_metadata(
+        id: Uuid,
+        name: String,
+        display_name: String,
+        owner_id: Uuid,
+        description: Option<String>,
+        color: Option<String>,
+        is_public: bool,
+        ctag: String,
+        sync_version: i64,
+        supported_components: Vec<String>,
+        timezone: Option<String>,
+        calendar_order: i32,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Self> {
+        if name.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar name cannot be empty",
+            ));
+        }
+        if display_name.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar display name cannot be empty",
+            ));
+        }
+        if let Some(color_str) = &color {
+            Self::validate_color(color_str)?;
+        }
+        Self::validate_sync_version(sync_version)?;
+        Self::validate_supported_components(&supported_components)?;
+        Ok(Self {
+            id,
+            name,
+            display_name,
+            owner_id,
+            description,
+            color,
+            is_public,
+            ctag,
+            sync_version,
+            supported_components,
+            timezone,
+            calendar_order,
             created_at,
             updated_at,
             custom_properties: std::collections::HashMap::new(),
@@ -151,6 +242,11 @@ impl Calendar {
         &self.name
     }
 
+    /// Returns the DAV display name.
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
     /// Returns the ID of the user who owns this calendar
     pub fn owner_id(&self) -> &Uuid {
         &self.owner_id
@@ -164,6 +260,25 @@ impl Calendar {
     /// Returns the calendar's color code, if any
     pub fn color(&self) -> Option<&str> {
         self.color.as_deref()
+    }
+
+    pub fn is_public(&self) -> bool {
+        self.is_public
+    }
+    pub fn ctag(&self) -> &str {
+        &self.ctag
+    }
+    pub fn sync_version(&self) -> i64 {
+        self.sync_version
+    }
+    pub fn supported_components(&self) -> &[String] {
+        &self.supported_components
+    }
+    pub fn timezone(&self) -> Option<&str> {
+        self.timezone.as_deref()
+    }
+    pub fn calendar_order(&self) -> i32 {
+        self.calendar_order
     }
 
     /// Returns the time when the calendar was created
@@ -195,7 +310,7 @@ impl Calendar {
      * @return Result indicating success or containing a domain error
      */
     pub fn update_name(&mut self, name: String) -> Result<()> {
-        if name.is_empty() {
+        if name.trim().is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "Calendar",
@@ -204,6 +319,19 @@ impl Calendar {
         }
 
         self.name = name;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    pub fn update_display_name(&mut self, display_name: String) -> Result<()> {
+        if display_name.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar display name cannot be empty",
+            ));
+        }
+        self.display_name = display_name;
         self.updated_at = Utc::now();
         Ok(())
     }
@@ -235,6 +363,32 @@ impl Calendar {
         Ok(())
     }
 
+    pub fn update_is_public(&mut self, is_public: bool) {
+        self.is_public = is_public;
+        self.updated_at = Utc::now();
+    }
+    pub fn update_sync_metadata(&mut self, ctag: String, sync_version: i64) -> Result<()> {
+        Self::validate_sync_version(sync_version)?;
+        self.ctag = ctag;
+        self.sync_version = sync_version;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+    pub fn update_supported_components(&mut self, supported_components: Vec<String>) -> Result<()> {
+        Self::validate_supported_components(&supported_components)?;
+        self.supported_components = supported_components;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+    pub fn update_timezone(&mut self, timezone: Option<String>) {
+        self.timezone = timezone;
+        self.updated_at = Utc::now();
+    }
+    pub fn update_calendar_order(&mut self, calendar_order: i32) {
+        self.calendar_order = calendar_order;
+        self.updated_at = Utc::now();
+    }
+
     /// Validate a calendar color
     fn validate_color(color: &str) -> Result<()> {
         if !color.starts_with('#')
@@ -246,6 +400,37 @@ impl Calendar {
                 "Calendar",
                 "Color must be in #RRGGBB or #RRGGBBAA format",
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_sync_version(sync_version: i64) -> Result<()> {
+        if sync_version < 1 {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar sync version must be positive",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_supported_components(supported_components: &[String]) -> Result<()> {
+        if supported_components.is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Calendar must support at least one component type",
+            ));
+        }
+        for component in supported_components {
+            if component != "VEVENT" && component != "VTODO" {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "Calendar",
+                    "Supported calendar components are VEVENT and VTODO",
+                ));
+            }
         }
         Ok(())
     }

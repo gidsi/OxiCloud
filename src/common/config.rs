@@ -717,8 +717,13 @@ impl AppConfig {
             config.server_host = server_host;
         }
 
-        // Database configuration
+        // Database configuration. Prefer the OxiCloud-specific variable, but
+        // accept DATABASE_URL as a conventional fallback so test orchestrators
+        // and deployment tooling can inject isolated databases without needing
+        // OxiCloud-specific knowledge.
         if let Ok(connection_string) = env::var("OXICLOUD_DB_CONNECTION_STRING") {
+            config.database.connection_string = connection_string;
+        } else if let Ok(connection_string) = env::var("DATABASE_URL") {
             config.database.connection_string = connection_string;
         }
 
