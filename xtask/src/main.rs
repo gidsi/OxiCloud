@@ -2,6 +2,7 @@ use glob::glob;
 use sqlx::{Executor, PgPool, postgres::PgPoolOptions};
 use std::env;
 use std::ffi::OsStr;
+use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -150,6 +151,8 @@ async fn run_tests(
     println!(
         "Creating isolated state for xtask run UUID {run_uuid}; each executed test receives an isolated database, storage path, server port, and environment"
     );
+    log_hurl_variable_injection_contract(&tests);
+
     println!("Using test timeout of {:?}", timeout_duration);
 
     let tools = detect_tool_availability(&tests).await;
@@ -264,6 +267,14 @@ async fn run_tests(
     Ok(())
 }
 
+fn log_hurl_variable_injection_contract(tests: &[TestFile]) {
+    if tests.iter().any(|test| matches!(test.kind, TestKind::Hurl)) {
+        println!(
+            "Hurl invocation injects variables with strict flags: --variable base_url=<allocated-per-test> --variable username={TEST_USERNAME} --variable email={TEST_EMAIL} --variable password=<redacted>"
+        );
+    }
+}
+
 fn discover_tests(tests_dir: &Path) -> Result<Vec<TestFile>> {
     let hurl_pattern = tests_dir.join("**/*.hurl").to_string_lossy().to_string();
     let sh_pattern = tests_dir.join("**/*_test.sh").to_string_lossy().to_string();
@@ -307,9 +318,56 @@ async fn detect_tool_availability(tests: &[TestFile]) -> ToolAvailability {
         .any(|test| matches!(test.kind, TestKind::Shell));
 
     ToolAvailability {
-        hurl: !needs_hurl || binary_available("hurl").await,
-        bash: !needs_bash || binary_available("bash").await,
+        hurl: !needs_hurl || executable_on_path("hurl"),
+        bash: !needs_bash || executable_on_path("bash"),
     }
+}
+
+fn executable_on_path(binary: &str) -> bool {
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+
+    env::split_paths(&paths).any(|directory| {
+        executable_candidates(&directory, binary).any(|candidate| is_executable_file(&candidate))
+    })
+}
+
+#[cfg(windows)]
+fn executable_candidates(directory: &Path, binary: &str) -> impl Iterator<Item = PathBuf> {
+    let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let extensions = pathext
+        .split(';')
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| extension.trim_start_matches('.').to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    let mut candidates = Vec::with_capacity(extensions.len() + 1);
+    candidates.push(directory.join(binary));
+    for extension in extensions {
+        candidates.push(directory.join(format!("{binary}.{extension}")));
+    }
+
+    candidates.into_iter()
+}
+
+#[cfg(not(windows))]
+fn executable_candidates(directory: &Path, binary: &str) -> impl Iterator<Item = PathBuf> {
+    std::iter::once(directory.join(binary))
+}
+
+#[cfg(windows)]
+fn is_executable_file(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
+#[cfg(not(windows))]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 fn enforce_strict_tool_availability(

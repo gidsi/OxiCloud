@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Full Hurl API test runner.
-# Starts postgres + OxiCloud server, runs Hurl tests, tears everything down.
+# Starts postgres + OxiCloud server, dynamically discovers Hurl tests,
+# runs them, and tears everything down.
 #
 # Usage (from repo root):
 #   bash tests/api/run.sh
 #
-# Prerequisites: docker, cargo, hurl ≥ 4.0
+# Prerequisites: docker, cargo or a pre-built OxiCloud binary, hurl ≥ 4.0
 
 set -euo pipefail
 
@@ -32,6 +33,32 @@ wait_for_http() {
     [[ $(date +%s) -ge $deadline ]] && die "Timeout waiting for $url"
     sleep 1
   done
+}
+
+discover_hurl_tests() {
+  local setup_file="$API_DIR/setup.hurl"
+  local -a discovered_tests=()
+  local -a ordered_tests=()
+
+  while IFS= read -r -d '' test_file; do
+    discovered_tests+=("$test_file")
+  done < <(find "$API_DIR" -type f -name '*.hurl' -print0 | sort -z)
+
+  if [[ ${#discovered_tests[@]} -eq 0 ]]; then
+    die "No .hurl API tests discovered under $API_DIR"
+  fi
+
+  if [[ -f "$setup_file" ]]; then
+    ordered_tests+=("$setup_file")
+  fi
+
+  for test_file in "${discovered_tests[@]}"; do
+    if [[ "$test_file" != "$setup_file" ]]; then
+      ordered_tests+=("$test_file")
+    fi
+  done
+
+  printf '%s\0' "${ordered_tests[@]}"
 }
 
 # ── Teardown (always runs on exit) ────────────────────────────────────────────
@@ -87,21 +114,15 @@ log "Server is ready."
 
 # ── 4. Run Hurl tests ─────────────────────────────────────────────────────────
 
-log "Running Hurl tests..."
-hurl --variables-file "$API_DIR/test.env" --file-root "$REPO_ROOT/tests" --test --jobs 1 \
-  "$API_DIR/setup.hurl" \
-  "$API_DIR/files-folders.hurl" \
-  "$API_DIR/favorites.hurl" \
-  "$API_DIR/trash.hurl" \
-  "$API_DIR/recent.hurl" \
-  "$API_DIR/batch_folder_copy.hurl" \
-  "$API_DIR/dedup_blob_cleanup.hurl" \
-  "$API_DIR/contacts.hurl" \
-  "$API_DIR/permissions.hurl" \
-  "$API_DIR/grants.hurl" \
-  "$API_DIR/calendars.hurl"
+log "Discovering Hurl tests under $API_DIR..."
+mapfile -d '' HURL_TESTS < <(discover_hurl_tests)
+for test_file in "${HURL_TESTS[@]}"; do
+  log "Discovered Hurl test: $test_file"
+done
 
-#bash "$API_DIR/dedup_bulk_upload.sh"
+log "Running ${#HURL_TESTS[@]} Hurl test file(s)..."
+hurl --variables-file "$API_DIR/test.env" --file-root "$REPO_ROOT/tests" --test --jobs 1 \
+  "${HURL_TESTS[@]}"
 
 bash "$API_DIR/storage_cleanup_check.sh"
 

@@ -143,14 +143,13 @@ async fn test_xtask_orchestrator_discovers_files_and_enforces_timeouts() {
         .args(["run", "-p", "xtask", "--", "test", "--tests-dir"])
         .arg(temp_dir.path())
         .args(["--timeout-secs", "1"])
-        .env("CARGO_TARGET_DIR", "target/spawn_target") // Avoid build lock deadlocks in parallel test runs
+        .env("CARGO_TARGET_DIR", "target/spawn_target")
         .output()
         .expect("Failed to execute xtask runner. Ensure the xtask crate is created.");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // The test MUST fail until the tool is implemented, enforcing the acceptance criteria outputs.
     assert!(
         stdout.contains("api_test.hurl") || stderr.contains("api_test.hurl"),
         "The xtask runner must discover .hurl files"
@@ -169,5 +168,94 @@ async fn test_xtask_orchestrator_discovers_files_and_enforces_timeouts() {
     assert!(
         stdout.contains("isolated state") || stdout.contains("database") || stdout.contains("UUID"),
         "The xtask runner must dynamically orchestrate the infrastructure and log the creation of isolated database states"
+    );
+}
+
+// Test 3: Verify dynamic auto-discovery of Hurl tests in nested directories and injection of required variables.
+// The xtask orchestrator must glob **/*.hurl, provision infrastructure, and inject --variable for base_url, username, email, and password.
+#[tokio::test]
+async fn test_xtask_orchestrator_auto_discovers_nested_hurl_and_injects_variables() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+    // 1. Create a mock `hurl` binary to capture injected arguments and fail execution immediately.
+    // This allows us to inspect the raw command variables constructed by the orchestrator.
+    let bin_dir = temp_dir.path().join("bin");
+    fs::create_dir(&bin_dir).unwrap();
+    let fake_hurl = bin_dir.join("hurl");
+    let mut fake_hurl_file = File::create(&fake_hurl).unwrap();
+    writeln!(
+        fake_hurl_file,
+        "#!/bin/sh\necho \"HURL_MOCK_ARGS: $@\"\nexit 1"
+    )
+    .unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&fake_hurl).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&fake_hurl, perms).unwrap();
+    }
+
+    let mut env_path = std::env::var("PATH").unwrap_or_default();
+    env_path = format!("{}:{}", bin_dir.display(), env_path);
+
+    // 2. Create the deeply nested .hurl test file to verify **/*.hurl globbing logic.
+    let test_dir = temp_dir.path().join("tests");
+    let nested_dir = test_dir.join("api").join("deeply").join("nested");
+    fs::create_dir_all(&nested_dir).expect("Failed to create nested test dirs");
+
+    let hurl_path = nested_dir.join("dynamic_discovery_test.hurl");
+    let mut hurl_file = File::create(&hurl_path).unwrap();
+    writeln!(
+        hurl_file,
+        "GET {{{{base_url}}}}/health\n\
+         [BasicAuth]\n\
+         {{{{username}}}}:{{{{password}}}}\n\
+         HTTP 200\n\
+         [Asserts]\n\
+         header \"X-Test-Email\" == \"{{{{email}}}}\""
+    )
+    .unwrap();
+
+    // 3. Execute the xtask orchestrator runner.
+    let output = Command::new("cargo")
+        .args(["run", "-p", "xtask", "--", "test", "--tests-dir"])
+        .arg(temp_dir.path())
+        .env("PATH", env_path)
+        .env("CARGO_TARGET_DIR", "target/spawn_target")
+        .output()
+        .expect("Failed to execute xtask runner.");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined_output = format!("{}\n{}", stdout, stderr);
+
+    // 4. Verification assertions.
+    assert!(
+        combined_output.contains("dynamic_discovery_test.hurl"),
+        "The xtask runner must automatically discover and glob **/*.hurl files in nested subdirectories.\nOutput:\n{}",
+        combined_output
+    );
+
+    assert!(
+        combined_output.contains("--variable base_url="),
+        "The xtask runner must inject {{base_url}} dynamically via the hurl --variable flag.\nOutput:\n{}",
+        combined_output
+    );
+    assert!(
+        combined_output.contains("--variable username="),
+        "The xtask runner must inject {{username}} dynamically via the hurl --variable flag.\nOutput:\n{}",
+        combined_output
+    );
+    assert!(
+        combined_output.contains("--variable email="),
+        "The xtask runner must inject {{email}} dynamically via the hurl --variable flag.\nOutput:\n{}",
+        combined_output
+    );
+    assert!(
+        combined_output.contains("--variable password="),
+        "The xtask runner must inject {{password}} dynamically via the hurl --variable flag.\nOutput:\n{}",
+        combined_output
     );
 }
