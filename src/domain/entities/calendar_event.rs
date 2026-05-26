@@ -1,84 +1,31 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
-/**
- * Calendar Event Entity
- *
- * This module defines the CalendarEvent entity, which represents an event or
- * appointment in a calendar, following the iCalendar (RFC 5545) specification.
- *
- * Calendar events have properties like summary, description, location, start/end times,
- * and can include recurrence rules for repeating events. Each event belongs to a
- * specific calendar and stores its complete iCalendar representation.
- */
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::common::errors::{DomainError, ErrorKind, Result};
 
-// Re-export entity errors from the centralized module
 pub use super::entity_errors::CalendarEventError;
 
-/**
- * CalendarEvent entity.
- *
- * Represents a calendar event or appointment that can be synced via CalDAV.
- * Follows the iCalendar format (RFC 5545) for compatibility with CalDAV clients.
- */
 #[derive(Debug, Clone)]
 pub struct CalendarEvent {
-    /// Unique identifier for the event
     id: Uuid,
-
-    /// ID of the calendar this event belongs to
     calendar_id: Uuid,
-
-    /// Short summary/title of the event
+    resource_name: String,
     summary: String,
-
-    /// Detailed description of the event (optional)
     description: Option<String>,
-
-    /// Location of the event (optional)
     location: Option<String>,
-
-    /// Start time of the event
     start_time: DateTime<Utc>,
-
-    /// End time of the event
     end_time: DateTime<Utc>,
-
-    /// Whether this is an all-day event
     all_day: bool,
-
-    /// Recurrence rule in iCalendar RRULE format (optional)
     rrule: Option<String>,
-
-    /// Unique identifier in iCalendar format (used for CalDAV sync)
     ical_uid: String,
-
-    /// Complete iCalendar data (VEVENT component)
     ical_data: String,
-
-    /// Time when the event was created
+    etag: String,
     created_at: DateTime<Utc>,
-
-    /// Time when the event was last modified
     updated_at: DateTime<Utc>,
 }
 
 impl CalendarEvent {
-    /**
-     * Creates a new calendar event with the given properties.
-     *
-     * @param calendar_id ID of the calendar this event belongs to
-     * @param summary Short summary/title of the event
-     * @param description Detailed description of the event (optional)
-     * @param location Location of the event (optional)
-     * @param start_time Start time of the event
-     * @param end_time End time of the event
-     * @param all_day Whether this is an all-day event
-     * @param rrule Recurrence rule in iCalendar RRULE format (optional)
-     * @param ical_data Complete iCalendar data (VEVENT component)
-     * @return Result containing the new CalendarEvent or a domain error
-     */
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         calendar_id: Uuid,
@@ -91,8 +38,34 @@ impl CalendarEvent {
         rrule: Option<String>,
         ical_data: String,
     ) -> Result<Self> {
-        // Validate inputs
-        if summary.is_empty() {
+        Self::new_with_resource_name(
+            calendar_id,
+            None,
+            summary,
+            description,
+            location,
+            start_time,
+            end_time,
+            all_day,
+            rrule,
+            ical_data,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_resource_name(
+        calendar_id: Uuid,
+        resource_name: Option<String>,
+        summary: String,
+        description: Option<String>,
+        location: Option<String>,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        all_day: bool,
+        rrule: Option<String>,
+        ical_data: String,
+    ) -> Result<Self> {
+        if summary.trim().is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "CalendarEvent",
@@ -108,31 +81,37 @@ impl CalendarEvent {
             ));
         }
 
-        // Validate RRULE if provided (basic validation)
-        if let Some(ref rule) = rrule
-            && !rule.starts_with("FREQ=")
-        {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "CalendarEvent",
-                "Recurrence rule must start with FREQ=",
-            ));
+        if let Some(ref rule) = rrule {
+            if !rule.starts_with("FREQ=") {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "CalendarEvent",
+                    "Recurrence rule must start with FREQ=",
+                ));
+            }
         }
 
-        // Validate iCalendar data (basic validation)
-        if !ical_data.contains("BEGIN:VEVENT") || !ical_data.contains("END:VEVENT") {
-            return Err(DomainError::new(
+        Self::validate_calendar_object_data(&ical_data)?;
+
+        let ical_uid = Self::extract_ical_property(&ical_data, "UID").ok_or_else(|| {
+            DomainError::new(
                 ErrorKind::InvalidInput,
                 "CalendarEvent",
-                "iCalendar data must contain a VEVENT component",
-            ));
-        }
+                "iCalendar data must contain a UID property",
+            )
+        })?;
+
+        let resource_name = resource_name.unwrap_or_else(|| Self::default_resource_name(&ical_uid));
+        Self::validate_resource_name(&resource_name)?;
 
         let now = Utc::now();
+        let id = Uuid::new_v4();
+        let etag = Self::generate_etag(&id, &resource_name, &ical_data, &now);
 
         Ok(Self {
-            id: Uuid::new_v4(),
+            id,
             calendar_id,
+            resource_name,
             summary,
             description,
             location,
@@ -140,32 +119,14 @@ impl CalendarEvent {
             end_time,
             all_day,
             rrule,
-            ical_uid: Uuid::new_v4().to_string(),
+            ical_uid,
             ical_data,
+            etag,
             created_at: now,
             updated_at: now,
         })
     }
 
-    /**
-     * Creates a calendar event with specific ID and timestamps.
-     * Typically used when reconstructing from storage.
-     *
-     * @param id Unique identifier for the event
-     * @param calendar_id ID of the calendar this event belongs to
-     * @param summary Short summary/title of the event
-     * @param description Detailed description of the event (optional)
-     * @param location Location of the event (optional)
-     * @param start_time Start time of the event
-     * @param end_time End time of the event
-     * @param all_day Whether this is an all-day event
-     * @param rrule Recurrence rule in iCalendar RRULE format (optional)
-     * @param ical_uid Unique identifier in iCalendar format
-     * @param ical_data Complete iCalendar data (VEVENT component)
-     * @param created_at Time when the event was created
-     * @param updated_at Time when the event was last modified
-     * @return Result containing the new CalendarEvent or a domain error
-     */
     #[allow(clippy::too_many_arguments)]
     pub fn with_id(
         id: Uuid,
@@ -182,8 +143,47 @@ impl CalendarEvent {
         created_at: DateTime<Utc>,
         updated_at: DateTime<Utc>,
     ) -> Result<Self> {
-        // Basic validation
-        if summary.is_empty() {
+        let resource_name = Self::default_resource_name(&ical_uid);
+        let etag = Self::generate_etag(&id, &resource_name, &ical_data, &updated_at);
+
+        Self::with_id_and_metadata(
+            id,
+            calendar_id,
+            resource_name,
+            summary,
+            description,
+            location,
+            start_time,
+            end_time,
+            all_day,
+            rrule,
+            ical_uid,
+            ical_data,
+            etag,
+            created_at,
+            updated_at,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_id_and_metadata(
+        id: Uuid,
+        calendar_id: Uuid,
+        resource_name: String,
+        summary: String,
+        description: Option<String>,
+        location: Option<String>,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        all_day: bool,
+        rrule: Option<String>,
+        ical_uid: String,
+        ical_data: String,
+        etag: String,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Self> {
+        if summary.trim().is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "CalendarEvent",
@@ -199,9 +199,36 @@ impl CalendarEvent {
             ));
         }
 
+        if ical_uid.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar UID cannot be empty",
+            ));
+        }
+
+        if ical_data.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data cannot be empty",
+            ));
+        }
+
+        Self::validate_resource_name(&resource_name)?;
+
+        if etag.trim().is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "ETag cannot be empty",
+            ));
+        }
+
         Ok(Self {
             id,
             calendar_id,
+            resource_name,
             summary,
             description,
             location,
@@ -211,31 +238,25 @@ impl CalendarEvent {
             rrule,
             ical_uid,
             ical_data,
+            etag,
             created_at,
             updated_at,
         })
     }
 
-    /**
-     * Creates a calendar event from an iCalendar VEVENT component.
-     * Parses the iCalendar data to extract event properties.
-     *
-     * @param calendar_id ID of the calendar this event belongs to
-     * @param ical_data Complete iCalendar data (VEVENT component)
-     * @return Result containing the new CalendarEvent or a domain error
-     */
     pub fn from_ical(calendar_id: Uuid, ical_data: String) -> Result<Self> {
-        // This implementation would require a proper iCalendar parser
-        // For brevity, we're using a simplified version here
+        Self::from_ical_with_resource_name(calendar_id, None, ical_data)
+    }
 
-        // Extract required fields from iCalendar data
-        let summary = Self::extract_ical_property(&ical_data, "SUMMARY").ok_or_else(|| {
-            DomainError::new(
-                ErrorKind::InvalidInput,
-                "CalendarEvent",
-                "Missing SUMMARY in iCalendar data",
-            )
-        })?;
+    pub fn from_ical_with_resource_name(
+        calendar_id: Uuid,
+        resource_name: Option<String>,
+        ical_data: String,
+    ) -> Result<Self> {
+        Self::validate_calendar_object_data(&ical_data)?;
+
+        let summary = Self::extract_ical_property(&ical_data, "SUMMARY")
+            .unwrap_or_else(|| "Untitled event".to_string());
 
         let dtstart = Self::extract_ical_property(&ical_data, "DTSTART").ok_or_else(|| {
             DomainError::new(
@@ -253,7 +274,6 @@ impl CalendarEvent {
             )
         })?;
 
-        // Parse dates (simplified)
         let start_time = Self::parse_ical_datetime(&dtstart).map_err(|e| {
             DomainError::new(
                 ErrorKind::InvalidInput,
@@ -270,23 +290,29 @@ impl CalendarEvent {
             )
         })?;
 
-        // Determine if all-day event (simplified check)
-        let all_day = dtstart.contains("VALUE=DATE") && !dtstart.contains("T");
-
-        // Extract optional fields
+        let all_day = dtstart.contains("VALUE=DATE") && !dtstart.contains('T');
         let description = Self::extract_ical_property(&ical_data, "DESCRIPTION");
         let location = Self::extract_ical_property(&ical_data, "LOCATION");
         let rrule = Self::extract_ical_property(&ical_data, "RRULE");
+        let ical_uid = Self::extract_ical_property(&ical_data, "UID").ok_or_else(|| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "Missing UID in iCalendar data",
+            )
+        })?;
 
-        // Extract UID or generate a new one
-        let ical_uid = Self::extract_ical_property(&ical_data, "UID")
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let resource_name = resource_name.unwrap_or_else(|| Self::default_resource_name(&ical_uid));
+        Self::validate_resource_name(&resource_name)?;
 
         let now = Utc::now();
+        let id = Uuid::new_v4();
+        let etag = Self::generate_etag(&id, &resource_name, &ical_data, &now);
 
         Ok(Self {
-            id: Uuid::new_v4(),
+            id,
             calendar_id,
+            resource_name,
             summary,
             description,
             location,
@@ -296,93 +322,82 @@ impl CalendarEvent {
             rrule,
             ical_uid,
             ical_data,
+            etag,
             created_at: now,
             updated_at: now,
         })
     }
 
-    // Getters
-
-    /// Returns the event's unique identifier
     pub fn id(&self) -> &Uuid {
         &self.id
     }
 
-    /// Returns the ID of the calendar this event belongs to
     pub fn calendar_id(&self) -> &Uuid {
         &self.calendar_id
     }
 
-    /// Returns the event's summary/title
+    pub fn resource_name(&self) -> &str {
+        &self.resource_name
+    }
+
     pub fn summary(&self) -> &str {
         &self.summary
     }
 
-    /// Returns the event's description, if any
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
 
-    /// Returns the event's location, if any
     pub fn location(&self) -> Option<&str> {
         self.location.as_deref()
     }
 
-    /// Returns the event's start time
     pub fn start_time(&self) -> &DateTime<Utc> {
         &self.start_time
     }
 
-    /// Returns the event's end time
     pub fn end_time(&self) -> &DateTime<Utc> {
         &self.end_time
     }
 
-    /// Returns whether this is an all-day event
     pub fn all_day(&self) -> bool {
         self.all_day
     }
 
-    /// Returns the event's recurrence rule, if any
     pub fn rrule(&self) -> Option<&str> {
         self.rrule.as_deref()
     }
 
-    /// Returns the event's iCalendar UID
     pub fn ical_uid(&self) -> &str {
         &self.ical_uid
     }
 
-    /// Returns the complete iCalendar data for the event
     pub fn ical_data(&self) -> &str {
         &self.ical_data
     }
 
-    /// Returns the time when the event was created
+    pub fn etag(&self) -> &str {
+        &self.etag
+    }
+
+    pub fn quoted_etag(&self) -> String {
+        format!("\"{}\"", self.etag)
+    }
+
     pub fn created_at(&self) -> &DateTime<Utc> {
         &self.created_at
     }
 
-    /// Returns the time when the event was last modified
     pub fn updated_at(&self) -> &DateTime<Utc> {
         &self.updated_at
     }
 
-    /// Returns the duration of the event
     pub fn duration(&self) -> Duration {
         self.end_time - self.start_time
     }
 
-    // Setters and Mutators
-
-    /**
-     * Updates the event's summary/title.
-     *
-     * @param summary New summary/title for the event
-     * @return Result indicating success or containing a domain error
-     */
     pub fn update_summary(&mut self, summary: String) -> Result<()> {
-        if summary.is_empty() {
+        if summary.trim().is_empty() {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "CalendarEvent",
@@ -390,56 +405,38 @@ impl CalendarEvent {
             ));
         }
 
-        // Clone the summary before updating the struct
-        let summary_clone = summary.clone();
-        self.summary = summary;
+        self.summary = summary.clone();
         self.updated_at = Utc::now();
-
-        // Update iCalendar data using the cloned value
-        self.update_ical_property("SUMMARY", &summary_clone);
+        self.update_ical_property("SUMMARY", &summary);
+        self.refresh_etag();
 
         Ok(())
     }
 
-    /**
-     * Updates the event's description.
-     *
-     * @param description New description for the event
-     */
     pub fn update_description(&mut self, description: Option<String>) {
         self.description = description.clone();
         self.updated_at = Utc::now();
 
-        // Update iCalendar data
         match description {
             Some(desc) => self.update_ical_property("DESCRIPTION", &desc),
             None => self.remove_ical_property("DESCRIPTION"),
         }
+
+        self.refresh_etag();
     }
 
-    /**
-     * Updates the event's location.
-     *
-     * @param location New location for the event
-     */
     pub fn update_location(&mut self, location: Option<String>) {
         self.location = location.clone();
         self.updated_at = Utc::now();
 
-        // Update iCalendar data
         match location {
             Some(loc) => self.update_ical_property("LOCATION", &loc),
             None => self.remove_ical_property("LOCATION"),
         }
+
+        self.refresh_etag();
     }
 
-    /**
-     * Updates the event's start and end times.
-     *
-     * @param start_time New start time for the event
-     * @param end_time New end time for the event
-     * @return Result indicating success or containing a domain error
-     */
     pub fn update_time_range(
         &mut self,
         start_time: DateTime<Utc>,
@@ -457,99 +454,73 @@ impl CalendarEvent {
         self.end_time = end_time;
         self.updated_at = Utc::now();
 
-        // Update iCalendar data
         let start_str = if self.all_day {
             format!("{}T000000Z", start_time.format("%Y%m%d"))
         } else {
-            format!("{}", start_time.format("%Y%m%dT%H%M%SZ"))
+            start_time.format("%Y%m%dT%H%M%SZ").to_string()
         };
 
         let end_str = if self.all_day {
             format!("{}T000000Z", end_time.format("%Y%m%d"))
         } else {
-            format!("{}", end_time.format("%Y%m%dT%H%M%SZ"))
+            end_time.format("%Y%m%dT%H%M%SZ").to_string()
         };
 
         self.update_ical_property("DTSTART", &start_str);
         self.update_ical_property("DTEND", &end_str);
+        self.refresh_etag();
 
         Ok(())
     }
 
-    /**
-     * Updates whether this is an all-day event.
-     *
-     * @param all_day Whether this is an all-day event
-     */
     pub fn update_all_day(&mut self, all_day: bool) {
         self.all_day = all_day;
         self.updated_at = Utc::now();
 
-        // Update iCalendar data
         let start_str = if all_day {
             format!("VALUE=DATE:{}", self.start_time.format("%Y%m%d"))
         } else {
-            format!("{}", self.start_time.format("%Y%m%dT%H%M%SZ"))
+            self.start_time.format("%Y%m%dT%H%M%SZ").to_string()
         };
 
         let end_str = if all_day {
             format!("VALUE=DATE:{}", self.end_time.format("%Y%m%d"))
         } else {
-            format!("{}", self.end_time.format("%Y%m%dT%H%M%SZ"))
+            self.end_time.format("%Y%m%dT%H%M%SZ").to_string()
         };
 
         self.update_ical_property("DTSTART", &start_str);
         self.update_ical_property("DTEND", &end_str);
+        self.refresh_etag();
     }
 
-    /**
-     * Updates the event's recurrence rule.
-     *
-     * @param rrule New recurrence rule for the event
-     * @return Result indicating success or containing a domain error
-     */
     pub fn update_rrule(&mut self, rrule: Option<String>) -> Result<()> {
-        // Validate RRULE if provided (basic validation)
-        if let Some(ref rule) = rrule
-            && !rule.starts_with("FREQ=")
-        {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "CalendarEvent",
-                "Recurrence rule must start with FREQ=",
-            ));
+        if let Some(ref rule) = rrule {
+            if !rule.starts_with("FREQ=") {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "CalendarEvent",
+                    "Recurrence rule must start with FREQ=",
+                ));
+            }
         }
 
         self.rrule = rrule.clone();
         self.updated_at = Utc::now();
 
-        // Update iCalendar data
         match rrule {
             Some(rule) => self.update_ical_property("RRULE", &rule),
             None => self.remove_ical_property("RRULE"),
         }
 
+        self.refresh_etag();
+
         Ok(())
     }
 
-    /**
-     * Updates the complete iCalendar data for the event.
-     * Also updates the event properties based on the new iCalendar data.
-     *
-     * @param ical_data New iCalendar data for the event
-     * @return Result indicating success or containing a domain error
-     */
     pub fn update_ical_data(&mut self, ical_data: String) -> Result<()> {
-        // Validate iCalendar data (basic validation)
-        if !ical_data.contains("BEGIN:VEVENT") || !ical_data.contains("END:VEVENT") {
-            return Err(DomainError::new(
-                ErrorKind::InvalidInput,
-                "CalendarEvent",
-                "iCalendar data must contain a VEVENT component",
-            ));
-        }
+        Self::validate_calendar_object_data(&ical_data)?;
 
-        // Extract and update properties from iCalendar data
         if let Some(summary) = Self::extract_ical_property(&ical_data, "SUMMARY") {
             self.summary = summary;
         }
@@ -557,21 +528,25 @@ impl CalendarEvent {
         self.description = Self::extract_ical_property(&ical_data, "DESCRIPTION");
         self.location = Self::extract_ical_property(&ical_data, "LOCATION");
 
-        if let Some(dtstart) = Self::extract_ical_property(&ical_data, "DTSTART")
-            && let Ok(start_time) = Self::parse_ical_datetime(&dtstart)
-        {
-            self.start_time = start_time;
-        }
-
-        if let Some(dtend) = Self::extract_ical_property(&ical_data, "DTEND")
-            && let Ok(end_time) = Self::parse_ical_datetime(&dtend)
-        {
-            self.end_time = end_time;
-        }
-
-        // Update all-day status based on DTSTART
         if let Some(dtstart) = Self::extract_ical_property(&ical_data, "DTSTART") {
-            self.all_day = dtstart.contains("VALUE=DATE") && !dtstart.contains("T");
+            self.start_time = Self::parse_ical_datetime(&dtstart).map_err(|e| {
+                DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "CalendarEvent",
+                    format!("Invalid DTSTART: {}", e),
+                )
+            })?;
+            self.all_day = dtstart.contains("VALUE=DATE") && !dtstart.contains('T');
+        }
+
+        if let Some(dtend) = Self::extract_ical_property(&ical_data, "DTEND") {
+            self.end_time = Self::parse_ical_datetime(&dtend).map_err(|e| {
+                DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "CalendarEvent",
+                    format!("Invalid DTEND: {}", e),
+                )
+            })?;
         }
 
         self.rrule = Self::extract_ical_property(&ical_data, "RRULE");
@@ -582,58 +557,44 @@ impl CalendarEvent {
 
         self.ical_data = ical_data;
         self.updated_at = Utc::now();
+        self.refresh_etag();
 
         Ok(())
     }
 
-    /**
-     * Checks if this event belongs to the specified calendar.
-     *
-     * @param calendar_id ID of the calendar to check against
-     * @return true if the event belongs to the calendar, false otherwise
-     */
+    pub fn update_resource_name(&mut self, resource_name: String) -> Result<()> {
+        Self::validate_resource_name(&resource_name)?;
+        self.resource_name = resource_name;
+        self.updated_at = Utc::now();
+        self.refresh_etag();
+        Ok(())
+    }
+
     pub fn belongs_to_calendar(&self, calendar_id: &Uuid) -> bool {
         self.calendar_id == *calendar_id
     }
 
-    /**
-     * Checks if this event occurs within the specified time range.
-     *
-     * @param start Start of the time range to check
-     * @param end End of the time range to check
-     * @return true if the event occurs within the range, false otherwise
-     */
     pub fn occurs_in_range(&self, start: &DateTime<Utc>, end: &DateTime<Utc>) -> bool {
-        // Basic case: event directly overlaps with range
         if self.start_time <= *end && self.end_time >= *start {
             return true;
         }
 
-        // If event has recurrence, check if any recurrence occurs in range
-        // Note: A full implementation would need a proper recurrence rule parser
         if let Some(rrule) = &self.rrule {
-            // Simplified check for demonstration
-            // A real implementation would need to generate recurrence instances
-            // and check if any fall within the range
-
-            // For now, we'll just check if the recurrence hasn't ended
-            // or if it ended after the start of our range
             if let Some(until_pos) = rrule.find("UNTIL=") {
-                let until_start = until_pos + 6; // "UNTIL=" is 6 chars
+                let until_start = until_pos + 6;
+
                 if let Some(until_end) = rrule[until_start..].find(';') {
                     let until_str = &rrule[until_start..until_start + until_end];
                     if let Ok(until_date) = Self::parse_ical_datetime(until_str) {
                         return until_date >= *start;
                     }
                 } else {
-                    // UNTIL is the last part of the rule
                     let until_str = &rrule[until_start..];
                     if let Ok(until_date) = Self::parse_ical_datetime(until_str) {
                         return until_date >= *start;
                     }
                 }
             } else {
-                // No UNTIL specified, so recurrence continues indefinitely
                 return true;
             }
         }
@@ -641,52 +602,160 @@ impl CalendarEvent {
         false
     }
 
-    // Helper methods for iCalendar operations
-
-    /**
-     * Extracts a property value from iCalendar data.
-     *
-     * @param ical_data The iCalendar data to search in
-     * @param property_name The name of the property to extract
-     * @return Option containing the property value if found
-     */
     fn extract_ical_property(ical_data: &str, property_name: &str) -> Option<String> {
-        // Find the property in the iCalendar data
-        let search_str = format!("\n{}:", property_name);
-        let search_str_alt = format!("\r\n{}:", property_name);
+        for raw_line in ical_data.lines() {
+            let line = raw_line.trim_end_matches('\r');
 
-        let pos = ical_data
-            .find(&search_str)
-            .or_else(|| ical_data.find(&search_str_alt));
+            let Some(colon_pos) = line.find(':') else {
+                continue;
+            };
 
-        if let Some(pos) = pos {
-            // Find the start of the value
-            let value_start = pos + search_str.len();
+            let name_and_params = &line[..colon_pos];
+            let name = name_and_params.split(';').next().unwrap_or_default();
 
-            // Find the end of the value (next line or end of string)
-            let value_end = ical_data[value_start..]
-                .find('\n')
-                .map(|p| value_start + p)
-                .unwrap_or_else(|| ical_data.len());
-
-            // Extract and return the value
-            let value = ical_data[value_start..value_end].trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
+            if name.eq_ignore_ascii_case(property_name) {
+                let value = line[colon_pos + 1..].trim();
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
             }
         }
 
         None
     }
 
-    /**
-     * Parses an iCalendar datetime string into a DateTime object.
-     *
-     * @param datetime The iCalendar datetime string to parse
-     * @return Result containing the parsed DateTime or an error
-     */
+    fn validate_calendar_object_data(ical_data: &str) -> Result<()> {
+        let trimmed_start = ical_data.trim_start();
+        let trimmed_end = ical_data.trim_end();
+
+        if trimmed_end.is_empty() {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data cannot be empty",
+            ));
+        }
+
+        if !trimmed_start.starts_with("BEGIN:VCALENDAR") {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data must start with BEGIN:VCALENDAR",
+            ));
+        }
+
+        if !trimmed_end.ends_with("END:VCALENDAR") {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data must end with END:VCALENDAR",
+            ));
+        }
+
+        if !ical_data
+            .lines()
+            .any(|line| line.trim_end_matches('\r') == "VERSION:2.0")
+        {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data must contain VERSION:2.0",
+            ));
+        }
+
+        if !ical_data.contains("BEGIN:VEVENT") || !ical_data.contains("END:VEVENT") {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data must contain a VEVENT component",
+            ));
+        }
+
+        if Self::extract_ical_property(ical_data, "UID")
+            .map(|uid| uid.trim().is_empty())
+            .unwrap_or(true)
+        {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "iCalendar data must contain a UID property",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_resource_name(resource_name: &str) -> Result<()> {
+        if resource_name.trim().is_empty()
+            || resource_name.contains('/')
+            || resource_name.contains('\\')
+            || resource_name == "."
+            || resource_name == ".."
+            || !resource_name.to_ascii_lowercase().ends_with(".ics")
+        {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarEvent",
+                "CalDAV resource name must be a non-empty .ics file name without path separators",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn default_resource_name(ical_uid: &str) -> String {
+        let sanitized: String = ical_uid
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '~' | '-') {
+                    ch
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+
+        let trimmed = sanitized.trim_matches(['.', '-']).to_string();
+        let base = if trimmed.is_empty() {
+            format!("event-{}", Uuid::new_v4())
+        } else {
+            trimmed
+        };
+
+        if base.to_ascii_lowercase().ends_with(".ics") {
+            base
+        } else {
+            format!("{}.ics", base)
+        }
+    }
+
+    fn generate_etag(
+        id: &Uuid,
+        resource_name: &str,
+        ical_data: &str,
+        updated_at: &DateTime<Utc>,
+    ) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(id.as_bytes());
+        hasher.update(b":");
+        hasher.update(resource_name.as_bytes());
+        hasher.update(b":");
+        hasher.update(ical_data.as_bytes());
+        hasher.update(b":");
+        hasher.update(updated_at.timestamp_micros().to_string().as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    fn refresh_etag(&mut self) {
+        self.etag = Self::generate_etag(
+            &self.id,
+            &self.resource_name,
+            &self.ical_data,
+            &self.updated_at,
+        );
+    }
+
     fn parse_ical_datetime(datetime: &str) -> std::result::Result<DateTime<Utc>, String> {
-        // Handle VALUE=DATE format
         if datetime.contains("VALUE=DATE") {
             let date_str = datetime.split(':').next_back().unwrap_or("");
             if date_str.len() != 8 {
@@ -709,7 +778,6 @@ impl CalendarEvent {
             };
         }
 
-        // Handle standard UTC format (20230101T120000Z)
         let datetime_str = datetime.split(':').next_back().unwrap_or(datetime);
         if datetime_str.len() < 15 || !datetime_str.ends_with('Z') {
             return Err("Invalid datetime format".to_string());
@@ -724,7 +792,6 @@ impl CalendarEvent {
         let day = datetime_str[6..8]
             .parse::<u32>()
             .map_err(|_| "Invalid day".to_string())?;
-
         let hour = datetime_str[9..11]
             .parse::<u32>()
             .map_err(|_| "Invalid hour".to_string())?;
@@ -744,75 +811,58 @@ impl CalendarEvent {
         }
     }
 
-    /**
-     * Updates an iCalendar property in the event's iCalendar data.
-     *
-     * @param property_name The name of the property to update
-     * @param value The new value for the property
-     */
     fn update_ical_property(&mut self, property_name: &str, value: &str) {
-        let search_str = format!("\n{}:", property_name);
-        let search_str_alt = format!("\r\n{}:", property_name);
-
-        // Check if property exists
-        let pos = self
+        let mut lines: Vec<String> = self
             .ical_data
-            .find(&search_str)
-            .or_else(|| self.ical_data.find(&search_str_alt));
+            .lines()
+            .map(|line| line.trim_end_matches('\r').to_string())
+            .collect();
 
-        if let Some(pos) = pos {
-            // Find the start of the value
-            let value_start = pos + search_str.len();
+        let mut found = false;
 
-            // Find the end of the value (next line or end of string)
-            let value_end = self.ical_data[value_start..]
-                .find('\n')
-                .map(|p| value_start + p)
-                .unwrap_or_else(|| self.ical_data.len());
+        for line in &mut lines {
+            let Some(colon_pos) = line.find(':') else {
+                continue;
+            };
 
-            // Replace the value
-            let before = &self.ical_data[..value_start];
-            let after = &self.ical_data[value_end..];
-            self.ical_data = format!("{}{}{}", before, value, after);
-        } else {
-            // Property doesn't exist, add it before END:VEVENT
-            let end_pos = self
-                .ical_data
-                .find("END:VEVENT")
-                .unwrap_or(self.ical_data.len());
+            let name = line[..colon_pos].split(';').next().unwrap_or_default();
+            if name.eq_ignore_ascii_case(property_name) {
+                *line = format!("{}:{}", property_name, value);
+                found = true;
+                break;
+            }
+        }
 
-            let before = &self.ical_data[..end_pos];
-            let after = &self.ical_data[end_pos..];
-            self.ical_data = format!("{}{}:{}\n{}", before, property_name, value, after);
+        if !found {
+            if let Some(pos) = lines.iter().position(|line| line == "END:VEVENT") {
+                lines.insert(pos, format!("{}:{}", property_name, value));
+            }
+        }
+
+        self.ical_data = lines.join("\r\n");
+        if !self.ical_data.ends_with("\r\n") {
+            self.ical_data.push_str("\r\n");
         }
     }
 
-    /**
-     * Removes an iCalendar property from the event's iCalendar data.
-     *
-     * @param property_name The name of the property to remove
-     */
     fn remove_ical_property(&mut self, property_name: &str) {
-        let search_str = format!("\n{}:", property_name);
-        let search_str_alt = format!("\r\n{}:", property_name);
-
-        // Check if property exists
-        let pos = self
+        self.ical_data = self
             .ical_data
-            .find(&search_str)
-            .or_else(|| self.ical_data.find(&search_str_alt));
+            .lines()
+            .filter(|line| {
+                let line = line.trim_end_matches('\r');
+                let Some(colon_pos) = line.find(':') else {
+                    return true;
+                };
 
-        if let Some(pos) = pos {
-            // Find the end of the value (next line or end of string)
-            let value_end = self.ical_data[pos + 1..]
-                .find('\n')
-                .map(|p| pos + 1 + p)
-                .unwrap_or_else(|| self.ical_data.len());
+                let name = line[..colon_pos].split(';').next().unwrap_or_default();
+                !name.eq_ignore_ascii_case(property_name)
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n");
 
-            // Remove the property
-            let before = &self.ical_data[..pos];
-            let after = &self.ical_data[value_end..];
-            self.ical_data = format!("{}{}", before, after);
+        if !self.ical_data.ends_with("\r\n") {
+            self.ical_data.push_str("\r\n");
         }
     }
 }

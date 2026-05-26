@@ -10,14 +10,17 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
-    UpdateCalendarDto, UpdateEventDto,
+    CalendarDto, CalendarEventDto, CalendarObjectPutConditionDto, CalendarObjectPutResultDto,
+    CalendarObjectPutStatusDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::CalendarStoragePort;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::calendar::Calendar;
 use crate::domain::entities::calendar_event::CalendarEvent;
-use crate::domain::repositories::calendar_event_repository::CalendarEventRepository;
+use crate::domain::repositories::calendar_event_repository::{
+    CalendarEventReplaceResult, CalendarEventRepository,
+};
 use crate::domain::repositories::calendar_repository::CalendarRepository;
 use crate::infrastructure::repositories::pg::CalendarEventPgRepository;
 use crate::infrastructure::repositories::pg::CalendarPgRepository;
@@ -184,6 +187,18 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .await
     }
 
+    async fn find_calendar_by_slug_for_owner(
+        &self,
+        slug: &str,
+        owner_id: Uuid,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self
+            .calendar_repository
+            .find_calendar_by_slug_and_owner(slug, owner_id)
+            .await?;
+        Ok(CalendarDto::from(calendar))
+    }
+
     async fn share_calendar(
         &self,
         calendar_id: &str,
@@ -346,7 +361,11 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .find_calendar_by_id(&calendar_id)
             .await?;
 
-        let event = CalendarEvent::from_ical(calendar_id, dto.ical_data.clone())?;
+        let event = CalendarEvent::from_ical_with_resource_name(
+            calendar_id,
+            dto.resource_name,
+            dto.ical_data,
+        )?;
 
         let created = self.event_repository.create_event(event).await?;
         Ok(CalendarEventDto::from(created))
@@ -445,6 +464,125 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .await?;
 
         Ok(events.into_iter().map(CalendarEventDto::from).collect())
+    }
+
+    async fn put_calendar_object(
+        &self,
+        dto: PutCalendarObjectDto,
+    ) -> Result<CalendarObjectPutResultDto, DomainError> {
+        let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarObject",
+                "Invalid calendar ID format",
+            )
+        })?;
+
+        let _calendar = self
+            .calendar_repository
+            .find_calendar_by_id(&calendar_id)
+            .await?;
+
+        let event = CalendarEvent::from_ical_with_resource_name(
+            calendar_id,
+            Some(dto.resource_name.clone()),
+            dto.ical_data,
+        )?;
+
+        if let Some(conflict) = self
+            .event_repository
+            .find_uid_conflict(&calendar_id, event.ical_uid(), event.resource_name())
+            .await?
+        {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalDavUidConflict",
+                format!(
+                    "Another calendar object resource with the same UID already exists: {}",
+                    conflict.resource_name()
+                ),
+            ));
+        }
+
+        match dto.condition {
+            CalendarObjectPutConditionDto::IfNoneMatchAny => {
+                let created = self
+                    .event_repository
+                    .create_event_if_resource_absent(event)
+                    .await
+                    .map_err(|e| {
+                        if e.kind == ErrorKind::AlreadyExists {
+                            DomainError::new(
+                                ErrorKind::InvalidInput,
+                                "CalDavPreconditionFailed",
+                                "If-None-Match precondition failed because the resource already exists.",
+                            )
+                        } else {
+                            e
+                        }
+                    })?;
+                Ok(CalendarObjectPutResultDto {
+                    status: CalendarObjectPutStatusDto::Created,
+                    event: CalendarEventDto::from(created),
+                })
+            }
+            CalendarObjectPutConditionDto::IfMatch(expected_etag) => match self
+                .event_repository
+                .replace_event_by_resource_name_and_etag(event, &expected_etag)
+                .await?
+            {
+                CalendarEventReplaceResult::Replaced(updated) => Ok(CalendarObjectPutResultDto {
+                    status: CalendarObjectPutStatusDto::Updated,
+                    event: CalendarEventDto::from(updated),
+                }),
+                CalendarEventReplaceResult::PreconditionFailed => Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "CalDavPreconditionFailed",
+                    "If-Match precondition failed because the supplied ETag does not match the current resource ETag.",
+                )),
+            },
+            CalendarObjectPutConditionDto::None => {
+                let existing = self
+                    .event_repository
+                    .find_event_by_resource_name(&calendar_id, event.resource_name())
+                    .await?;
+                if existing.is_some() {
+                    let updated = self
+                        .event_repository
+                        .replace_event_by_resource_name(event)
+                        .await?;
+                    Ok(CalendarObjectPutResultDto {
+                        status: CalendarObjectPutStatusDto::Updated,
+                        event: CalendarEventDto::from(updated),
+                    })
+                } else {
+                    let created = self.event_repository.create_event(event).await?;
+                    Ok(CalendarObjectPutResultDto {
+                        status: CalendarObjectPutStatusDto::Created,
+                        event: CalendarEventDto::from(created),
+                    })
+                }
+            }
+        }
+    }
+
+    async fn get_event_by_resource_name(
+        &self,
+        calendar_id: &str,
+        resource_name: &str,
+    ) -> Result<Option<CalendarEventDto>, DomainError> {
+        let calendar_id = Uuid::parse_str(calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Invalid calendar ID format",
+            )
+        })?;
+        let event = self
+            .event_repository
+            .find_event_by_resource_name(&calendar_id, resource_name)
+            .await?;
+        Ok(event.map(CalendarEventDto::from))
     }
 
     async fn get_events_in_time_range(

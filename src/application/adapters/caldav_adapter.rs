@@ -42,6 +42,35 @@ pub enum CalDavReportType {
 pub struct CalDavAdapter;
 
 impl CalDavAdapter {
+    /// Write a DAV getetag property, preserving literal entity-tag quotes in XML text.
+    fn write_getetag<W: Write>(xml_writer: &mut Writer<W>, etag: &str) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new("D:getetag")))?;
+
+        let safe_etag = etag
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        let quoted_etag = format!("\"{}\"", safe_etag);
+
+        xml_writer.write_event(Event::Text(BytesText::from_escaped(quoted_etag)))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
+        Ok(())
+    }
+
+    fn event_href(base_href: &str, resource_name: &str) -> String {
+        format!("{}/{}", base_href.trim_end_matches('/'), resource_name)
+    }
+
+    fn write_calendar_data<W: Write>(
+        xml_writer: &mut Writer<W>,
+        event: &CalendarEventDto,
+    ) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new("C:calendar-data")))?;
+        xml_writer.write_event(Event::Text(BytesText::new(&event.ical_data)))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-data")))?;
+        Ok(())
+    }
+
     /// Parse a REPORT XML request for CalDAV
     pub fn parse_report<R: Read>(reader: R) -> Result<CalDavReportType> {
         let mut xml_reader = Reader::from_reader(BufReader::new(reader));
@@ -907,9 +936,7 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::End(BytesEnd::new("D:getlastmodified")))?;
 
         // ETag
-        xml_writer.write_event(Event::Start(BytesStart::new("D:getetag")))?;
-        xml_writer.write_event(Event::Text(BytesText::new(&format!("\"{}\"", calendar.id))))?;
-        xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
+        Self::write_getetag(xml_writer, &calendar.id)?;
 
         // Content type for calendar collection
         xml_writer.write_event(Event::Start(BytesStart::new("D:getcontenttype")))?;
@@ -1179,7 +1206,7 @@ impl CalDavAdapter {
                 // Write a basic DAV response for each event
                 xml_writer.write_event(Event::Start(BytesStart::new("D:response")))?;
 
-                let event_href = format!("{}{}.ics", base_href, event.ical_uid);
+                let event_href = Self::event_href(base_href, &event.resource_name);
                 xml_writer.write_event(Event::Start(BytesStart::new("D:href")))?;
                 xml_writer.write_event(Event::Text(BytesText::new(&event_href)))?;
                 xml_writer.write_event(Event::End(BytesEnd::new("D:href")))?;
@@ -1191,10 +1218,7 @@ impl CalDavAdapter {
                 xml_writer.write_event(Event::Empty(BytesStart::new("D:resourcetype")))?;
 
                 // getetag
-                xml_writer.write_event(Event::Start(BytesStart::new("D:getetag")))?;
-                xml_writer
-                    .write_event(Event::Text(BytesText::new(&format!("\"{}\"", event.id))))?;
-                xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
+                Self::write_getetag(&mut xml_writer, &event.etag)?;
 
                 // getcontenttype
                 xml_writer.write_event(Event::Start(BytesStart::new("D:getcontenttype")))?;
@@ -1253,7 +1277,7 @@ impl CalDavAdapter {
         // Add responses for events
         for event in events {
             // Create the event href based on its UID
-            let href = format!("{}{}.ics", base_href, event.ical_uid);
+            let href = Self::event_href(base_href, &event.resource_name);
 
             // Write event response
             Self::write_event_response(&mut xml_writer, event, &props, &href)?;
@@ -1322,9 +1346,7 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::Empty(BytesStart::new("D:resourcetype")))?;
 
         // ETag based on updated_at timestamp
-        xml_writer.write_event(Event::Start(BytesStart::new("D:getetag")))?;
-        xml_writer.write_event(Event::Text(BytesText::new(&format!("\"{}\"", event.id))))?;
-        xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
+        Self::write_getetag(xml_writer, &event.etag)?;
 
         // Content type
         xml_writer.write_event(Event::Start(BytesStart::new("D:getcontenttype")))?;
@@ -1341,34 +1363,7 @@ impl CalDavAdapter {
         // CalDAV specific properties
 
         // Calendar data (iCalendar format)
-        xml_writer.write_event(Event::Start(BytesStart::new("C:calendar-data")))?;
-        // In a full implementation, we would generate a complete iCalendar component here
-        // For now, we'll just provide a basic example
-        let ical_data = format!(
-            "BEGIN:VCALENDAR\r\n\
-            VERSION:2.0\r\n\
-            PRODID:-//OxiCloud//NONSGML Calendar//EN\r\n\
-            BEGIN:VEVENT\r\n\
-            UID:{}\r\n\
-            SUMMARY:{}\r\n\
-            DTSTART:{}\r\n\
-            DTEND:{}\r\n\
-            {}\
-            DTSTAMP:{}\r\n\
-            END:VEVENT\r\n\
-            END:VCALENDAR\r\n",
-            event.ical_uid,
-            event.summary.replace("\n", "\\n"),
-            event.start_time.format("%Y%m%dT%H%M%SZ"),
-            event.end_time.format("%Y%m%dT%H%M%SZ"),
-            event
-                .rrule
-                .as_ref()
-                .map_or("".to_string(), |r| format!("RRULE:{}\r\n", r)),
-            event.updated_at.format("%Y%m%dT%H%M%SZ"),
-        );
-        xml_writer.write_event(Event::Text(BytesText::new(&ical_data)))?;
-        xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-data")))?;
+        Self::write_calendar_data(xml_writer, event)?;
 
         Ok(())
     }
@@ -1386,10 +1381,7 @@ impl CalDavAdapter {
                     xml_writer.write_event(Event::Empty(BytesStart::new("D:resourcetype")))?;
                 }
                 ("DAV:", "getetag") => {
-                    xml_writer.write_event(Event::Start(BytesStart::new("D:getetag")))?;
-                    xml_writer
-                        .write_event(Event::Text(BytesText::new(&format!("\"{}\"", event.id))))?;
-                    xml_writer.write_event(Event::End(BytesEnd::new("D:getetag")))?;
+                    Self::write_getetag(xml_writer, &event.etag)?;
                 }
                 ("DAV:", "getcontenttype") => {
                     xml_writer.write_event(Event::Start(BytesStart::new("D:getcontenttype")))?;
@@ -1407,34 +1399,7 @@ impl CalDavAdapter {
 
                 // CalDAV namespace properties
                 ("urn:ietf:params:xml:ns:caldav", "calendar-data") => {
-                    xml_writer.write_event(Event::Start(BytesStart::new("C:calendar-data")))?;
-                    // In a full implementation, we would generate a complete iCalendar component here
-                    // For now, we'll just provide a basic example
-                    let ical_data = format!(
-                        "BEGIN:VCALENDAR\r\n\
-                        VERSION:2.0\r\n\
-                        PRODID:-//OxiCloud//NONSGML Calendar//EN\r\n\
-                        BEGIN:VEVENT\r\n\
-                        UID:{}\r\n\
-                        SUMMARY:{}\r\n\
-                        DTSTART:{}\r\n\
-                        DTEND:{}\r\n\
-                        {}\
-                        DTSTAMP:{}\r\n\
-                        END:VEVENT\r\n\
-                        END:VCALENDAR\r\n",
-                        event.ical_uid,
-                        event.summary.replace("\n", "\\n"),
-                        event.start_time.format("%Y%m%dT%H%M%SZ"),
-                        event.end_time.format("%Y%m%dT%H%M%SZ"),
-                        event
-                            .rrule
-                            .as_ref()
-                            .map_or("".to_string(), |r| format!("RRULE:{}\r\n", r)),
-                        event.updated_at.format("%Y%m%dT%H%M%SZ"),
-                    );
-                    xml_writer.write_event(Event::Text(BytesText::new(&ical_data)))?;
-                    xml_writer.write_event(Event::End(BytesEnd::new("C:calendar-data")))?;
+                    Self::write_calendar_data(xml_writer, event)?;
                 }
 
                 // Property not supported

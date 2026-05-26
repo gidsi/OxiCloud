@@ -25,9 +25,25 @@ mod tests {
     }
 
     fn sample_event() -> CalendarEventDto {
+        let ical_data = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//OxiCloud//NONSGML Calendar//EN\r\n\
+BEGIN:VEVENT\r\n\
+UID:uid-evt-001@oxicloud\r\n\
+SUMMARY:Team Meeting\r\n\
+DESCRIPTION:Weekly team sync\r\n\
+LOCATION:Conference Room A\r\n\
+DTSTART:20250615T100000Z\r\n\
+DTEND:20250615T110000Z\r\n\
+DTSTAMP:20250101T000000Z\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n"
+            .to_string();
+
         CalendarEventDto {
             id: "evt-001".to_string(),
             calendar_id: "cal-001".to_string(),
+            resource_name: "evt-001.ics".to_string(),
             summary: "Team Meeting".to_string(),
             description: Some("Weekly team sync".to_string()),
             location: Some("Conference Room A".to_string()),
@@ -36,6 +52,8 @@ mod tests {
             all_day: false,
             rrule: None,
             ical_uid: "uid-evt-001@oxicloud".to_string(),
+            ical_data,
+            etag: "etag-evt-001".to_string(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
         }
@@ -252,10 +270,14 @@ mod tests {
         let xml_str = String::from_utf8(output).expect("Invalid UTF-8");
         assert!(xml_str.contains("multistatus"), "Should have multistatus");
         assert!(xml_str.contains("Personal"), "Should have calendar name");
-        // Depth 1 should include event resources
+        // Depth 1 should include event resources with persisted CalDAV identity.
         assert!(
-            xml_str.contains("evt-001"),
-            "Depth 1 should include event resources"
+            xml_str.contains("evt-001.ics"),
+            "Depth 1 should include persisted resource name"
+        );
+        assert!(
+            xml_str.contains("\"etag-evt-001\""),
+            "Depth 1 should include persisted quoted ETag"
         );
     }
 
@@ -296,18 +318,66 @@ mod tests {
 
         let xml_str = String::from_utf8(output).expect("Invalid UTF-8");
         assert!(xml_str.contains("multistatus"), "Should have multistatus");
-        assert!(xml_str.contains("evt-001"), "Should reference event ID");
+        assert!(
+            xml_str.contains("evt-001.ics"),
+            "Should reference persisted resource name"
+        );
+        assert!(
+            xml_str.contains("\"etag-evt-001\""),
+            "Should contain persisted quoted ETag"
+        );
         assert!(
             xml_str.contains("BEGIN:VCALENDAR"),
             "Should contain iCal data"
         );
         assert!(
-            xml_str.contains("VEVENT"),
-            "Should contain VEVENT component"
+            xml_str.contains("DESCRIPTION:Weekly team sync"),
+            "Should contain stored event description"
+        );
+        assert!(
+            xml_str.contains("LOCATION:Conference Room A"),
+            "Should contain stored event location"
         );
         assert!(
             xml_str.contains("Team Meeting"),
             "Should contain event summary"
+        );
+    }
+
+    #[test]
+    fn test_generate_calendar_events_response_standard_props_preserves_stored_ical_data() {
+        let events = vec![sample_event()];
+        let report = CalDavReportType::CalendarQuery {
+            time_range: None,
+            props: vec![],
+        };
+
+        let mut output = Vec::new();
+        let result = CalDavAdapter::generate_calendar_events_response(
+            &mut output,
+            &events,
+            &report,
+            "/caldav/cal-001",
+        );
+
+        assert!(
+            result.is_ok(),
+            "Failed to generate standard props events response: {:?}",
+            result.err()
+        );
+
+        let xml_str = String::from_utf8(output).expect("Invalid UTF-8");
+        assert!(
+            xml_str.contains("BEGIN:VCALENDAR"),
+            "Should contain persisted iCal data"
+        );
+        assert!(
+            xml_str.contains("DESCRIPTION:Weekly team sync"),
+            "Should contain stored event description"
+        );
+        assert!(
+            xml_str.contains("LOCATION:Conference Room A"),
+            "Should contain stored event location"
         );
     }
 

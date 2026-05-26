@@ -97,6 +97,7 @@ pub struct CalendarShareDto {
 pub struct CalendarEventDto {
     pub id: String,
     pub calendar_id: String,
+    pub resource_name: String,
     pub summary: String,
     pub description: Option<String>,
     pub location: Option<String>,
@@ -105,6 +106,8 @@ pub struct CalendarEventDto {
     pub all_day: bool,
     pub rrule: Option<String>,
     pub ical_uid: String,
+    pub ical_data: String,
+    pub etag: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -114,6 +117,7 @@ impl Default for CalendarEventDto {
         Self {
             id: String::new(),
             calendar_id: String::new(),
+            resource_name: String::new(),
             summary: String::new(),
             description: None,
             location: None,
@@ -122,6 +126,8 @@ impl Default for CalendarEventDto {
             all_day: false,
             rrule: None,
             ical_uid: String::new(),
+            ical_data: String::new(),
+            etag: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -133,6 +139,7 @@ impl From<CalendarEvent> for CalendarEventDto {
         Self {
             id: event.id().to_string(),
             calendar_id: event.calendar_id().to_string(),
+            resource_name: event.resource_name().to_string(),
             summary: event.summary().to_string(),
             description: event.description().map(|s| s.to_string()),
             location: event.location().map(|s| s.to_string()),
@@ -141,6 +148,8 @@ impl From<CalendarEvent> for CalendarEventDto {
             all_day: event.all_day(),
             rrule: event.rrule().map(|s| s.to_string()),
             ical_uid: event.ical_uid().to_string(),
+            ical_data: event.ical_data().to_string(),
+            etag: event.etag().to_string(),
             created_at: *event.created_at(),
             updated_at: *event.updated_at(),
         }
@@ -148,10 +157,38 @@ impl From<CalendarEvent> for CalendarEventDto {
 }
 
 /// DTO for calendar event creation using iCalendar data
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateEventICalDto {
     pub calendar_id: String,
+    pub resource_name: Option<String>,
     pub ical_data: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum CalendarObjectPutConditionDto {
+    None,
+    IfNoneMatchAny,
+    IfMatch(String),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PutCalendarObjectDto {
+    pub calendar_id: String,
+    pub resource_name: String,
+    pub ical_data: String,
+    pub condition: CalendarObjectPutConditionDto,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum CalendarObjectPutStatusDto {
+    Created,
+    Updated,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CalendarObjectPutResultDto {
+    pub status: CalendarObjectPutStatusDto,
+    pub event: CalendarEventDto,
 }
 
 /// DTO for calendar event creation with structured data
