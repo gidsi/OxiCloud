@@ -597,8 +597,14 @@ fn server_command() -> Command {
 
 fn oxicloud_binary_path() -> PathBuf {
     let exe_suffix = env::consts::EXE_SUFFIX;
+    let build_target = env::var("BUILD_TARGET").unwrap_or_else(|_| "debug".to_string());
+    let profile = match build_target.as_str() {
+        "release" => "release",
+        _ => "debug",
+    };
+
     PathBuf::from("target")
-        .join("debug")
+        .join(profile)
         .join(format!("oxicloud{exe_suffix}"))
 }
 

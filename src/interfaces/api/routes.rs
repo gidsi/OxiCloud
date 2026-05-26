@@ -104,7 +104,6 @@ pub fn create_public_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppStat
 
         router = router.nest("/s", public_share_router);
 
-        // AppState-backed share endpoints (download, contents, file, zip)
         router = router
             .route(
                 "/s/{token}/download",
@@ -132,7 +131,6 @@ pub fn create_public_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppStat
             );
     }
 
-    // i18n routes — no auth required (localization should be available before login)
     if let Some(i18n_service) = i18n_service {
         let i18n_router = Router::new()
             .route("/locales", get(get_locales))
@@ -143,11 +141,10 @@ pub fn create_public_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppStat
         router = router.nest("/i18n", i18n_router);
     }
 
-    // Version endpoint — public, no auth required
-    router = router.route("/version", get(get_version));
-    router = router.route("/openapi.json", get(get_openapi_spec));
-
     router
+        .route("/version", get(get_version))
+        .route("/openapi.json", get(get_openapi_spec))
+        .with_state(app_state.clone())
 }
 
 /// Creates protected API routes for the application.

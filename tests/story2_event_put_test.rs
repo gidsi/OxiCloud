@@ -32,7 +32,9 @@ struct TestResources {
 async fn spawn_app() -> Router {
     let base_database_url = std::env::var("TEST_DATABASE_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
-        .expect("TEST_DATABASE_URL or DATABASE_URL must be set for Story 2 CalDAV integration tests");
+        .expect(
+            "TEST_DATABASE_URL or DATABASE_URL must be set for Story 2 CalDAV integration tests",
+        );
 
     let test_database_name = format!("oxicloud_story2_{}", Uuid::new_v4().simple());
     create_test_database(&base_database_url, &test_database_name).await;
