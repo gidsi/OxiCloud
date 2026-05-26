@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::application::ports::blob_storage_ports::BlobStorageBackend;
 use crate::common::config::StorageBackendType;
-use crate::infrastructure::db::DbPools;
+use crate::infrastructure::db::{DbPools, create_database_pools};
 
 use crate::application::services::admin_settings_service::AdminSettingsService;
 use crate::application::services::auth_application_service::AuthApplicationService;
@@ -618,13 +618,29 @@ impl AppServiceFactory {
         &self,
         db_pools: Option<DbPools>,
     ) -> Result<AppState, DomainError> {
-        // Database is REQUIRED in 100% blob storage model
-        let pools = db_pools.ok_or_else(|| {
-            DomainError::internal_error(
-                "Database",
-                "PostgreSQL database is required for blob storage model",
-            )
-        })?;
+        // Database is REQUIRED in the 100% blob storage model. If callers do not
+        // inject pools explicitly, build real PostgreSQL pools from configuration
+        // so integration wiring uses the same production path as main.rs.
+        let pools = match db_pools {
+            Some(pools) => pools,
+            None => {
+                let mut config = self.config.clone();
+                if std::env::var("OXICLOUD_DB_CONNECTION_STRING").is_err()
+                    && config.database.connection_string
+                        == AppConfig::default().database.connection_string
+                    && let Ok(database_url) = std::env::var("DATABASE_URL")
+                {
+                    config.database.connection_string = database_url;
+                }
+
+                create_database_pools(&config).await.map_err(|e| {
+                    DomainError::internal_error(
+                        "Database",
+                        format!("PostgreSQL database initialization failed: {e}"),
+                    )
+                })?
+            }
+        };
 
         let pool = Arc::new(pools.primary);
         let maintenance_pool = Arc::new(pools.maintenance);
