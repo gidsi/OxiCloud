@@ -220,3 +220,31 @@ jobs:
         with:
           name: oxicloud-release
           path: target/release/
+
+      - name: Set execute bit on pre-built binary
+        run: chmod +x target/release/oxicloud
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install Node dependencies
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright tests (spawns DB via pretest hook)
+        working-directory: tests/e2e
+        run: npm test
+        env:
+          BUILD_TARGET: release
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report/
+          retention-days: 30
