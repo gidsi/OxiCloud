@@ -654,6 +654,9 @@ async fn handle_mkcalendar(
         name,
         description,
         color,
+        timezone_text: None,
+        supported_components: None,
+        calendar_order: None,
         is_public: Some(false),
     };
 
@@ -1403,6 +1406,9 @@ async fn handle_proppatch(
         name: None,
         description: None,
         color: None,
+        timezone_text: None,
+        supported_components: None,
+        calendar_order: None,
         is_public: None,
     };
 

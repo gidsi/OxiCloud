@@ -6,7 +6,6 @@ mod tests {
     };
     use crate::application::dtos::calendar_dto::{CalendarDto, CalendarEventDto};
     use chrono::{TimeZone, Utc};
-    use std::collections::HashMap;
     use std::io::Cursor;
 
     fn sample_calendar() -> CalendarDto {
@@ -20,7 +19,7 @@ mod tests {
             is_public: false,
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2025, 1, 15, 12, 0, 0).unwrap(),
-            custom_properties: HashMap::new(),
+            ..CalendarDto::default()
         }
     }
 

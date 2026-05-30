@@ -53,17 +53,34 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         owner_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
         let calendar = match dto.slug {
-            Some(slug) => Calendar::new_with_slug(
+            Some(slug) => Calendar::new_with_slug_and_metadata(
                 dto.name,
                 slug,
                 owner_id,
                 dto.description,
                 dto.color,
+                dto.timezone_text,
                 dto.is_public.unwrap_or(false),
-                None,
+                dto.supported_components,
+                1,
+                1,
+                dto.calendar_order.unwrap_or(0),
                 HashMap::new(),
             )?,
-            None => Calendar::new(dto.name, owner_id, dto.description, dto.color)?,
+            None => Calendar::new_with_slug_and_metadata(
+                dto.name.clone(),
+                Calendar::slug_from_name(&dto.name),
+                owner_id,
+                dto.description,
+                dto.color,
+                dto.timezone_text,
+                dto.is_public.unwrap_or(false),
+                dto.supported_components,
+                1,
+                1,
+                dto.calendar_order.unwrap_or(0),
+                HashMap::new(),
+            )?,
         };
 
         let created = self.calendar_repository.create_calendar(calendar).await?;
@@ -96,6 +113,15 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         }
         if let Some(color) = update.color {
             calendar.update_color(Some(color))?;
+        }
+        if let Some(timezone_text) = update.timezone_text {
+            calendar.update_timezone_text(Some(timezone_text));
+        }
+        if let Some(supported_components) = update.supported_components {
+            calendar.update_supported_components(supported_components)?;
+        }
+        if let Some(calendar_order) = update.calendar_order {
+            calendar.update_calendar_order(calendar_order);
         }
         if let Some(is_public) = update.is_public {
             calendar.update_public_visibility(is_public);

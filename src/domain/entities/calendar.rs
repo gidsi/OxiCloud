@@ -22,9 +22,17 @@ pub const CALDAV_CALENDAR_DESCRIPTION_PROPERTY: &str =
     "{urn:ietf:params:xml:ns:caldav}calendar-description";
 pub const CALDAV_SUPPORTED_COMPONENT_SET_PROPERTY: &str =
     "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set";
+pub const CALDAV_CALENDAR_TIMEZONE_PROPERTY: &str =
+    "{urn:ietf:params:xml:ns:caldav}calendar-timezone";
+pub const DAV_SYNC_TOKEN_PROPERTY: &str = "{DAV:}sync-token";
+pub const CALENDAR_SERVER_GETCTAG_PROPERTY: &str = "{http://calendarserver.org/ns/}getctag";
 pub const APPLE_CALENDAR_COLOR_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-color";
+pub const APPLE_CALENDAR_ORDER_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-order";
 
 const DEFAULT_SUPPORTED_COMPONENT: &str = "VEVENT";
+const DEFAULT_CALENDAR_COLOR: &str = "#2C7EF8FF";
+const DEFAULT_CALENDAR_ORDER: i32 = 0;
+const DEFAULT_CALENDAR_SEQUENCE: i64 = 1;
 
 #[derive(Debug, Clone)]
 pub struct Calendar {
@@ -34,8 +42,12 @@ pub struct Calendar {
     owner_id: Uuid,
     description: Option<String>,
     color: Option<String>,
+    timezone_text: Option<String>,
     is_public: bool,
     supported_components: Vec<String>,
+    ctag: i64,
+    sync_token: i64,
+    calendar_order: i32,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     custom_properties: HashMap<String, String>,
@@ -72,40 +84,55 @@ impl Calendar {
         supported_components: Option<Vec<String>>,
         custom_properties: HashMap<String, String>,
     ) -> Result<Self> {
-        let name = Self::normalize_name(name)?;
-        let slug = Self::normalize_slug(slug)?;
-
-        if let Some(color_str) = &color {
-            Self::validate_color(color_str)?;
-        }
-
-        let supported_components = Self::normalize_supported_components(
-            supported_components.unwrap_or_else(|| vec![DEFAULT_SUPPORTED_COMPONENT.to_string()]),
-        )?;
-
-        let now = Utc::now();
-
-        let mut calendar = Self {
-            id: Uuid::new_v4(),
-            slug,
+        Self::new_with_slug_and_metadata(
             name,
+            slug,
             owner_id,
             description,
             color,
+            None,
             is_public,
             supported_components,
-            created_at: now,
-            updated_at: now,
-            custom_properties: HashMap::new(),
-        };
+            DEFAULT_CALENDAR_SEQUENCE,
+            DEFAULT_CALENDAR_SEQUENCE,
+            DEFAULT_CALENDAR_ORDER,
+            custom_properties,
+        )
+    }
 
-        calendar.refresh_standard_properties();
-
-        for (property_name, property_value) in custom_properties {
-            calendar.set_custom_property(property_name, property_value)?;
-        }
-
-        Ok(calendar)
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_slug_and_metadata(
+        name: String,
+        slug: String,
+        owner_id: Uuid,
+        description: Option<String>,
+        color: Option<String>,
+        timezone_text: Option<String>,
+        is_public: bool,
+        supported_components: Option<Vec<String>>,
+        ctag: i64,
+        sync_token: i64,
+        calendar_order: i32,
+        custom_properties: HashMap<String, String>,
+    ) -> Result<Self> {
+        let now = Utc::now();
+        Self::with_id_and_caldav_metadata(
+            Uuid::new_v4(),
+            name,
+            slug,
+            owner_id,
+            description,
+            color,
+            timezone_text,
+            is_public,
+            supported_components.unwrap_or_else(|| vec![DEFAULT_SUPPORTED_COMPONENT.to_string()]),
+            ctag,
+            sync_token,
+            calendar_order,
+            now,
+            now,
+            custom_properties,
+        )
     }
 
     pub fn with_id(
@@ -163,8 +190,12 @@ impl Calendar {
             owner_id,
             description,
             color,
+            timezone_text: None,
             is_public,
             supported_components,
+            ctag: DEFAULT_CALENDAR_SEQUENCE,
+            sync_token: DEFAULT_CALENDAR_SEQUENCE,
+            calendar_order: DEFAULT_CALENDAR_ORDER,
             created_at,
             updated_at,
             custom_properties: HashMap::new(),
@@ -176,6 +207,58 @@ impl Calendar {
             calendar.set_custom_property_without_touch(property_name, property_value)?;
         }
 
+        Ok(calendar)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_id_and_caldav_metadata(
+        id: Uuid,
+        name: String,
+        slug: String,
+        owner_id: Uuid,
+        description: Option<String>,
+        color: Option<String>,
+        timezone_text: Option<String>,
+        is_public: bool,
+        supported_components: Vec<String>,
+        ctag: i64,
+        sync_token: i64,
+        calendar_order: i32,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+        custom_properties: HashMap<String, String>,
+    ) -> Result<Self> {
+        let name = Self::normalize_name(name)?;
+        let slug = Self::normalize_slug(slug)?;
+        let color = Some(color.unwrap_or_else(|| DEFAULT_CALENDAR_COLOR.to_string()));
+        if let Some(color_str) = &color {
+            Self::validate_color(color_str)?;
+        }
+        let timezone_text = Self::normalize_optional_text(timezone_text);
+        let supported_components = Self::normalize_supported_components(supported_components)?;
+        Self::validate_positive_sequence("ctag", ctag)?;
+        Self::validate_positive_sequence("sync_token", sync_token)?;
+        let mut calendar = Self {
+            id,
+            slug,
+            name,
+            owner_id,
+            description: Self::normalize_optional_text(description),
+            color,
+            timezone_text,
+            is_public,
+            supported_components,
+            ctag,
+            sync_token,
+            calendar_order,
+            created_at,
+            updated_at,
+            custom_properties: HashMap::new(),
+        };
+        calendar.refresh_standard_properties();
+        for (property_name, property_value) in custom_properties {
+            calendar.set_custom_property_without_touch(property_name, property_value)?;
+        }
         Ok(calendar)
     }
 
@@ -203,12 +286,39 @@ impl Calendar {
         self.color.as_deref()
     }
 
+    pub fn timezone_text(&self) -> Option<&str> {
+        self.timezone_text.as_deref()
+    }
+
     pub fn is_public(&self) -> bool {
         self.is_public
     }
 
     pub fn supported_components(&self) -> &[String] {
         &self.supported_components
+    }
+
+    pub fn ctag(&self) -> i64 {
+        self.ctag
+    }
+
+    pub fn quoted_ctag(&self) -> String {
+        format!("\"{}\"", self.ctag)
+    }
+
+    pub fn sync_token(&self) -> i64 {
+        self.sync_token
+    }
+
+    pub fn sync_token_uri(&self, username: &str) -> String {
+        format!(
+            "http://oxicloud.local/ns/sync/calendars/{}/{}/{}",
+            username, self.slug, self.sync_token
+        )
+    }
+
+    pub fn calendar_order(&self) -> i32 {
+        self.calendar_order
     }
 
     pub fn created_at(&self) -> &DateTime<Utc> {
@@ -241,12 +351,13 @@ impl Calendar {
     }
 
     pub fn update_description(&mut self, description: Option<String>) {
-        self.description = description;
+        self.description = Self::normalize_optional_text(description);
         self.refresh_standard_properties();
         self.updated_at = Utc::now();
     }
 
     pub fn update_color(&mut self, color: Option<String>) -> Result<()> {
+        let color = Some(color.unwrap_or_else(|| DEFAULT_CALENDAR_COLOR.to_string()));
         if let Some(color_str) = &color {
             Self::validate_color(color_str)?;
         }
@@ -255,6 +366,28 @@ impl Calendar {
         self.refresh_standard_properties();
         self.updated_at = Utc::now();
         Ok(())
+    }
+
+    pub fn update_timezone_text(&mut self, timezone_text: Option<String>) {
+        self.timezone_text = Self::normalize_optional_text(timezone_text);
+        self.refresh_standard_properties();
+        self.updated_at = Utc::now();
+    }
+
+    pub fn update_caldav_sequences(&mut self, ctag: i64, sync_token: i64) -> Result<()> {
+        Self::validate_positive_sequence("ctag", ctag)?;
+        Self::validate_positive_sequence("sync_token", sync_token)?;
+        self.ctag = ctag;
+        self.sync_token = sync_token;
+        self.refresh_standard_properties();
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    pub fn update_calendar_order(&mut self, calendar_order: i32) {
+        self.calendar_order = calendar_order;
+        self.refresh_standard_properties();
+        self.updated_at = Utc::now();
     }
 
     pub fn update_public_visibility(&mut self, is_public: bool) {
@@ -361,6 +494,12 @@ impl Calendar {
         Ok(slug)
     }
 
+    fn normalize_optional_text(value: Option<String>) -> Option<String> {
+        value
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
     fn normalize_supported_components(components: Vec<String>) -> Result<Vec<String>> {
         let mut normalized = Vec::new();
 
@@ -407,6 +546,17 @@ impl Calendar {
         Ok(())
     }
 
+    fn validate_positive_sequence(field_name: &str, value: i64) -> Result<()> {
+        if value < 1 {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                format!("{field_name} must be greater than zero"),
+            ));
+        }
+        Ok(())
+    }
+
     fn set_custom_property_without_touch(&mut self, name: String, value: String) -> Result<()> {
         if name.trim().is_empty() {
             return Err(DomainError::new(
@@ -433,6 +583,18 @@ impl Calendar {
             CALDAV_SUPPORTED_COMPONENT_SET_PROPERTY.to_string(),
             self.supported_components.join(","),
         );
+        self.custom_properties.insert(
+            CALENDAR_SERVER_GETCTAG_PROPERTY.to_string(),
+            self.quoted_ctag(),
+        );
+        self.custom_properties.insert(
+            DAV_SYNC_TOKEN_PROPERTY.to_string(),
+            self.sync_token.to_string(),
+        );
+        self.custom_properties.insert(
+            APPLE_CALENDAR_ORDER_PROPERTY.to_string(),
+            self.calendar_order.to_string(),
+        );
 
         match &self.description {
             Some(description) => {
@@ -444,6 +606,19 @@ impl Calendar {
             None => {
                 self.custom_properties
                     .remove(CALDAV_CALENDAR_DESCRIPTION_PROPERTY);
+            }
+        }
+
+        match &self.timezone_text {
+            Some(timezone_text) => {
+                self.custom_properties.insert(
+                    CALDAV_CALENDAR_TIMEZONE_PROPERTY.to_string(),
+                    timezone_text.clone(),
+                );
+            }
+            None => {
+                self.custom_properties
+                    .remove(CALDAV_CALENDAR_TIMEZONE_PROPERTY);
             }
         }
 
