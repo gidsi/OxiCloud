@@ -562,10 +562,10 @@ async fn start_server(
         .env("OXICLOUD_JWT_SECRET", "0123456789abcdef0123456789abcdef")
         .env(
             "RUST_LOG",
-            env::var("RUST_LOG").unwrap_or_else(|_| "warn".to_string()),
+            env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_string()),
         )
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
         .kill_on_drop(true);
 
     make_new_process_group(&mut command);
@@ -644,6 +644,7 @@ async fn run_hurl_test(
     let name = test_name(test);
     let mut command = Command::new("hurl");
     command
+        .arg("--verbose")
         .arg("--test")
         .arg("--jobs")
         .arg("1")
