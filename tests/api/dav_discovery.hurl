@@ -1,13 +1,13 @@
 # Test Scenario 1: Client Auto-Discovery Redirects (Unauthenticated)
 # Enforces that self-hosters don't need to configure complex paths.
 GET {{base_url}}/.well-known/caldav
-HTTP 301
+HTTP 308
 [Asserts]
 header "Location" == "/caldav/"
 header "Location" startsWith "/"
 
 GET {{base_url}}/.well-known/carddav
-HTTP 301
+HTTP 308
 [Asserts]
 header "Location" == "/carddav/"
 header "Location" startsWith "/"
