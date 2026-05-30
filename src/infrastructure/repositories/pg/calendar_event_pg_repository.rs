@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row, postgres::PgRow, types::Uuid};
 use std::sync::Arc;

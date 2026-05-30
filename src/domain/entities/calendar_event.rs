@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;

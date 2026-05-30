@@ -6,6 +6,7 @@ use uuid::Uuid;
 pub type CalendarEventRepositoryResult<T> = Result<T, DomainError>;
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum CalendarEventReplaceResult {
     Replaced(CalendarEvent),
     PreconditionFailed,

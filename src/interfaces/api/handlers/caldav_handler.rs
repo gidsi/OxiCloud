@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 /**
  * CalDAV Handler Module
  *
@@ -75,7 +76,7 @@ pub fn well_known_routes() -> Router<Arc<AppState>> {
         )
 }
 
-async fn handle_well_known_caldav() -> Redirect {
+pub async fn handle_well_known_caldav() -> Redirect {
     Redirect::permanent("/caldav/")
 }
 

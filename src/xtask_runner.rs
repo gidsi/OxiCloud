@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use glob::glob;
 use sqlx::postgres::PgPoolOptions;
 use std::env;

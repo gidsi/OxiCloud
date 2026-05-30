@@ -61,6 +61,7 @@ impl Calendar {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_slug(
         name: String,
         slug: String,
@@ -132,6 +133,7 @@ impl Calendar {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_id_and_details(
         id: Uuid,
         name: String,
