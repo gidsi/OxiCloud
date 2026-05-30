@@ -2,76 +2,49 @@ name: Docker Build and Test
 
 on:
   push:
-    branches: [ "main", "dev" ]
-  pull_request:
-    branches: [ "main", "dev" ]
-
-#concurrency:
-#  group: rust-build-${{ github.ref }}
-#  cancel-in-progress: false
+    branches: [ "main", "dev", "feat/*" ]
 
 jobs:
   build-and-test:
-    name: Build and Test Docker Image
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     timeout-minutes: 45
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: test/oxicloud
+          images: ghcr.io/gidsi/oxicloud
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=sha
 
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
-          load: true
-          tags: test/oxicloud:test
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Verify image starts correctly
-        run: |
-          # Start the container in background
-          docker run -d --name oxicloud-test \
-            -e DATABASE_URL="postgres://test:test@localhost/test" \
-            -p 8080:8080 \
-            test/oxicloud:test || true
-
-          # Give it a moment to start (or fail)
-          sleep 3
-
-          # Check that the container exists and show logs
-          echo "=== Container status ==="
-          docker ps -a --filter name=oxicloud-test
-          echo "=== Container logs ==="
-          docker logs oxicloud-test 2>&1 || true
-
-          # Cleanup
-          docker rm -f oxicloud-test || true
-
-      - name: Verify image structure
-        run: |
-          echo "=== Image size ==="
-          docker image ls test/oxicloud:test
-
-          echo "=== Binary exists and is executable ==="
-          docker run --rm --entrypoint sh test/oxicloud:test -c "test -x /usr/local/bin/oxicloud && echo 'OK: binary is executable'"
-
-          echo "=== Static files present ==="
-          docker run --rm --entrypoint sh test/oxicloud:test -c "ls /app/static/index.html && echo 'OK: static files present'"
-
-          echo "✅ Docker build and test completed successfully"
