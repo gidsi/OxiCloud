@@ -232,7 +232,11 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: tests/e2e
-        run: npx playwright install --with-deps
+        run: |
+          sudo sed -i "s/#\$nrconf{restart} = 'i';/\$nrconf{restart} = 'a';/g" /etc/needrestart/needrestart.conf || true
+          npx playwright install --with-deps
+        env:
+          DEBIAN_FRONTEND: noninteractive
 
       - name: Run Playwright tests (spawns DB via pretest hook)
         working-directory: tests/e2e
