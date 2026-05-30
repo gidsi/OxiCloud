@@ -58,6 +58,11 @@ header "Content-Type" contains "xml"
 body contains "calendar-home-set"
 body contains "addressbook-home-set"
 
+# Logout to clear the session cookie so the following requests are unauthenticated
+POST {{base_url}}/api/auth/logout
+Authorization: Bearer {{token}}
+HTTP 200
+
 # Test Scenario 4: Missing Credentials on protected endpoints (caldav)
 OPTIONS {{base_url}}/caldav/
 HTTP 401
