@@ -242,7 +242,7 @@ SET value = EXCLUDED.value;
 COMMENT ON COLUMN caldav.calendars.slug IS
     'Stable per-owner CalDAV collection slug used in /caldav/{username}/{slug}/ URLs';
 
-COMMENT ON INDEX idx_calendars_owner_slug_unique IS
+COMMENT ON INDEX caldav.idx_calendars_owner_slug_unique IS
     'Enforces one calendar collection per owner and CalDAV URI slug';
 
 COMMENT ON TABLE caldav.calendar_properties IS
