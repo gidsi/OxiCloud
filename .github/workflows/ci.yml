@@ -187,10 +187,12 @@ jobs:
           curl -fLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb"
           sudo apt-get install -y "./hurl_${HURL_VERSION}_amd64.deb" b3sum
 
-      - name: Run Hurl API tests
-        run: bash tests/api/run.sh
+      - name: Run unified API and Bash E2E tests
+        run: cargo run --bin xtask -- test --test-dir tests --manage-db
         env:
           BUILD_TARGET: release
+          BASE_DB_URL: "postgres://oxicloud_test:oxicloud_test@localhost:5433/oxicloud_test"
+          DATABASE_URL: "postgres://oxicloud_test:oxicloud_test@localhost:5433/oxicloud_test"
 
       - name: Run Webdav tests
         run: bash tests/webdav/run.sh

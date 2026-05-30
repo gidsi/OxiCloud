@@ -14,6 +14,7 @@ COPY static static
 RUN mkdir -p src/bin && \
     echo 'fn main() { println!("Dummy build for caching dependencies"); }' > src/main.rs && \
     echo 'fn main() {}' > src/bin/generate-openapi.rs && \
+    echo 'fn main() {}' > src/bin/xtask.rs && \
     cargo build --release && \
     rm -rf src static-dist target/release/deps/oxicloud* target/release/build/oxicloud-*
 

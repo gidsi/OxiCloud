@@ -18,6 +18,20 @@ pub trait CalendarRepository: Send + Sync + 'static {
     /// Finds a calendar by its ID
     async fn find_calendar_by_id(&self, id: &Uuid) -> CalendarRepositoryResult<Calendar>;
 
+    /// Finds a calendar by stable CalDAV collection slug and owner
+    async fn find_calendar_by_slug_and_owner(
+        &self,
+        slug: &str,
+        owner_id: Uuid,
+    ) -> CalendarRepositoryResult<Calendar>;
+
+    /// Returns true when a calendar collection already exists at the owner/slug URI
+    async fn calendar_exists_by_slug_and_owner(
+        &self,
+        slug: &str,
+        owner_id: Uuid,
+    ) -> CalendarRepositoryResult<bool>;
+
     /// Lists all calendars for a specific user
     async fn list_calendars_by_owner(
         &self,
@@ -65,6 +79,20 @@ pub trait CalendarRepository: Send + Sync + 'static {
         property_name: &str,
         property_value: &str,
     ) -> CalendarRepositoryResult<()>;
+
+    /// Sets multiple custom properties for a calendar
+    async fn set_calendar_properties(
+        &self,
+        calendar_id: &Uuid,
+        properties: &std::collections::HashMap<String, String>,
+    ) -> CalendarRepositoryResult<()> {
+        for (property_name, property_value) in properties {
+            self.set_calendar_property(calendar_id, property_name, property_value)
+                .await?;
+        }
+
+        Ok(())
+    }
 
     /// Removes a custom property from a calendar
     async fn remove_calendar_property(

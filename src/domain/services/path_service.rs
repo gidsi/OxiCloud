@@ -6,6 +6,30 @@
 
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoragePathInput {
+    Segments(Vec<String>),
+    Path(String),
+}
+
+impl From<Vec<String>> for StoragePathInput {
+    fn from(value: Vec<String>) -> Self {
+        Self::Segments(value)
+    }
+}
+
+impl From<String> for StoragePathInput {
+    fn from(value: String) -> Self {
+        Self::Path(value)
+    }
+}
+
+impl From<&str> for StoragePathInput {
+    fn from(value: &str) -> Self {
+        Self::Path(value.to_string())
+    }
+}
+
 /// Validates a single file or folder name component.
 ///
 /// Returns `Err` with a human-readable reason if the name is rejected.
@@ -38,8 +62,19 @@ impl StoragePath {
         !s.is_empty() && s != "." && s != ".." && !s.contains('/')
     }
 
-    /// Creates a new storage path, silently dropping any traversal segments
-    pub fn new(segments: Vec<String>) -> Self {
+    /// Creates a new storage path from path segments or a slash-separated path string,
+    /// silently dropping traversal segments.
+    pub fn new<T>(input: T) -> Self
+    where
+        T: Into<StoragePathInput>,
+    {
+        match input.into() {
+            StoragePathInput::Segments(segments) => Self::from_segments(segments),
+            StoragePathInput::Path(path) => Self::from_string(&path),
+        }
+    }
+
+    fn from_segments(segments: Vec<String>) -> Self {
         Self {
             segments: segments
                 .into_iter()

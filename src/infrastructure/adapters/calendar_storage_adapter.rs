@@ -10,14 +10,19 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
-    UpdateCalendarDto, UpdateEventDto,
+    CalendarDto, CalendarEventDto, CalendarObjectDeleteConditionDto, CalendarObjectDeleteResultDto,
+    CalendarObjectDeleteStatusDto, CalendarObjectPutConditionDto, CalendarObjectPutResultDto,
+    CalendarObjectPutStatusDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::CalendarStoragePort;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::calendar::Calendar;
 use crate::domain::entities::calendar_event::CalendarEvent;
-use crate::domain::repositories::calendar_event_repository::CalendarEventRepository;
+use crate::domain::repositories::calendar_event_repository::{
+    CalendarEventDeleteCondition, CalendarEventDeleteResult, CalendarEventReplaceResult,
+    CalendarEventRepository,
+};
 use crate::domain::repositories::calendar_repository::CalendarRepository;
 use crate::infrastructure::repositories::pg::CalendarEventPgRepository;
 use crate::infrastructure::repositories::pg::CalendarPgRepository;
@@ -42,14 +47,24 @@ impl CalendarStorageAdapter {
 }
 
 impl CalendarStoragePort for CalendarStorageAdapter {
-    // Calendar operations
-
     async fn create_calendar(
         &self,
         dto: CreateCalendarDto,
         owner_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        let calendar = Calendar::new(dto.name, owner_id, dto.description, dto.color)?;
+        let calendar = match dto.slug {
+            Some(slug) => Calendar::new_with_slug(
+                dto.name,
+                slug,
+                owner_id,
+                dto.description,
+                dto.color,
+                dto.is_public.unwrap_or(false),
+                None,
+                HashMap::new(),
+            )?,
+            None => Calendar::new(dto.name, owner_id, dto.description, dto.color)?,
+        };
 
         let created = self.calendar_repository.create_calendar(calendar).await?;
         Ok(CalendarDto::from(created))
@@ -70,6 +85,9 @@ impl CalendarStoragePort for CalendarStorageAdapter {
 
         let mut calendar = self.calendar_repository.find_calendar_by_id(&uuid).await?;
 
+        if let Some(slug) = update.slug {
+            calendar.update_slug(slug)?;
+        }
         if let Some(name) = update.name {
             calendar.update_name(name)?;
         }
@@ -78,6 +96,9 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         }
         if let Some(color) = update.color {
             calendar.update_color(Some(color))?;
+        }
+        if let Some(is_public) = update.is_public {
+            calendar.update_public_visibility(is_public);
         }
 
         let updated = self.calendar_repository.update_calendar(calendar).await?;
@@ -93,12 +114,10 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        // First delete all events in the calendar
         self.event_repository
             .delete_all_events_in_calendar(&uuid)
             .await?;
 
-        // Then delete the calendar itself
         self.calendar_repository.delete_calendar(&uuid).await
     }
 
@@ -123,6 +142,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .list_calendars_by_owner(owner_id)
             .await?;
+
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
@@ -134,6 +154,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .list_calendars_shared_with_user(user_id)
             .await?;
+
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
@@ -146,6 +167,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .list_public_calendars(limit, offset)
             .await?;
+
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
@@ -167,7 +189,17 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .await
     }
 
-    // Calendar sharing
+    async fn find_calendar_by_slug_for_owner(
+        &self,
+        slug: &str,
+        owner_id: Uuid,
+    ) -> Result<CalendarDto, DomainError> {
+        let calendar = self
+            .calendar_repository
+            .find_calendar_by_slug_and_owner(slug, owner_id)
+            .await?;
+        Ok(CalendarDto::from(calendar))
+    }
 
     async fn share_calendar(
         &self,
@@ -220,8 +252,6 @@ impl CalendarStoragePort for CalendarStorageAdapter {
 
         self.calendar_repository.get_calendar_shares(&uuid).await
     }
-
-    // Calendar properties
 
     async fn set_calendar_property(
         &self,
@@ -277,8 +307,6 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .await
     }
 
-    // Event operations
-
     async fn create_event(&self, dto: CreateEventDto) -> Result<CalendarEventDto, DomainError> {
         let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
             DomainError::new(
@@ -288,13 +316,11 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        // Verify calendar exists and user has access
         let _calendar = self
             .calendar_repository
             .find_calendar_by_id(&calendar_id)
             .await?;
 
-        // Generate basic iCal data
         let ical_data = format!(
             "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OxiCloud//EN\nBEGIN:VEVENT\nUID:{}@oxicloud\nDTSTAMP:{}\nDTSTART:{}\nDTEND:{}\nSUMMARY:{}\nEND:VEVENT\nEND:VCALENDAR",
             uuid::Uuid::new_v4(),
@@ -332,14 +358,16 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        // Verify calendar exists
         let _calendar = self
             .calendar_repository
             .find_calendar_by_id(&calendar_id)
             .await?;
 
-        // Parse iCal data and create event
-        let event = CalendarEvent::from_ical(calendar_id, dto.ical_data.clone())?;
+        let event = CalendarEvent::from_ical_with_resource_name(
+            calendar_id,
+            dto.resource_name,
+            dto.ical_data,
+        )?;
 
         let created = self.event_repository.create_event(event).await?;
         Ok(CalendarEventDto::from(created))
@@ -436,7 +464,165 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .event_repository
             .list_events_by_calendar_paginated(&uuid, limit, offset)
             .await?;
+
         Ok(events.into_iter().map(CalendarEventDto::from).collect())
+    }
+
+    async fn put_calendar_object(
+        &self,
+        dto: PutCalendarObjectDto,
+    ) -> Result<CalendarObjectPutResultDto, DomainError> {
+        let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarObject",
+                "Invalid calendar ID format",
+            )
+        })?;
+
+        let _calendar = self
+            .calendar_repository
+            .find_calendar_by_id(&calendar_id)
+            .await?;
+
+        let event = CalendarEvent::from_ical_with_resource_name(
+            calendar_id,
+            Some(dto.resource_name.clone()),
+            dto.ical_data,
+        )?;
+
+        if let Some(conflict) = self
+            .event_repository
+            .find_uid_conflict(&calendar_id, event.ical_uid(), event.resource_name())
+            .await?
+        {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalDavUidConflict",
+                format!(
+                    "Another calendar object resource with the same UID already exists: {}",
+                    conflict.resource_name()
+                ),
+            ));
+        }
+
+        match dto.condition {
+            CalendarObjectPutConditionDto::IfNoneMatchAny => {
+                let created = self
+                    .event_repository
+                    .create_event_if_resource_absent(event)
+                    .await
+                    .map_err(|e| {
+                        if e.kind == ErrorKind::AlreadyExists {
+                            DomainError::new(
+                                ErrorKind::InvalidInput,
+                                "CalDavPreconditionFailed",
+                                "If-None-Match precondition failed because the resource already exists.",
+                            )
+                        } else {
+                            e
+                        }
+                    })?;
+                Ok(CalendarObjectPutResultDto {
+                    status: CalendarObjectPutStatusDto::Created,
+                    event: CalendarEventDto::from(created),
+                })
+            }
+            CalendarObjectPutConditionDto::IfMatch(expected_etag) => match self
+                .event_repository
+                .replace_event_by_resource_name_and_etag(event, &expected_etag)
+                .await?
+            {
+                CalendarEventReplaceResult::Replaced(updated) => Ok(CalendarObjectPutResultDto {
+                    status: CalendarObjectPutStatusDto::Updated,
+                    event: CalendarEventDto::from(updated),
+                }),
+                CalendarEventReplaceResult::PreconditionFailed => Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "CalDavPreconditionFailed",
+                    "If-Match precondition failed because the supplied ETag does not match the current resource ETag.",
+                )),
+            },
+            CalendarObjectPutConditionDto::None => {
+                let existing = self
+                    .event_repository
+                    .find_event_by_resource_name(&calendar_id, event.resource_name())
+                    .await?;
+                if existing.is_some() {
+                    let updated = self
+                        .event_repository
+                        .replace_event_by_resource_name(event)
+                        .await?;
+                    Ok(CalendarObjectPutResultDto {
+                        status: CalendarObjectPutStatusDto::Updated,
+                        event: CalendarEventDto::from(updated),
+                    })
+                } else {
+                    let created = self.event_repository.create_event(event).await?;
+                    Ok(CalendarObjectPutResultDto {
+                        status: CalendarObjectPutStatusDto::Created,
+                        event: CalendarEventDto::from(created),
+                    })
+                }
+            }
+        }
+    }
+
+    async fn delete_calendar_object(
+        &self,
+        dto: DeleteCalendarObjectDto,
+    ) -> Result<CalendarObjectDeleteResultDto, DomainError> {
+        let calendar_id = Uuid::parse_str(&dto.calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarObject",
+                "Invalid calendar ID format",
+            )
+        })?;
+
+        let condition = match dto.condition {
+            CalendarObjectDeleteConditionDto::None => CalendarEventDeleteCondition::None,
+            CalendarObjectDeleteConditionDto::IfMatchAny => {
+                CalendarEventDeleteCondition::IfMatchAny
+            }
+            CalendarObjectDeleteConditionDto::IfMatch(etags) => {
+                CalendarEventDeleteCondition::IfMatch(etags)
+            }
+        };
+
+        let result = self
+            .event_repository
+            .delete_event_by_resource_name(&calendar_id, &dto.resource_name, condition)
+            .await?;
+
+        let status = match result {
+            CalendarEventDeleteResult::Deleted => CalendarObjectDeleteStatusDto::Deleted,
+            CalendarEventDeleteResult::NotFound => CalendarObjectDeleteStatusDto::NotFound,
+            CalendarEventDeleteResult::PreconditionFailed => {
+                CalendarObjectDeleteStatusDto::PreconditionFailed
+            }
+        };
+
+        Ok(CalendarObjectDeleteResultDto { status })
+    }
+
+    async fn get_event_by_resource_name(
+        &self,
+        calendar_id: &str,
+        resource_name: &str,
+    ) -> Result<Option<CalendarEventDto>, DomainError> {
+        let calendar_id = Uuid::parse_str(calendar_id).map_err(|_| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "Calendar",
+                "Invalid calendar ID format",
+            )
+        })?;
+        let event = self
+            .event_repository
+            .find_event_by_resource_name(&calendar_id, resource_name)
+            .await?;
+        Ok(event.map(CalendarEventDto::from))
     }
 
     async fn get_events_in_time_range(
@@ -457,11 +643,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .event_repository
             .get_events_in_time_range(&uuid, start, end)
             .await?;
+
         Ok(events.into_iter().map(CalendarEventDto::from).collect())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    // Tests would go here using mock repositories
 }

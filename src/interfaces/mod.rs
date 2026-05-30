@@ -1,5 +1,6 @@
 pub mod api;
 pub mod errors;
+pub mod http;
 pub mod middleware;
 pub mod nextcloud;
 pub mod web;

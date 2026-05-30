@@ -6,6 +6,7 @@ pub mod common;
 pub mod domain;
 pub mod infrastructure;
 pub mod interfaces;
+pub mod xtask_runner;
 
 // Common public re-exports
 pub use application::services::folder_service::FolderService;

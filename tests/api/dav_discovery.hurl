@@ -1,21 +1,43 @@
 # Test Scenario 1: Client Auto-Discovery Redirects (Unauthenticated)
 # Enforces that self-hosters don't need to configure complex paths.
-GET http://localhost:8080/.well-known/caldav
-HTTP 301
+GET {{base_url}}/.well-known/caldav
+HTTP 308
 [Asserts]
 header "Location" == "/caldav/"
 header "Location" startsWith "/"
 
-GET http://localhost:8080/.well-known/carddav
-HTTP 301
+GET {{base_url}}/.well-known/carddav
+HTTP 308
 [Asserts]
 header "Location" == "/carddav/"
 header "Location" startsWith "/"
 
+# Get an app password for the remaining tests
+POST {{base_url}}/api/auth/login
+Content-Type: application/json
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+HTTP 200
+[Captures]
+token: jsonpath "$.access_token"
+
+POST {{base_url}}/api/auth/app-passwords
+Authorization: Bearer {{token}}
+Content-Type: application/json
+{
+  "label": "Test Client"
+}
+HTTP 200
+[Captures]
+app_password: jsonpath "$.password"
+
 # Test Scenario 2: Server Capabilities Verification with valid credentials
 # Ensures sync clients know we support contacts and calendars natively.
-OPTIONS http://localhost:8080/caldav/
-Authorization: Basic dGVzdHVzZXI6cGFzc3dvcmQ=
+OPTIONS {{base_url}}/caldav/
+[BasicAuth]
+{{username}}: {{app_password}}
 HTTP 200
 [Asserts]
 header "DAV" contains "1"
@@ -25,25 +47,31 @@ header "DAV" contains "addressbook"
 
 # Test Scenario 3: Principal Home-Set Discovery
 # Verifies the strict XML parsing and fetching of the user's specific sync URLs.
-PROPFIND http://localhost:8080/caldav/
-Authorization: Basic dGVzdHVzZXI6cGFzc3dvcmQ=
+PROPFIND {{base_url}}/caldav/
 Depth: 0
 Content-Type: text/xml; charset=utf-8
+[BasicAuth]
+{{username}}: {{app_password}}
 HTTP 207
 [Asserts]
 header "Content-Type" contains "xml"
 body contains "calendar-home-set"
 body contains "addressbook-home-set"
 
+# Logout to clear the session cookie so the following requests are unauthenticated
+POST {{base_url}}/api/auth/logout
+Authorization: Bearer {{token}}
+HTTP 200
+
 # Test Scenario 4: Missing Credentials on protected endpoints (caldav)
-OPTIONS http://localhost:8080/caldav/
+OPTIONS {{base_url}}/caldav/
 HTTP 401
 [Asserts]
 header "WWW-Authenticate" == "Basic realm=\"OxiCloud\""
 body not contains "<html"
 body not contains "<!DOCTYPE html"
 
-PROPFIND http://localhost:8080/caldav/
+PROPFIND {{base_url}}/caldav/
 Depth: 0
 Content-Type: text/xml; charset=utf-8
 HTTP 401
@@ -53,14 +81,14 @@ body not contains "<html"
 body not contains "<!DOCTYPE html"
 
 # Test Scenario 4: Missing Credentials on protected endpoints (carddav)
-OPTIONS http://localhost:8080/carddav/
+OPTIONS {{base_url}}/carddav/
 HTTP 401
 [Asserts]
 header "WWW-Authenticate" == "Basic realm=\"OxiCloud\""
 body not contains "<html"
 body not contains "<!DOCTYPE html"
 
-PROPFIND http://localhost:8080/carddav/
+PROPFIND {{base_url}}/carddav/
 Depth: 0
 Content-Type: text/xml; charset=utf-8
 HTTP 401
@@ -70,10 +98,11 @@ body not contains "<html"
 body not contains "<!DOCTYPE html"
 
 # Test Scenario 5: Invalid Credentials during PROPFIND
-PROPFIND http://localhost:8080/caldav/
-Authorization: Basic aW52YWxpZDp3cm9uZw==
+PROPFIND {{base_url}}/caldav/
 Depth: 0
 Content-Type: text/xml; charset=utf-8
+[BasicAuth]
+invalid: wrong
 HTTP 401
 [Asserts]
 header "WWW-Authenticate" == "Basic realm=\"OxiCloud\""

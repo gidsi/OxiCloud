@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::application::ports::blob_storage_ports::BlobStorageBackend;
 use crate::common::config::StorageBackendType;
-use crate::infrastructure::db::DbPools;
+use crate::infrastructure::db::{DbPools, create_database_pools};
 
 use crate::application::services::admin_settings_service::AdminSettingsService;
 use crate::application::services::auth_application_service::AuthApplicationService;
@@ -618,13 +618,29 @@ impl AppServiceFactory {
         &self,
         db_pools: Option<DbPools>,
     ) -> Result<AppState, DomainError> {
-        // Database is REQUIRED in 100% blob storage model
-        let pools = db_pools.ok_or_else(|| {
-            DomainError::internal_error(
-                "Database",
-                "PostgreSQL database is required for blob storage model",
-            )
-        })?;
+        // Database is REQUIRED in the 100% blob storage model. If callers do not
+        // inject pools explicitly, build real PostgreSQL pools from configuration
+        // so integration wiring uses the same production path as main.rs.
+        let pools = match db_pools {
+            Some(pools) => pools,
+            None => {
+                let mut config = self.config.clone();
+                if std::env::var("OXICLOUD_DB_CONNECTION_STRING").is_err()
+                    && config.database.connection_string
+                        == AppConfig::default().database.connection_string
+                    && let Ok(database_url) = std::env::var("DATABASE_URL")
+                {
+                    config.database.connection_string = database_url;
+                }
+
+                create_database_pools(&config).await.map_err(|e| {
+                    DomainError::internal_error(
+                        "Database",
+                        format!("PostgreSQL database initialization failed: {e}"),
+                    )
+                })?
+            }
+        };
 
         let pool = Arc::new(pools.primary);
         let maintenance_pool = Arc::new(pools.maintenance);
@@ -1162,6 +1178,39 @@ pub struct AppState {
     /// an enum dispatcher or `Arc<dyn AuthorizationEngine>` (with
     /// `async_trait` boxing).
     pub authorization: Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine>,
+}
+
+impl AppState {
+    pub async fn new(
+        pool: PgPool,
+        storage_path: crate::domain::services::path_service::StoragePath,
+        jwt_secret: String,
+        host: String,
+    ) -> Arc<Self> {
+        let mut config = AppConfig::default();
+        config.auth.jwt_secret = jwt_secret;
+        config.server_host = host;
+        config.features.enable_auth = false;
+
+        let storage_root = if storage_path.is_empty() {
+            PathBuf::from("/")
+        } else {
+            PathBuf::from(storage_path.to_string())
+        };
+        let locales_root = PathBuf::from("./static/locales");
+        let factory = AppServiceFactory::with_config(storage_root, locales_root, config);
+
+        let maintenance_pool = pool.clone();
+        let app_state = factory
+            .build_app_state(Some(DbPools {
+                primary: pool,
+                maintenance: maintenance_pool,
+            }))
+            .await
+            .expect("failed to build application state from supplied database pool");
+
+        Arc::new(app_state)
+    }
 }
 
 // All AppState construction is done via struct literal in build_app_state().
