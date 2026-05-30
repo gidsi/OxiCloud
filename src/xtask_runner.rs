@@ -645,6 +645,8 @@ async fn run_hurl_test(
     let mut command = Command::new("hurl");
     command
         .arg("--test")
+        .arg("--jobs")
+        .arg("1")
         .arg("--file-root")
         .arg("tests")
         .arg("--variable")
@@ -654,7 +656,9 @@ async fn run_hurl_test(
         .arg("--variable")
         .arg("email=admin@example.com")
         .arg("--variable")
-        .arg("password=TestPassword1!");
+        .arg("password=TestPassword1!")
+        .arg("--variable")
+        .arg("basic_auth_credentials=YWRtaW46VGVzdFBhc3N3b3JkMSE=");
 
     if let Some(setup) = setup_hurl_for(&test.path) {
         command.arg(setup);
@@ -677,6 +681,21 @@ async fn run_bash_test(
         .or_else(|| context.base_url.strip_prefix("https://"))
         .unwrap_or(&context.base_url)
         .to_string();
+
+    if let Some(setup) = setup_hurl_for(&test.path) {
+        let mut setup_cmd = Command::new("hurl");
+        setup_cmd
+            .arg("--variable")
+            .arg(format!("base_url={}", context.base_url))
+            .arg("--variable")
+            .arg("username=admin")
+            .arg("--variable")
+            .arg("email=admin@example.com")
+            .arg("--variable")
+            .arg("password=TestPassword1!")
+            .arg(&setup);
+        let _ = setup_cmd.status().await;
+    }
     let mut command = Command::new("bash");
     command
         .arg(&test.path)
