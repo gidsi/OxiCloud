@@ -48,10 +48,10 @@ header "DAV" contains "addressbook"
 # Test Scenario 3: Principal Home-Set Discovery
 # Verifies the strict XML parsing and fetching of the user's specific sync URLs.
 PROPFIND {{base_url}}/caldav/
-[BasicAuth]
-{{username}}: {{app_password}}
 Depth: 0
 Content-Type: text/xml; charset=utf-8
+[BasicAuth]
+{{username}}: {{app_password}}
 HTTP 207
 [Asserts]
 header "Content-Type" contains "xml"
@@ -94,10 +94,10 @@ body not contains "<!DOCTYPE html"
 
 # Test Scenario 5: Invalid Credentials during PROPFIND
 PROPFIND {{base_url}}/caldav/
-[BasicAuth]
-invalid: wrong
 Depth: 0
 Content-Type: text/xml; charset=utf-8
+[BasicAuth]
+invalid: wrong
 HTTP 401
 [Asserts]
 header "WWW-Authenticate" == "Basic realm=\"OxiCloud\""

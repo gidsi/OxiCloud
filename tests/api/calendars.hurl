@@ -25,7 +25,7 @@ app_password: jsonpath "$.password"
 
 # 1. User should be able to create a new calendar successfully
 MKCALENDAR {{base_url}}/caldav/{{username}}/work-calendar/
+Content-Type: application/xml; charset=utf-8
 [BasicAuth]
 {{username}}: {{app_password}}
-Content-Type: application/xml; charset=utf-8
 HTTP 201
