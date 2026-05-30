@@ -65,9 +65,27 @@ if [ "$CARDDAV_LOCATION" != "/carddav/" ]; then
     fail "Expected Location: /carddav/ for /.well-known/carddav, got $CARDDAV_LOCATION"
 fi
 
+echo "Getting App Password for CalDAV tests..."
+TOKEN=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+
+if [ -z "$TOKEN" ]; then
+    fail "Could not get access token for App Password creation"
+fi
+
+APP_PASSWORD=$(curl -s -X POST "$BASE_URL/api/auth/app-passwords" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"label": "Test Client"}' | grep -o '"password":"[^"]*' | cut -d'"' -f4)
+
+if [ -z "$APP_PASSWORD" ]; then
+    fail "Could not create App Password"
+fi
+
 echo "Testing OPTIONS capabilities..."
 OPTIONS_HEADERS=$(curl -s -i -o /dev/null -D - \
-    -u "$USERNAME:$PASSWORD" \
+    -u "$USERNAME:$APP_PASSWORD" \
     -X OPTIONS "$BASE_URL/caldav/")
 
 OPTIONS_STATUS=$(printf '%s\n' "$OPTIONS_HEADERS" | awk 'tolower($0) ~ /^http\// { code=$2 } END { print code }')
@@ -115,7 +133,7 @@ fi
 echo "Testing authenticated principal discovery..."
 PRINCIPAL_RESPONSE=$(curl -s -w "\n%{http_code}" \
     -X PROPFIND "$BASE_URL/caldav/" \
-    -u "$USERNAME:$PASSWORD" \
+    -u "$USERNAME:$APP_PASSWORD" \
     -H "Depth: 0" \
     -H "Content-Type: application/xml; charset=utf-8" \
     --data-binary '<?xml version="1.0" encoding="utf-8"?>

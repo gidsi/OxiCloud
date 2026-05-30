@@ -1,3 +1,4 @@
+set -x
 #!/usr/bin/env bash
 # =============================================================
 # OxiCloud – Storage disk-cleanup verification
@@ -20,7 +21,14 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STORAGE_PATH="${OXICLOUD_STORAGE_PATH:-$REPO_ROOT/tests/api/storage}"
 
 # shellcheck source=test.env
-source "$SCRIPT_DIR/test.env"
+if [[ -f "$SCRIPT_DIR/test.env" ]]; then
+    source "$SCRIPT_DIR/test.env"
+fi
+
+# Override with environment variables if set (xtask test runner sets these)
+base_url="${BASE_URL:-${base_url:-http://localhost:8087}}"
+username="${username:-admin}"
+password="${password:-TestPassword1!}"
 
 log()  { echo "[storage-check] $*"; }
 fail() { echo $'\e[31m'"[storage-check] FAIL: $*"$'\e[0m' >&2; exit 1; }

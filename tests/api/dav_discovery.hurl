@@ -12,10 +12,32 @@ HTTP 308
 header "Location" == "/carddav/"
 header "Location" startsWith "/"
 
+# Get an app password for the remaining tests
+POST {{base_url}}/api/auth/login
+Content-Type: application/json
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+HTTP 200
+[Captures]
+token: jsonpath "$.access_token"
+
+POST {{base_url}}/api/auth/app-passwords
+Authorization: Bearer {{token}}
+Content-Type: application/json
+{
+  "label": "Test Client"
+}
+HTTP 200
+[Captures]
+app_password: jsonpath "$.password"
+
 # Test Scenario 2: Server Capabilities Verification with valid credentials
 # Ensures sync clients know we support contacts and calendars natively.
 OPTIONS {{base_url}}/caldav/
-Authorization: Basic dGVzdHVzZXI6cGFzc3dvcmQ=
+[BasicAuth]
+{{username}}: {{app_password}}
 HTTP 200
 [Asserts]
 header "DAV" contains "1"
@@ -26,7 +48,8 @@ header "DAV" contains "addressbook"
 # Test Scenario 3: Principal Home-Set Discovery
 # Verifies the strict XML parsing and fetching of the user's specific sync URLs.
 PROPFIND {{base_url}}/caldav/
-Authorization: Basic dGVzdHVzZXI6cGFzc3dvcmQ=
+[BasicAuth]
+{{username}}: {{app_password}}
 Depth: 0
 Content-Type: text/xml; charset=utf-8
 HTTP 207
@@ -71,7 +94,8 @@ body not contains "<!DOCTYPE html"
 
 # Test Scenario 5: Invalid Credentials during PROPFIND
 PROPFIND {{base_url}}/caldav/
-Authorization: Basic aW52YWxpZDp3cm9uZw==
+[BasicAuth]
+invalid: wrong
 Depth: 0
 Content-Type: text/xml; charset=utf-8
 HTTP 401
