@@ -34,6 +34,41 @@ const DEFAULT_CALENDAR_COLOR: &str = "#2C7EF8FF";
 const DEFAULT_CALENDAR_ORDER: i32 = 0;
 const DEFAULT_CALENDAR_SEQUENCE: i64 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrivilegeSet {
+    pub read: bool,
+    pub write: bool,
+}
+
+impl PrivilegeSet {
+    pub const fn none() -> Self {
+        Self {
+            read: false,
+            write: false,
+        }
+    }
+
+    pub const fn read_only() -> Self {
+        Self {
+            read: true,
+            write: false,
+        }
+    }
+
+    pub const fn read_write() -> Self {
+        Self {
+            read: true,
+            write: true,
+        }
+    }
+}
+
+impl Default for PrivilegeSet {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Calendar {
     id: Uuid,
@@ -420,6 +455,16 @@ impl Calendar {
         self.owner_id == *user_id
     }
 
+    pub fn permissions_for(&self, user_id: &Uuid) -> PrivilegeSet {
+        if self.owner_id == *user_id {
+            PrivilegeSet::read_write()
+        } else if self.is_public {
+            PrivilegeSet::read_only()
+        } else {
+            PrivilegeSet::none()
+        }
+    }
+
     pub fn touch(&mut self) {
         self.updated_at = Utc::now();
     }
@@ -755,5 +800,49 @@ mod tests {
             HashMap::new(),
         );
         assert!(res.is_err());
+    }
+    #[test]
+    fn calendar_permissions_owner_gets_read_write() {
+        let owner_id = Uuid::new_v4();
+        let calendar = Calendar::new("Name".to_string(), owner_id, None, None).unwrap();
+
+        assert_eq!(
+            calendar.permissions_for(&owner_id),
+            PrivilegeSet::read_write()
+        );
+    }
+
+    #[test]
+    fn calendar_permissions_non_owner_private_gets_none() {
+        let owner_id = Uuid::new_v4();
+        let other_user_id = Uuid::new_v4();
+        let calendar = Calendar::new("Name".to_string(), owner_id, None, None).unwrap();
+
+        assert_eq!(
+            calendar.permissions_for(&other_user_id),
+            PrivilegeSet::none()
+        );
+    }
+
+    #[test]
+    fn calendar_permissions_non_owner_public_gets_read_only() {
+        let owner_id = Uuid::new_v4();
+        let other_user_id = Uuid::new_v4();
+        let calendar = Calendar::new_with_slug(
+            "Name".to_string(),
+            "name".to_string(),
+            owner_id,
+            None,
+            None,
+            true,
+            None,
+            HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            calendar.permissions_for(&other_user_id),
+            PrivilegeSet::read_only()
+        );
     }
 }

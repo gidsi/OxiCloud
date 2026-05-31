@@ -1,8 +1,24 @@
-use crate::domain::entities::calendar::Calendar;
+use crate::domain::entities::calendar::{Calendar, PrivilegeSet};
 use crate::domain::entities::calendar_event::CalendarEvent;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PrivilegeSetDto {
+    pub read: bool,
+    pub write: bool,
+}
+
+impl From<PrivilegeSet> for PrivilegeSetDto {
+    fn from(value: PrivilegeSet) -> Self {
+        Self {
+            read: value.read,
+            write: value.write,
+        }
+    }
+}
 
 /// DTO for calendar data transfer
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -19,6 +35,7 @@ pub struct CalendarDto {
     pub ctag: i64,
     pub sync_token: i64,
     pub calendar_order: i32,
+    pub privileges: PrivilegeSetDto,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub custom_properties: HashMap<String, String>,
@@ -39,6 +56,7 @@ impl Default for CalendarDto {
             ctag: 1,
             sync_token: 1,
             calendar_order: 0,
+            privileges: PrivilegeSetDto::default(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             custom_properties: HashMap::new(),
@@ -46,8 +64,13 @@ impl Default for CalendarDto {
     }
 }
 
-impl From<Calendar> for CalendarDto {
-    fn from(calendar: Calendar) -> Self {
+impl CalendarDto {
+    pub fn from_calendar_for_user(calendar: Calendar, user_id: &Uuid) -> Self {
+        let privileges = calendar.permissions_for(user_id).into();
+        Self::from_calendar_with_privileges(calendar, privileges)
+    }
+
+    fn from_calendar_with_privileges(calendar: Calendar, privileges: PrivilegeSetDto) -> Self {
         Self {
             id: calendar.id().to_string(),
             slug: calendar.slug().to_string(),
@@ -61,10 +84,18 @@ impl From<Calendar> for CalendarDto {
             ctag: calendar.ctag(),
             sync_token: calendar.sync_token(),
             calendar_order: calendar.calendar_order(),
+            privileges,
             created_at: *calendar.created_at(),
             updated_at: *calendar.updated_at(),
             custom_properties: calendar.custom_properties().clone(),
         }
+    }
+}
+
+impl From<Calendar> for CalendarDto {
+    fn from(calendar: Calendar) -> Self {
+        let privileges = calendar.permissions_for(calendar.owner_id()).into();
+        Self::from_calendar_with_privileges(calendar, privileges)
     }
 }
 

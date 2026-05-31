@@ -86,7 +86,13 @@ impl CalendarUseCase for CalendarService {
                 "You don't have permission to view this calendar",
             ));
         }
-        Ok(calendar)
+        Ok(CalendarDto {
+            privileges: crate::application::dtos::calendar_dto::PrivilegeSetDto {
+                read: true,
+                write: calendar.owner_id == user_id.to_string(),
+            },
+            ..calendar
+        })
     }
 
     async fn find_calendar_by_slug_for_owner(

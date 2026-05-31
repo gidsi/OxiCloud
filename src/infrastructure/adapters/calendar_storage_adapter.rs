@@ -169,7 +169,10 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .list_calendars_by_owner(owner_id)
             .await?;
 
-        Ok(calendars.into_iter().map(CalendarDto::from).collect())
+        Ok(calendars
+            .into_iter()
+            .map(|calendar| CalendarDto::from_calendar_for_user(calendar, &owner_id))
+            .collect())
     }
 
     async fn list_calendars_shared_with_user(
@@ -181,7 +184,10 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .list_calendars_shared_with_user(user_id)
             .await?;
 
-        Ok(calendars.into_iter().map(CalendarDto::from).collect())
+        Ok(calendars
+            .into_iter()
+            .map(|calendar| CalendarDto::from_calendar_for_user(calendar, &user_id))
+            .collect())
     }
 
     async fn list_public_calendars(
@@ -224,7 +230,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .calendar_repository
             .find_calendar_by_slug_and_owner(slug, owner_id)
             .await?;
-        Ok(CalendarDto::from(calendar))
+        Ok(CalendarDto::from_calendar_for_user(calendar, &owner_id))
     }
 
     async fn share_calendar(
