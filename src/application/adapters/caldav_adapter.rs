@@ -980,7 +980,7 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
 
         // Only add write privilege if user owns the calendar or has write access
-        if true {
+        if calendar.owner_id == "current_user_id" {
             // This should be replaced with actual user check
             xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
             xml_writer.write_event(Event::Empty(BytesStart::new("D:write")))?;
@@ -1084,7 +1084,7 @@ impl CalDavAdapter {
                     xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
 
                     // Only add write privilege if user owns the calendar or has write access
-                    if true {
+                    if calendar.owner_id == "current_user_id" {
                         // This should be replaced with actual user check
                         xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
                         xml_writer.write_event(Event::Empty(BytesStart::new("D:write")))?;
