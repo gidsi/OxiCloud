@@ -467,7 +467,6 @@ async fn test_xtask_real_application_e2e_is_opt_in() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[cfg(unix)]
 #[tokio::test]
 async fn test_xtask_caldav_compliance_returns_zero_on_suite_failure_and_calculates_score() {
@@ -516,14 +515,7 @@ exit 1
         .arg(output_dir.to_str().unwrap())
         .arg("--markdown-out")
         .arg(pr_comment_path.to_str().unwrap())
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                tools_dir.to_str().unwrap(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
+        .env("PATH", format!("{}:{}", tools_dir.to_str().unwrap(), std::env::var("PATH").unwrap_or_default()))
         .env("TEST_DATABASE_URL", base_db_url)
         .current_dir(&current_dir)
         .stdout(Stdio::piped())
@@ -546,10 +538,7 @@ exit 1
         "Runner did not emit compliance score to logs. Output: {combined_output}"
     );
 
-    assert!(
-        pr_comment_path.exists(),
-        "Markdown PR comment file was not generated"
-    );
+    assert!(pr_comment_path.exists(), "Markdown PR comment file was not generated");
     let markdown_content = fs::read_to_string(pr_comment_path).unwrap();
 
     assert!(
@@ -562,8 +551,7 @@ exit 1
     );
 
     assert!(
-        !markdown_content.contains("postgres://")
-            && !markdown_content.contains("TEST_DATABASE_URL"),
+        !markdown_content.contains("postgres://") && !markdown_content.contains("TEST_DATABASE_URL"),
         "Markdown leaked sensitive environment variables. Content: {markdown_content}"
     );
 }
@@ -612,8 +600,7 @@ exit 0
         .iter()
         .find(|path| std::path::Path::new(path).is_file())
         .expect("test requires a system curl binary");
-    std::os::unix::fs::symlink(curl_target, tools_dir.join("curl"))
-        .expect("Failed to create isolated curl symlink");
+    std::os::unix::fs::symlink(curl_target, tools_dir.join("curl")).expect("Failed to create isolated curl symlink");
 
     let mut current_dir = std::env::current_dir().unwrap();
     if current_dir.ends_with("tests") {
@@ -622,21 +609,14 @@ exit 0
 
     let base_db_url = "postgres://postgres:postgres@localhost/oxicloud";
     let pr_comment_path = test_workspace.path().join("pr_comment.md");
-
+    
     let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
         .arg("caldav-compliance")
         .arg("--suite-output-dir")
         .arg(output_dir.to_str().unwrap())
         .arg("--markdown-out")
         .arg(pr_comment_path.to_str().unwrap())
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                tools_dir.to_str().unwrap(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
+        .env("PATH", format!("{}:{}", tools_dir.to_str().unwrap(), std::env::var("PATH").unwrap_or_default()))
         .env("TEST_DATABASE_URL", base_db_url)
         .current_dir(&current_dir)
         .stdout(Stdio::piped())

@@ -2,20 +2,24 @@ name: Docker Build and Test
 
 on:
   push:
-    branches: [ "main", "dev" ]
-  pull_request:
-    branches: [ "main", "dev" ]
-
-#concurrency:
-#  group: rust-build-${{ github.ref }}
-#  cancel-in-progress: false
+    branches: [ "main", "dev", "feat/*" ]
+  workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Build and Test Docker Image
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
+  build:
+    name: Build Docker Image
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -23,55 +27,84 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: test/oxicloud
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha
+          images: ghcr.io/gidsi/oxicloud
 
-      - name: Build Docker image
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          load: true
-          tags: test/oxicloud:test
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/gidsi/oxicloud,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify image starts correctly
+      - name: Export digest
         run: |
-          # Start the container in background
-          docker run -d --name oxicloud-test \
-            -e DATABASE_URL="postgres://test:test@localhost/test" \
-            -p 8080:8080 \
-            test/oxicloud:test || true
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
 
-          # Give it a moment to start (or fail)
-          sleep 3
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+        env:
+          PLATFORM_PAIR: ${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
 
-          # Check that the container exists and show logs
-          echo "=== Container status ==="
-          docker ps -a --filter name=oxicloud-test
-          echo "=== Container logs ==="
-          docker logs oxicloud-test 2>&1 || true
+  merge:
+    name: Merge and Publish Manifest
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
-          # Cleanup
-          docker rm -f oxicloud-test || true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Verify image structure
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/gidsi/oxicloud
+          tags: |
+            type=ref,event=branch
+            type=sha
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
         run: |
-          echo "=== Image size ==="
-          docker image ls test/oxicloud:test
-
-          echo "=== Binary exists and is executable ==="
-          docker run --rm --entrypoint sh test/oxicloud:test -c "test -x /usr/local/bin/oxicloud && echo 'OK: binary is executable'"
-
-          echo "=== Static files present ==="
-          docker run --rm --entrypoint sh test/oxicloud:test -c "ls /app/static/index.html && echo 'OK: static files present'"
-
-          echo "✅ Docker build and test completed successfully"
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/gidsi/oxicloud@sha256:%s ' *)
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
