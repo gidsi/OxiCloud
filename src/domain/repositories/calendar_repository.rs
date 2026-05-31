@@ -1,5 +1,5 @@
 use crate::common::errors::DomainError;
-use crate::domain::entities::calendar::Calendar;
+use crate::domain::entities::calendar::{Calendar, CalendarAccessLevel};
 use uuid::Uuid;
 
 pub type CalendarRepositoryResult<T> = Result<T, DomainError>;
@@ -58,12 +58,36 @@ pub trait CalendarRepository: Send + Sync + 'static {
         offset: i64,
     ) -> CalendarRepositoryResult<Vec<Calendar>>;
 
-    /// Checks if a user has access to a calendar
+    /// Returns the effective CalDAV access level for a user on a calendar.
+    async fn get_calendar_access_level(
+        &self,
+        calendar_id: &Uuid,
+        user_id: Uuid,
+    ) -> CalendarRepositoryResult<CalendarAccessLevel>;
+
+    /// Checks if a user has read access to a calendar.
     async fn user_has_calendar_access(
         &self,
         calendar_id: &Uuid,
         user_id: Uuid,
-    ) -> CalendarRepositoryResult<bool>;
+    ) -> CalendarRepositoryResult<bool> {
+        Ok(self
+            .get_calendar_access_level(calendar_id, user_id)
+            .await?
+            .can_read())
+    }
+
+    /// Checks if a user has write access to a calendar.
+    async fn user_has_calendar_write_access(
+        &self,
+        calendar_id: &Uuid,
+        user_id: Uuid,
+    ) -> CalendarRepositoryResult<bool> {
+        Ok(self
+            .get_calendar_access_level(calendar_id, user_id)
+            .await?
+            .can_write())
+    }
 
     /// Gets a custom property for a calendar
     async fn get_calendar_property(

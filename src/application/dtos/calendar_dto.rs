@@ -1,8 +1,64 @@
-use crate::domain::entities::calendar::Calendar;
+use crate::domain::entities::calendar::{Calendar, CalendarAccessLevel};
 use crate::domain::entities::calendar_event::CalendarEvent;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum CalendarAccessLevelDto {
+    None,
+    Read,
+    Write,
+    Owner,
+}
+
+impl Default for CalendarAccessLevelDto {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl CalendarAccessLevelDto {
+    pub fn can_read(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn can_write(self) -> bool {
+        matches!(self, Self::Write | Self::Owner)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Owner => "owner",
+        }
+    }
+}
+
+impl From<CalendarAccessLevel> for CalendarAccessLevelDto {
+    fn from(access_level: CalendarAccessLevel) -> Self {
+        match access_level {
+            CalendarAccessLevel::NoAccess => Self::None,
+            CalendarAccessLevel::Read => Self::Read,
+            CalendarAccessLevel::Write => Self::Write,
+            CalendarAccessLevel::Owner => Self::Owner,
+        }
+    }
+}
+
+impl From<CalendarAccessLevelDto> for CalendarAccessLevel {
+    fn from(access_level: CalendarAccessLevelDto) -> Self {
+        match access_level {
+            CalendarAccessLevelDto::None => Self::NoAccess,
+            CalendarAccessLevelDto::Read => Self::Read,
+            CalendarAccessLevelDto::Write => Self::Write,
+            CalendarAccessLevelDto::Owner => Self::Owner,
+        }
+    }
+}
 
 /// DTO for calendar data transfer
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -22,6 +78,7 @@ pub struct CalendarDto {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub custom_properties: HashMap<String, String>,
+    pub current_user_access: CalendarAccessLevelDto,
 }
 
 impl Default for CalendarDto {
@@ -42,6 +99,7 @@ impl Default for CalendarDto {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             custom_properties: HashMap::new(),
+            current_user_access: CalendarAccessLevelDto::None,
         }
     }
 }
@@ -64,6 +122,7 @@ impl From<Calendar> for CalendarDto {
             created_at: *calendar.created_at(),
             updated_at: *calendar.updated_at(),
             custom_properties: calendar.custom_properties().clone(),
+            current_user_access: CalendarAccessLevelDto::None,
         }
     }
 }
@@ -113,6 +172,27 @@ pub struct CalendarShareDto {
     pub calendar_id: String,
     pub user_id: String,
     pub access_level: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct CalendarAccessDto {
+    pub calendar_id: String,
+    pub user_id: String,
+    pub access_level: CalendarAccessLevelDto,
+    pub can_read: bool,
+    pub can_write: bool,
+}
+
+impl CalendarAccessDto {
+    pub fn new(calendar_id: String, user_id: String, access_level: CalendarAccessLevelDto) -> Self {
+        Self {
+            calendar_id,
+            user_id,
+            can_read: access_level.can_read(),
+            can_write: access_level.can_write(),
+            access_level,
+        }
+    }
 }
 
 /// DTO for calendar event data transfer

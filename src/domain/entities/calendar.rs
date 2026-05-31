@@ -29,6 +29,77 @@ pub const CALENDAR_SERVER_GETCTAG_PROPERTY: &str = "{http://calendarserver.org/n
 pub const APPLE_CALENDAR_COLOR_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-color";
 pub const APPLE_CALENDAR_ORDER_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-order";
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CalendarAccessLevel {
+    NoAccess,
+    Read,
+    Write,
+    Owner,
+}
+
+impl CalendarAccessLevel {
+    pub fn from_share_access_level(access_level: &str) -> Result<Self> {
+        match access_level.trim().to_ascii_lowercase().as_str() {
+            "read" => Ok(Self::Read),
+            "write" => Ok(Self::Write),
+            "owner" => Ok(Self::Owner),
+            invalid => Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "CalendarShare",
+                format!(
+                    "Invalid calendar access level: '{}'. Valid values are: read, write, owner",
+                    invalid
+                ),
+            )),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoAccess => "none",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Owner => "owner",
+        }
+    }
+
+    pub fn can_read(self) -> bool {
+        !matches!(self, Self::NoAccess)
+    }
+
+    pub fn can_write(self) -> bool {
+        matches!(self, Self::Write | Self::Owner)
+    }
+
+    pub fn is_owner(self) -> bool {
+        matches!(self, Self::Owner)
+    }
+
+    pub fn strongest(self, other: Self) -> Self {
+        if self.rank() >= other.rank() {
+            self
+        } else {
+            other
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::NoAccess => 0,
+            Self::Read => 1,
+            Self::Write => 2,
+            Self::Owner => 3,
+        }
+    }
+}
+
+impl std::fmt::Display for CalendarAccessLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 const DEFAULT_SUPPORTED_COMPONENT: &str = "VEVENT";
 const DEFAULT_CALENDAR_COLOR: &str = "#2C7EF8FF";
 const DEFAULT_CALENDAR_ORDER: i32 = 0;

@@ -198,6 +198,153 @@ fn strip_username_prefix(path: &str) -> &str {
 
 // ─── Helper: extract user from request ───────────────────────────────
 
+
+fn parse_dav_calendar_collection_path(path: &str) -> Option<(String, String)> {
+    let trimmed = path.trim_matches('/');
+    let segments: Vec<&str> = trimmed
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+
+    match segments.as_slice() {
+        ["calendars", username, calendar_key]
+            if !calendar_key.to_ascii_lowercase().ends_with(".ics") =>
+        {
+            Some(((*username).to_string(), (*calendar_key).to_string()))
+        }
+        _ => None,
+    }
+}
+
+fn parse_dav_calendar_object_path(path: &str) -> Option<(String, String, String)> {
+    let trimmed = path.trim_matches('/');
+    let segments: Vec<&str> = trimmed
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+
+    match segments.as_slice() {
+        ["calendars", username, calendar_key, resource_name] => Some((
+            (*username).to_string(),
+            (*calendar_key).to_string(),
+            (*resource_name).to_string(),
+        )),
+        _ => None,
+    }
+}
+
+async fn find_calendar_id_by_owner_username_and_slug(
+    state: &AppState,
+    owner_username: &str,
+    calendar_slug: &str,
+) -> Result<Option<String>, AppError> {
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "Database pool is not configured",
+            "NotImplemented",
+        )
+    })?;
+
+    let calendar_id = sqlx::query_scalar::<_, uuid::Uuid>(
+        r#"
+        SELECT c.id
+        FROM caldav.calendars c
+        INNER JOIN auth.users u ON u.id = c.owner_id
+        WHERE u.username = $1
+          AND c.slug = $2
+        "#,
+    )
+    .bind(owner_username)
+    .bind(calendar_slug)
+    .fetch_optional(&**pool)
+    .await
+    .map_err(|e| AppError::internal_error(format!("Failed to resolve calendar path: {e}")))?;
+
+    Ok(calendar_id.map(|id| id.to_string()))
+}
+
+async fn resolve_calendar_id_for_request_path(
+    state: &AppState,
+    calendar_service: &CalendarService,
+    user: &AuthUser,
+    owner_username: Option<&str>,
+    calendar_key: &str,
+) -> Result<String, AppError> {
+    let calendar_id = if uuid::Uuid::parse_str(calendar_key).is_ok() {
+        calendar_key.to_string()
+    } else if let Some(owner_username) = owner_username {
+        find_calendar_id_by_owner_username_and_slug(state, owner_username, calendar_key)
+            .await?
+            .ok_or_else(|| AppError::not_found("Calendar not found"))?
+    } else {
+        calendar_service
+            .find_calendar_by_slug_for_owner(calendar_key, user.id)
+            .await
+            .map_err(AppError::from)?
+            .id
+    };
+
+    let access = calendar_service
+        .get_calendar_access(&calendar_id, user.id)
+        .await
+        .map_err(AppError::from)?;
+
+    if !access.can_read {
+        return Err(AppError::not_found("Calendar not found"));
+    }
+
+    Ok(calendar_id)
+}
+
+fn dav_need_privileges_response(path: &str, privilege: &str) -> Response<Body> {
+    let href = if path.starts_with("/caldav/") || path.starts_with("/dav/") {
+        path.to_string()
+    } else if path.starts_with("calendars/") {
+        format!("/dav/{}", path.trim_matches('/'))
+    } else {
+        format!("/caldav/{}", path.trim_matches('/'))
+    };
+
+    xml_error_response(
+        StatusCode::FORBIDDEN,
+        &format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:">
+  <D:need-privileges>
+    <D:resource>
+      <D:href>{}</D:href>
+      <D:privilege>
+        <D:{}/>
+      </D:privilege>
+    </D:resource>
+  </D:need-privileges>
+</D:error>"#,
+            escape_xml_text(&href),
+            privilege
+        ),
+    )
+}
+
+async fn ensure_write_access_for_calendar_id(
+    calendar_service: &CalendarService,
+    user: &AuthUser,
+    calendar_id: &str,
+    request_path: &str,
+    privilege: &str,
+) -> Result<Option<Response<Body>>, AppError> {
+    match calendar_service
+        .ensure_calendar_write_access(calendar_id, user.id)
+        .await
+    {
+        Ok(()) => Ok(None),
+        Err(err) if err.kind == crate::domain::errors::ErrorKind::AccessDenied => {
+            Ok(Some(dav_need_privileges_response(request_path, privilege)))
+        }
+        Err(err) => Err(AppError::from(err)),
+    }
+}
+
 fn extract_user(req: &Request<Body>) -> Result<AuthUser, AppError> {
     req.extensions()
         .get::<Arc<CurrentUser>>()
@@ -281,7 +428,6 @@ async fn handle_propfind(
         reject_xml_entities(&body_bytes)?;
     }
 
-    // Parse PROPFIND request
     let propfind_request = if body_bytes.is_empty() {
         PropFindRequest {
             prop_find_type: PropFindType::AllProp,
@@ -294,8 +440,6 @@ async fn handle_propfind(
     };
 
     if path.is_empty() {
-        // Root CalDAV path — return discovery properties + list user's calendars
-        // At depth 0, only return root entry; at depth 1+, also include calendars
         let calendars = if depth == "0" {
             vec![]
         } else {
@@ -322,13 +466,15 @@ async fn handle_propfind(
         )
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
-        Ok(Response::builder()
+        return Ok(Response::builder()
             .status(StatusCode::MULTI_STATUS)
             .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+            .header(HEADER_DAV, "1, calendar-access, access-control")
             .body(Body::from(response_body))
-            .unwrap())
-    } else if path.starts_with("principals/") || path == "principals" {
-        // Principal resource — return user principal properties
+            .unwrap());
+    }
+
+    if path.starts_with("principals/") || path == "principals" {
         let username = path.strip_prefix("principals/").unwrap_or(&user.username);
         let username = if username.is_empty() {
             &user.username
@@ -357,168 +503,115 @@ async fn handle_propfind(
         )
         .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
-        Ok(Response::builder()
+        return Ok(Response::builder()
             .status(StatusCode::MULTI_STATUS)
             .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+            .header(HEADER_DAV, "1, calendar-access, access-control")
             .body(Body::from(response_body))
-            .unwrap())
-    } else {
-        // Path could be:
-        //   {username}                        — user calendar home (from calendar-home-set)
-        //   {calendar_id}                     — calendar collection
-        //   {calendar_id}/{event_uid}.ics     — individual event
-        //   {username}/{calendar_id}          — calendar under user home
-        //   {username}/{calendar_id}/{uid}.ics — event under user home
-        //
-        // Use strip_username_prefix heuristic: if first segment is a UUID
-        // it's a calendar ID, otherwise it's a username prefix.
-        let parts: Vec<&str> = path.splitn(2, '/').collect();
-        let first_segment = parts[0];
-        let first_is_uuid = uuid::Uuid::parse_str(first_segment).is_ok();
+            .unwrap());
+    }
 
-        if parts.len() == 1 {
-            // Single path segment: UUID means calendar ID, otherwise user home
-            let calendar_result = if first_is_uuid {
-                calendar_service.get_calendar(first_segment, user.id).await
-            } else {
-                Err(crate::domain::errors::DomainError::new(
-                    crate::domain::errors::ErrorKind::NotFound,
-                    "Calendar",
-                    "Not a UUID",
-                ))
-            };
+    if let Some((owner_username, calendar_key)) = parse_dav_calendar_collection_path(path) {
+        let calendar_id = resolve_calendar_id_for_request_path(
+            &state,
+            calendar_service,
+            &user,
+            Some(&owner_username),
+            &calendar_key,
+        )
+        .await?;
 
-            if let Ok(calendar) = calendar_result {
-                // Valid calendar ID — return calendar collection
-                let events = if depth != "0" {
-                    calendar_service
-                        .list_events(first_segment, None, None, user.id)
-                        .await
-                        .unwrap_or_default()
-                } else {
-                    vec![]
-                };
+        let calendar = calendar_service
+            .get_calendar(&calendar_id, user.id)
+            .await
+            .map_err(AppError::from)?;
 
-                let base_href = &format!("/caldav/{}/", first_segment);
-                let mut response_body = Vec::new();
-
-                CalDavAdapter::generate_calendar_collection_propfind(
-                    &mut response_body,
-                    &calendar,
-                    &events,
-                    &propfind_request,
-                    base_href,
-                    &depth,
-                )
-                .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
-
-                Ok(Response::builder()
-                    .status(StatusCode::MULTI_STATUS)
-                    .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
-                    .body(Body::from(response_body))
-                    .unwrap())
-            } else {
-                // Not a calendar ID — treat as user calendar home (e.g. /caldav/{username}/)
-                // List all calendars for this user
-                let calendars = calendar_service
-                    .list_my_calendars(user.id)
-                    .await
-                    .map_err(|e| {
-                        AppError::internal_error(format!("Failed to list calendars: {}", e))
-                    })?;
-
-                let base_href = &format!("/caldav/{}/", first_segment);
-                let mut response_body = Vec::new();
-
-                CalDavAdapter::generate_calendars_propfind_response(
-                    &mut response_body,
-                    &calendars,
-                    &propfind_request,
-                    base_href,
-                )
-                .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
-
-                Ok(Response::builder()
-                    .status(StatusCode::MULTI_STATUS)
-                    .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
-                    .body(Body::from(response_body))
-                    .unwrap())
-            }
-        } else {
-            // Multi-segment path: {something}/{rest}
-            let rest = parts[1];
-
-            // Use UUID heuristic: if first segment is a UUID it's a calendar ID
-            let (calendar_id, event_path) = if first_is_uuid {
-                // first_segment is a calendar ID, rest is event path
-                (first_segment, rest)
-            } else {
-                // first_segment may be a username, rest could be {calendar_id} or
-                // {calendar_id}/{event}.ics
-                let sub_parts: Vec<&str> = rest.splitn(2, '/').collect();
-                if sub_parts.len() == 1 {
-                    // /caldav/{username}/{calendar_id}
-                    // Try to get this as a calendar collection
-                    let cal = calendar_service
-                        .get_calendar(sub_parts[0], user.id)
-                        .await
-                        .map_err(|e| AppError::not_found(format!("Calendar not found: {}", e)))?;
-
-                    let events = if depth != "0" {
-                        calendar_service
-                            .list_events(sub_parts[0], None, None, user.id)
-                            .await
-                            .unwrap_or_default()
-                    } else {
-                        vec![]
-                    };
-
-                    let base_href = &format!("/caldav/{}/{}/", first_segment, sub_parts[0]);
-                    let mut response_body = Vec::new();
-
-                    CalDavAdapter::generate_calendar_collection_propfind(
-                        &mut response_body,
-                        &cal,
-                        &events,
-                        &propfind_request,
-                        base_href,
-                        &depth,
-                    )
-                    .map_err(|e| {
-                        AppError::internal_error(format!("Failed to generate XML: {}", e))
-                    })?;
-
-                    return Ok(Response::builder()
-                        .status(StatusCode::MULTI_STATUS)
-                        .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
-                        .body(Body::from(response_body))
-                        .unwrap());
-                } else {
-                    // /caldav/{username}/{calendar_id}/{event}.ics
-                    (sub_parts[0], sub_parts[1])
-                }
-            };
-
-            // Individual event .ics
-            validate_calendar_resource_name(event_path)?;
-
-            let event = calendar_service
-                .get_event_by_resource_name(calendar_id, event_path, user.id)
+        let events = if depth != "0" {
+            calendar_service
+                .list_events(&calendar_id, None, None, user.id)
                 .await
-                .map_err(|e| AppError::internal_error(format!("Failed to get event: {}", e)))?
-                .ok_or_else(|| AppError::not_found(format!("Event not found: {}", event_path)))?;
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
 
-            let base_href = &format!("/caldav/{}/", calendar_id);
-            let report_type = CalDavReportType::CalendarMultiget {
-                hrefs: vec![format!("{}{}", base_href, event.resource_name)],
-                props: vec![],
+        let base_href = format!("/dav/calendars/{}/{}/", owner_username, calendar_key);
+        let mut response_body = Vec::new();
+        CalDavAdapter::generate_calendar_collection_propfind(
+            &mut response_body,
+            &calendar,
+            &events,
+            &propfind_request,
+            &base_href,
+            &depth,
+        )
+        .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
+
+        return Ok(Response::builder()
+            .status(StatusCode::MULTI_STATUS)
+            .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+            .header(HEADER_DAV, "1, calendar-access, access-control")
+            .body(Body::from(response_body))
+            .unwrap());
+    }
+
+    let parts: Vec<&str> = path.splitn(2, '/').collect();
+    let first_segment = parts[0];
+    let first_is_uuid = uuid::Uuid::parse_str(first_segment).is_ok();
+
+    if parts.len() == 1 {
+        let calendar_result = if first_is_uuid {
+            calendar_service.get_calendar(first_segment, user.id).await
+        } else {
+            Err(crate::domain::errors::DomainError::new(
+                crate::domain::errors::ErrorKind::NotFound,
+                "Calendar",
+                "Not a UUID",
+            ))
+        };
+
+        if let Ok(calendar) = calendar_result {
+            let events = if depth != "0" {
+                calendar_service
+                    .list_events(first_segment, None, None, user.id)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                vec![]
             };
 
+            let base_href = &format!("/caldav/{}/", first_segment);
             let mut response_body = Vec::new();
-            CalDavAdapter::generate_calendar_events_response(
+            CalDavAdapter::generate_calendar_collection_propfind(
                 &mut response_body,
-                std::slice::from_ref(&event),
-                &report_type,
+                &calendar,
+                &events,
+                &propfind_request,
+                base_href,
+                &depth,
+            )
+            .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
+
+            Ok(Response::builder()
+                .status(StatusCode::MULTI_STATUS)
+                .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+                .header(HEADER_DAV, "1, calendar-access, access-control")
+                .body(Body::from(response_body))
+                .unwrap())
+        } else {
+            let calendars = calendar_service
+                .list_my_calendars(user.id)
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(format!("Failed to list calendars: {}", e))
+                })?;
+
+            let base_href = &format!("/caldav/{}/", first_segment);
+            let mut response_body = Vec::new();
+            CalDavAdapter::generate_calendars_propfind_response(
+                &mut response_body,
+                &calendars,
+                &propfind_request,
                 base_href,
             )
             .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
@@ -526,9 +619,94 @@ async fn handle_propfind(
             Ok(Response::builder()
                 .status(StatusCode::MULTI_STATUS)
                 .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+                .header(HEADER_DAV, "1, calendar-access, access-control")
                 .body(Body::from(response_body))
                 .unwrap())
         }
+    } else {
+        let rest = parts[1];
+        let (calendar_id, event_path) = if first_is_uuid {
+            (first_segment.to_string(), rest.to_string())
+        } else {
+            let sub_parts: Vec<&str> = rest.splitn(2, '/').collect();
+            if sub_parts.len() == 1 {
+                let calendar_id = resolve_calendar_id_for_request_path(
+                    &state,
+                    calendar_service,
+                    &user,
+                    None,
+                    sub_parts[0],
+                )
+                .await?;
+
+                let cal = calendar_service
+                    .get_calendar(&calendar_id, user.id)
+                    .await
+                    .map_err(AppError::from)?;
+
+                let events = if depth != "0" {
+                    calendar_service
+                        .list_events(&calendar_id, None, None, user.id)
+                        .await
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+
+                let base_href = &format!("/caldav/{}/{}/", first_segment, sub_parts[0]);
+                let mut response_body = Vec::new();
+                CalDavAdapter::generate_calendar_collection_propfind(
+                    &mut response_body,
+                    &cal,
+                    &events,
+                    &propfind_request,
+                    base_href,
+                    &depth,
+                )
+                .map_err(|e| {
+                    AppError::internal_error(format!("Failed to generate XML: {}", e))
+                })?;
+
+                return Ok(Response::builder()
+                    .status(StatusCode::MULTI_STATUS)
+                    .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+                    .header(HEADER_DAV, "1, calendar-access, access-control")
+                    .body(Body::from(response_body))
+                    .unwrap());
+            }
+
+            (sub_parts[0].to_string(), sub_parts[1].to_string())
+        };
+
+        validate_calendar_resource_name(&event_path)?;
+
+        let event = calendar_service
+            .get_event_by_resource_name(&calendar_id, &event_path, user.id)
+            .await
+            .map_err(AppError::from)?
+            .ok_or_else(|| AppError::not_found(format!("Event not found: {}", event_path)))?;
+
+        let base_href = &format!("/caldav/{}/", calendar_id);
+        let report_type = CalDavReportType::CalendarMultiget {
+            hrefs: vec![format!("{}{}", base_href, event.resource_name)],
+            props: vec![],
+        };
+
+        let mut response_body = Vec::new();
+        CalDavAdapter::generate_calendar_events_response(
+            &mut response_body,
+            std::slice::from_ref(&event),
+            &report_type,
+            base_href,
+        )
+        .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
+
+        Ok(Response::builder()
+            .status(StatusCode::MULTI_STATUS)
+            .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+            .header(HEADER_DAV, "1, calendar-access, access-control")
+            .body(Body::from(response_body))
+            .unwrap())
     }
 }
 
@@ -626,6 +804,32 @@ async fn handle_mkcalendar(
     let user = extract_user(&req)?;
     let calendar_service = get_calendar_service(&state)?;
 
+    if let Some((owner_username, calendar_key)) = parse_dav_calendar_collection_path(path) {
+        if let Some(existing_calendar_id) =
+            find_calendar_id_by_owner_username_and_slug(&state, &owner_username, &calendar_key)
+                .await?
+        {
+            let access = calendar_service
+                .get_calendar_access(&existing_calendar_id, user.id)
+                .await
+                .map_err(AppError::from)?;
+
+            if !access.can_read {
+                return Err(AppError::not_found("Calendar not found"));
+            }
+
+            if !access.can_write {
+                return Ok(dav_need_privileges_response(path, "write"));
+            }
+
+            return Err(AppError::conflict("Calendar already exists"));
+        }
+
+        if owner_username != user.username {
+            return Ok(dav_need_privileges_response(path, "bind"));
+        }
+    }
+
     let body_bytes = body::to_bytes(req.into_body(), MAX_CALDAV_BODY)
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
@@ -681,6 +885,23 @@ async fn handle_put(
     let user = extract_user(&req)?;
     let calendar_service = get_calendar_service(&state)?;
 
+    let (owner_username, calendar_key, resource_name) = parse_calendar_object_path(path)?;
+    let calendar_id = resolve_calendar_id_for_request_path(
+        &state,
+        calendar_service,
+        &user,
+        owner_username.as_deref(),
+        &calendar_key,
+    )
+    .await?;
+
+    if let Some(response) =
+        ensure_write_access_for_calendar_id(calendar_service, &user, &calendar_id, path, "write")
+            .await?
+    {
+        return Ok(response);
+    }
+
     let content_type = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -713,18 +934,6 @@ async fn handle_put(
             ));
         }
         Err(err) => return Err(err),
-    };
-
-    let (calendar_key, resource_name) = parse_calendar_object_path(path)?;
-
-    let calendar_id = if uuid::Uuid::parse_str(&calendar_key).is_ok() {
-        calendar_key
-    } else {
-        calendar_service
-            .find_calendar_by_slug_for_owner(&calendar_key, user.id)
-            .await
-            .map_err(AppError::from)?
-            .id
     };
 
     let body_bytes = body::to_bytes(req.into_body(), MAX_CALDAV_BODY)
@@ -863,20 +1072,14 @@ fn put_condition_from_headers(
     Ok(CalendarObjectPutConditionDto::None)
 }
 
-fn parse_calendar_object_path(path: &str) -> Result<(String, String), AppError> {
-    let trimmed = path.trim_matches('/');
-    let segments: Vec<&str> = trimmed
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-
-    if segments.len() >= 4 && segments[0] == "calendars" {
-        let calendar_key = segments[2].to_string();
-        let resource_name = segments[3].to_string();
+fn parse_calendar_object_path(path: &str) -> Result<(Option<String>, String, String), AppError> {
+    if let Some((owner_username, calendar_key, resource_name)) = parse_dav_calendar_object_path(path)
+    {
         validate_calendar_resource_name(&resource_name)?;
-        return Ok((calendar_key, resource_name));
+        return Ok((Some(owner_username), calendar_key, resource_name));
     }
 
+    let trimmed = path.trim_matches('/');
     let effective_path = strip_username_prefix(trimmed);
     let parts: Vec<&str> = effective_path.splitn(2, '/').collect();
 
@@ -890,7 +1093,7 @@ fn parse_calendar_object_path(path: &str) -> Result<(String, String), AppError> 
     let resource_name = parts[1].to_string();
     validate_calendar_resource_name(&resource_name)?;
 
-    Ok((calendar_key, resource_name))
+    Ok((None, calendar_key, resource_name))
 }
 
 fn validate_calendar_resource_name(resource_name: &str) -> Result<(), AppError> {
@@ -1051,17 +1254,22 @@ async fn handle_delete_calendar_object(
     let calendar_service = get_calendar_service(&state)?;
     let condition = delete_condition_from_headers(req.headers())?;
 
-    let (calendar_key, resource_name) = parse_calendar_object_path(path)?;
+    let (owner_username, calendar_key, resource_name) = parse_calendar_object_path(path)?;
+    let calendar_id = resolve_calendar_id_for_request_path(
+        &state,
+        calendar_service,
+        &user,
+        owner_username.as_deref(),
+        &calendar_key,
+    )
+    .await?;
 
-    let calendar_id = if uuid::Uuid::parse_str(&calendar_key).is_ok() {
-        calendar_key
-    } else {
-        calendar_service
-            .find_calendar_by_slug_for_owner(&calendar_key, user.id)
-            .await
-            .map_err(AppError::from)?
-            .id
-    };
+    if let Some(response) =
+        ensure_write_access_for_calendar_id(calendar_service, &user, &calendar_id, path, "write")
+            .await?
+    {
+        return Ok(response);
+    }
 
     let result = calendar_service
         .delete_calendar_object(
@@ -1103,16 +1311,30 @@ async fn handle_delete_calendar_collection(
         ));
     }
 
-    if let Some(username) = collection_path.username.as_deref() {
-        if username != user.username {
-            return Ok(xml_error_response(
-                StatusCode::FORBIDDEN,
-                r#"<?xml version="1.0" encoding="utf-8"?>
-<D:error xmlns:D="DAV:">
-  <D:need-privileges/>
-</D:error>"#,
-            ));
-        }
+    let calendar_service = get_calendar_service(&state)?;
+    let calendar_id_string = resolve_calendar_id_for_request_path(
+        &state,
+        calendar_service,
+        &user,
+        collection_path.username.as_deref(),
+        &collection_path.calendar_key,
+    )
+    .await?;
+
+    if let Some(response) = ensure_write_access_for_calendar_id(
+        calendar_service,
+        &user,
+        &calendar_id_string,
+        &format!(
+            "calendars/{}/{}",
+            collection_path.username.as_deref().unwrap_or(&user.username),
+            collection_path.calendar_key
+        ),
+        "write",
+    )
+    .await?
+    {
+        return Ok(response);
     }
 
     let condition = delete_condition_from_headers(req.headers())?;
@@ -1124,42 +1346,8 @@ async fn handle_delete_calendar_collection(
         )
     })?;
 
-    let calendar_id = match uuid::Uuid::parse_str(&collection_path.calendar_key) {
-        Ok(calendar_id) => sqlx::query_scalar::<_, uuid::Uuid>(
-            r#"
-            SELECT id
-            FROM caldav.calendars
-            WHERE id = $1
-              AND owner_id = $2
-            "#,
-        )
-        .bind(calendar_id)
-        .bind(user.id)
-        .fetch_optional(&**pool)
-        .await
-        .map_err(|e| AppError::internal_error(format!("Failed to look up calendar: {e}")))?,
-        Err(_) => sqlx::query_scalar::<_, uuid::Uuid>(
-            r#"
-            SELECT id
-            FROM caldav.calendars
-            WHERE slug = $1
-              AND owner_id = $2
-            "#,
-        )
-        .bind(&collection_path.calendar_key)
-        .bind(user.id)
-        .fetch_optional(&**pool)
-        .await
-        .map_err(|e| AppError::internal_error(format!("Failed to look up calendar: {e}")))?,
-    };
-
-    let Some(calendar_id) = calendar_id else {
-        return Ok(xml_error_response(
-            StatusCode::NOT_FOUND,
-            r#"<?xml version="1.0" encoding="utf-8"?>
-<D:error xmlns:D="DAV:"/>"#,
-        ));
-    };
+    let calendar_id = uuid::Uuid::parse_str(&calendar_id_string)
+        .map_err(|_| AppError::internal_error("Resolved calendar ID is invalid"))?;
 
     if !collection_if_match_satisfied(&condition, &calendar_id) {
         return Ok(xml_error_response(

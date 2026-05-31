@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::common::errors::DomainError;
-use crate::domain::entities::calendar::Calendar;
+use crate::domain::entities::calendar::{Calendar, CalendarAccessLevel};
 use crate::domain::repositories::calendar_repository::{
     CalendarRepository, CalendarRepositoryResult,
 };
@@ -361,32 +361,58 @@ impl CalendarRepository for CalendarPgRepository {
         Ok(calendars)
     }
 
-    async fn user_has_calendar_access(
+    async fn get_calendar_access_level(
         &self,
         calendar_id: &Uuid,
         user_id: Uuid,
-    ) -> CalendarRepositoryResult<bool> {
-        // Check if the user is the owner of the calendar or has a share
+    ) -> CalendarRepositoryResult<CalendarAccessLevel> {
         let row = sqlx::query(
             r#"
-            SELECT EXISTS (
-                SELECT 1 FROM caldav.calendars c
-                WHERE c.id = $1 AND (c.owner_id = $2 OR c.is_public = true)
-                UNION
-                SELECT 1 FROM caldav.calendar_shares s
-                WHERE s.calendar_id = $1 AND s.user_id = $2
-            ) as has_access
+            SELECT
+                c.owner_id = $2 AS is_owner,
+                c.is_public AS is_public,
+                s.access_level AS share_access_level
+            FROM caldav.calendars c
+            LEFT JOIN caldav.calendar_shares s
+                ON s.calendar_id = c.id
+               AND s.user_id = $2
+            WHERE c.id = $1
             "#,
         )
         .bind(calendar_id)
         .bind(user_id)
-        .fetch_one(&*self.pool)
+        .fetch_optional(&*self.pool)
         .await
         .map_err(|e| {
             DomainError::database_error(format!("Failed to check calendar access: {}", e))
-        })?;
+        })?
+        .ok_or_else(|| DomainError::not_found("Calendar", calendar_id.to_string()))?;
 
-        Ok(row.get::<bool, _>("has_access"))
+        if row.get::<bool, _>("is_owner") {
+            return Ok(CalendarAccessLevel::Owner);
+        }
+
+        let mut access_level = if row.get::<bool, _>("is_public") {
+            CalendarAccessLevel::Read
+        } else {
+            CalendarAccessLevel::NoAccess
+        };
+
+        if let Some(share_access_level) = row
+            .try_get::<Option<String>, _>("share_access_level")
+            .map_err(|e| {
+                DomainError::database_error(format!(
+                    "Failed to read calendar share access level: {}",
+                    e
+                ))
+            })?
+        {
+            access_level = access_level.strongest(
+                CalendarAccessLevel::from_share_access_level(&share_access_level)?,
+            );
+        }
+
+        Ok(access_level)
     }
 
     async fn share_calendar(

@@ -1,7 +1,7 @@
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CalendarObjectDeleteResultDto, CalendarObjectPutResultDto,
-    CreateCalendarDto, CreateEventDto, CreateEventICalDto, DeleteCalendarObjectDto,
-    PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
+    CalendarAccessDto, CalendarDto, CalendarEventDto, CalendarObjectDeleteResultDto,
+    CalendarObjectPutResultDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::common::errors::DomainError;
 use chrono::{DateTime, Utc};
@@ -47,7 +47,19 @@ pub trait CalendarStoragePort: Send + Sync + 'static {
         offset: i64,
     ) -> Result<Vec<CalendarDto>, DomainError>;
 
+    async fn get_calendar_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarAccessDto, DomainError>;
+
     async fn check_calendar_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<bool, DomainError>;
+
+    async fn check_calendar_write_access(
         &self,
         calendar_id: &str,
         user_id: Uuid,
@@ -164,6 +176,24 @@ pub trait CalendarUseCase: Send + Sync + 'static {
         calendar_id: &str,
         user_id: Uuid,
     ) -> Result<CalendarDto, DomainError>;
+
+    async fn get_calendar_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarAccessDto, DomainError>;
+
+    async fn ensure_calendar_read_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<(), DomainError>;
+
+    async fn ensure_calendar_write_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<(), DomainError>;
 
     async fn find_calendar_by_slug_for_owner(
         &self,

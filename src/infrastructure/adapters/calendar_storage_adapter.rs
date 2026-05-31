@@ -10,8 +10,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CalendarObjectDeleteConditionDto, CalendarObjectDeleteResultDto,
-    CalendarObjectDeleteStatusDto, CalendarObjectPutConditionDto, CalendarObjectPutResultDto,
+    CalendarAccessDto, CalendarAccessLevelDto, CalendarDto, CalendarEventDto,
+    CalendarObjectDeleteConditionDto, CalendarObjectDeleteResultDto, CalendarObjectDeleteStatusDto,
+    CalendarObjectPutConditionDto, CalendarObjectPutResultDto,
     CalendarObjectPutStatusDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
     DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
@@ -197,11 +198,11 @@ impl CalendarStoragePort for CalendarStorageAdapter {
         Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
-    async fn check_calendar_access(
+    async fn get_calendar_access(
         &self,
         calendar_id: &str,
         user_id: Uuid,
-    ) -> Result<bool, DomainError> {
+    ) -> Result<CalendarAccessDto, DomainError> {
         let uuid = Uuid::parse_str(calendar_id).map_err(|_| {
             DomainError::new(
                 ErrorKind::InvalidInput,
@@ -210,9 +211,39 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             )
         })?;
 
-        self.calendar_repository
-            .user_has_calendar_access(&uuid, user_id)
-            .await
+        let access_level = self
+            .calendar_repository
+            .get_calendar_access_level(&uuid, user_id)
+            .await?;
+        let access_level = CalendarAccessLevelDto::from(access_level);
+
+        Ok(CalendarAccessDto::new(
+            calendar_id.to_string(),
+            user_id.to_string(),
+            access_level,
+        ))
+    }
+
+    async fn check_calendar_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<bool, DomainError> {
+        Ok(self
+            .get_calendar_access(calendar_id, user_id)
+            .await?
+            .can_read)
+    }
+
+    async fn check_calendar_write_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<bool, DomainError> {
+        Ok(self
+            .get_calendar_access(calendar_id, user_id)
+            .await?
+            .can_write)
     }
 
     async fn find_calendar_by_slug_for_owner(

@@ -3,9 +3,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarDto, CalendarEventDto, CalendarObjectDeleteResultDto, CalendarObjectPutResultDto,
-    CreateCalendarDto, CreateEventDto, CreateEventICalDto, DeleteCalendarObjectDto,
-    PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
+    CalendarAccessDto, CalendarDto, CalendarEventDto,
+    CalendarObjectDeleteResultDto, CalendarObjectPutResultDto, CreateCalendarDto, CreateEventDto,
+    CreateEventICalDto, DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto,
+    UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::{CalendarStoragePort, CalendarUseCase};
 use crate::common::errors::{DomainError, ErrorKind};
@@ -18,6 +19,14 @@ pub struct CalendarService {
 impl CalendarService {
     pub fn new(calendar_storage: Arc<CalendarStorageAdapter>) -> Self {
         Self { calendar_storage }
+    }
+
+    fn not_found_for_inaccessible_calendar(calendar_id: &str) -> DomainError {
+        DomainError::not_found("Calendar", calendar_id)
+    }
+
+    fn insufficient_calendar_permissions(message: &str) -> DomainError {
+        DomainError::new(ErrorKind::AccessDenied, "Calendar", message)
     }
 }
 
@@ -38,34 +47,14 @@ impl CalendarUseCase for CalendarService {
         update: UpdateCalendarDto,
         user_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(calendar_id, user_id)
-            .await?;
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to update this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(calendar_id, user_id).await?;
         self.calendar_storage
             .update_calendar(calendar_id, update)
             .await
     }
 
     async fn delete_calendar(&self, calendar_id: &str, user_id: Uuid) -> Result<(), DomainError> {
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(calendar_id, user_id)
-            .await?;
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to delete this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(calendar_id, user_id).await?;
         self.calendar_storage.delete_calendar(calendar_id).await
     }
 
@@ -74,19 +63,53 @@ impl CalendarUseCase for CalendarService {
         calendar_id: &str,
         user_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        let calendar = self.calendar_storage.get_calendar(calendar_id).await?;
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(calendar_id, user_id)
-            .await?;
-        if !has_access && !calendar.is_public {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to view this calendar",
+        let mut calendar = self.calendar_storage.get_calendar(calendar_id).await?;
+        let access = self.get_calendar_access(calendar_id, user_id).await?;
+        if !access.can_read {
+            return Err(Self::not_found_for_inaccessible_calendar(calendar_id));
+        }
+        calendar.current_user_access = access.access_level;
+        Ok(calendar)
+    }
+
+    async fn get_calendar_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<CalendarAccessDto, DomainError> {
+        self.calendar_storage
+            .get_calendar_access(calendar_id, user_id)
+            .await
+    }
+
+    async fn ensure_calendar_read_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<(), DomainError> {
+        let access = self.get_calendar_access(calendar_id, user_id).await?;
+        if access.can_read {
+            Ok(())
+        } else {
+            Err(Self::not_found_for_inaccessible_calendar(calendar_id))
+        }
+    }
+
+    async fn ensure_calendar_write_access(
+        &self,
+        calendar_id: &str,
+        user_id: Uuid,
+    ) -> Result<(), DomainError> {
+        let access = self.get_calendar_access(calendar_id, user_id).await?;
+        if !access.can_read {
+            return Err(Self::not_found_for_inaccessible_calendar(calendar_id));
+        }
+        if !access.can_write {
+            return Err(Self::insufficient_calendar_permissions(
+                "You don't have permission to write to this calendar",
             ));
         }
-        Ok(calendar)
+        Ok(())
     }
 
     async fn find_calendar_by_slug_for_owner(
@@ -194,17 +217,7 @@ impl CalendarUseCase for CalendarService {
         event: CreateEventDto,
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError> {
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(&event.calendar_id, user_id)
-            .await?;
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to add events to this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
         self.calendar_storage.create_event(event).await
     }
 
@@ -213,17 +226,7 @@ impl CalendarUseCase for CalendarService {
         event: CreateEventICalDto,
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError> {
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(&event.calendar_id, user_id)
-            .await?;
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to add events to this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
         self.calendar_storage.create_event_from_ical(event).await
     }
 
@@ -232,18 +235,7 @@ impl CalendarUseCase for CalendarService {
         put: PutCalendarObjectDto,
         user_id: Uuid,
     ) -> Result<CalendarObjectPutResultDto, DomainError> {
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(&put.calendar_id, user_id)
-            .await?;
-
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to add or update events in this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(&put.calendar_id, user_id).await?;
 
         self.calendar_storage.put_calendar_object(put).await
     }
@@ -253,18 +245,7 @@ impl CalendarUseCase for CalendarService {
         dto: DeleteCalendarObjectDto,
         user_id: Uuid,
     ) -> Result<CalendarObjectDeleteResultDto, DomainError> {
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(&dto.calendar_id, user_id)
-            .await?;
-
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to delete events in this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(&dto.calendar_id, user_id).await?;
 
         self.calendar_storage.delete_calendar_object(dto).await
     }
@@ -276,33 +257,13 @@ impl CalendarUseCase for CalendarService {
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError> {
         let event = self.calendar_storage.get_event(event_id).await?;
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(&event.calendar_id, user_id)
-            .await?;
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to update events in this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
         self.calendar_storage.update_event(event_id, update).await
     }
 
     async fn delete_event(&self, event_id: &str, user_id: Uuid) -> Result<(), DomainError> {
         let event = self.calendar_storage.get_event(event_id).await?;
-        let has_access = self
-            .calendar_storage
-            .check_calendar_access(&event.calendar_id, user_id)
-            .await?;
-        if !has_access {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to delete events in this calendar",
-            ));
-        }
+        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
         self.calendar_storage.delete_event(event_id).await
     }
 
@@ -321,11 +282,7 @@ impl CalendarUseCase for CalendarService {
             .get_calendar(&event.calendar_id)
             .await?;
         if !has_access && !calendar.is_public {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to view events in this calendar",
-            ));
+            return Err(Self::not_found_for_inaccessible_calendar(&event.calendar_id));
         }
         Ok(event)
     }
@@ -349,11 +306,7 @@ impl CalendarUseCase for CalendarService {
         let calendar = self.calendar_storage.get_calendar(calendar_id).await?;
 
         if !has_access && !calendar.is_public {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to view events in this calendar",
-            ));
+            return Err(Self::not_found_for_inaccessible_calendar(calendar_id));
         }
 
         Ok(event)
@@ -372,11 +325,7 @@ impl CalendarUseCase for CalendarService {
             .await?;
         let calendar = self.calendar_storage.get_calendar(calendar_id).await?;
         if !has_access && !calendar.is_public {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to view events in this calendar",
-            ));
+            return Err(Self::not_found_for_inaccessible_calendar(calendar_id));
         }
         if limit.is_some() || offset.is_some() {
             let limit = limit.unwrap_or(100);
@@ -404,11 +353,7 @@ impl CalendarUseCase for CalendarService {
             .await?;
         let calendar = self.calendar_storage.get_calendar(calendar_id).await?;
         if !has_access && !calendar.is_public {
-            return Err(DomainError::new(
-                ErrorKind::AccessDenied,
-                "Calendar",
-                "You don't have permission to view events in this calendar",
-            ));
+            return Err(Self::not_found_for_inaccessible_calendar(calendar_id));
         }
         self.calendar_storage
             .get_events_in_time_range(calendar_id, &start, &end)
