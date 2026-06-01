@@ -170,11 +170,7 @@ impl CalendarStoragePort for CalendarStorageAdapter {
             .list_calendars_by_owner(owner_id)
             .await?;
 
-        Ok(calendars.into_iter().map(|c| {
-            let mut dto = CalendarDto::from(c);
-            dto.current_user_access = CalendarAccessLevelDto::Owner;
-            dto
-        }).collect())
+        Ok(calendars.into_iter().map(CalendarDto::from).collect())
     }
 
     async fn list_calendars_shared_with_user(
