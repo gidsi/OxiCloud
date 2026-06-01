@@ -200,7 +200,7 @@ fn strip_username_prefix(path: &str) -> &str {
 
 
 fn parse_dav_calendar_collection_path(path: &str) -> Option<(String, String)> {
-    let trimmed = path.trim_matches('/');
+    let trimmed = strip_username_prefix(path);
     let segments: Vec<&str> = trimmed
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -217,7 +217,7 @@ fn parse_dav_calendar_collection_path(path: &str) -> Option<(String, String)> {
 }
 
 fn parse_dav_calendar_object_path(path: &str) -> Option<(String, String, String)> {
-    let trimmed = path.trim_matches('/');
+    let trimmed = strip_username_prefix(path);
     let segments: Vec<&str> = trimmed
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -1582,12 +1582,29 @@ async fn handle_proppatch(
         )
         .map_err(|e| AppError::bad_request(format!("Failed to parse PROPPATCH: {}", e)))?;
 
-    let effective_path = strip_username_prefix(path);
-    let calendar_id = effective_path.split('/').next().unwrap_or(effective_path);
+    let (owner_username, calendar_key) = if let Some(t) = parse_dav_calendar_collection_path(path) {
+        t
+    } else {
+        return Err(AppError::bad_request("Invalid calendar collection path"));
+    };
 
-    if calendar_id.is_empty() {
-        return Err(AppError::bad_request("Calendar ID required"));
+    let calendar_id_str = resolve_calendar_id_for_request_path(
+        &state,
+        calendar_service,
+        &user,
+        Some(&owner_username),
+        &calendar_key,
+    )
+    .await?;
+
+    if let Some(response) =
+        ensure_write_access_for_calendar_id(calendar_service, &user, &calendar_id_str, path, "write-properties")
+            .await?
+    {
+        return Ok(response);
     }
+
+    let calendar_id = &calendar_id_str;
 
     let mut update = UpdateCalendarDto {
         slug: None,
