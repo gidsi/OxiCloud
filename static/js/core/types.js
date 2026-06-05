@@ -47,13 +47,6 @@
  */
 
 /**
- * @typedef {Object} SharePermissions
- * @property {boolean} read
- * @property {boolean} reshare
- * @property {boolean} write
- */
-
-/**
  * @typedef {Object} ShareItem
  * @property {number} access_count
  * @property {number} created_at - timestamp
@@ -64,7 +57,6 @@
  * @property {string} item_id
  * @property {string} item_name
  * @property {ItemTypeEnum} item_type
- * @property {SharePermissions} permissions
  * @property {string | null} token
  * @property {string} url
  */
@@ -76,14 +68,12 @@
  * @property {ItemTypeEnum} item_type
  * @property {string|null} password
  * @property {number|null} expires_at - timestamp
- * @property {SharePermissions|null} permissions
  */
 
 /**
  * @typedef {Object} UpdateShare
- * @property {string|null} password
- * @property {number|null} expires_at - timestamp
- * @property {SharePermissions|null} permissions
+ * @property {string|null}  [password]
+ * @property {number|null}  [expires_at]
  */
 
 /**
@@ -103,6 +93,7 @@
  * @property {String} icon_special_class
  * @property {String} category
  * @property {String} size_formatted
+ * @property {string|null} owner_id UUID of the file/folder's actual owner
  */
 
 /**
@@ -124,32 +115,57 @@
  */
 
 /**
- * @typedef {Object} TrashItem
- * @property {string} id
- * @property {string} original_id
- * @property {ItemTypeEnum} item_type
- * @property {string} name
- * @property {string} original_path - timestamp
- * @property {number} trashed_at
- * @property {number} days_until_deletion
- * @property {string} category
- * @property {string} icon_class
- * @property {string} icon_special_class
+ * One item returned by `GET /api/trash/resources`.
+ * `resource_type` discriminates the shape of `resource`.
+ *
+ * `deletion_date` is the real timestamp at which the retention sweeper will
+ * permanently delete the item (= trashed_at + retention_days). Days remaining
+ * is derived client-side from `deletion_date` and the current clock — it is
+ * not duplicated in the wire format.
+ *
+ * `resource.path` carries the item's original location (soft-delete preserves
+ * the row's `path` column).
+ *
+ * @typedef {Object} TrashResourceItem
+ * @property {ResourceTypeEnum}    resource_type  - 'file' | 'folder'
+ * @property {string}              trashed_at     - ISO-8601: when the user sent it to trash.
+ * @property {string}              deletion_date  - ISO-8601: when retention will purge it.
+ * @property {FileItem|FolderItem} resource       - Full resource details; shape follows resource_type.
  */
 
 /**
+ * Response for `GET /api/trash/resources`.
+ * @typedef {Object} TrashResourcesResponse
+ * @property {TrashResourceItem[]}  items
+ * @property {string|undefined}     [next_cursor]  - Absent when the last page is reached.
+ */
+
+/**
+ * Wire shape of `UserDto` (backend: `src/application/dtos/user_dto.rs`).
+ * Returned by `/api/auth/me`, `/api/users/{id}`, the login response, and
+ * the admin user-management endpoints. Optional fields (`image`,
+ * `given_name`, `family_name`) are omitted when null on the wire — the
+ * `?` markers below reflect that.
+ *
  * @typedef {Object} User
  * @property {string} id
- * @property {string} username
+ * @property {string} [username]   Optional handle (PR 16); claim-once via /api/auth/me/profile (PR 24). Omitted from JSON when null.
  * @property {string} email
  * @property {string} role
  * @property {number} storage_quota_bytes
  * @property {number} storage_used_bytes
- * @property {number} created_at
- * @property {number} updated_at
- * @property {number} last_login_at
+ * @property {string} created_at  ISO 8601 timestamp
+ * @property {string} updated_at  ISO 8601 timestamp
+ * @property {string|null} [last_login_at]  ISO 8601 timestamp; null until first login
  * @property {boolean} active
- * @property {string}  auth_provider
+ * @property {string}  auth_provider  "local" or OIDC provider id
+ * @property {string|null} [image]    Avatar URL or data URI
+ * @property {boolean} can_edit_image  False for OIDC-only users
+ * @property {boolean} is_external    True for magic-link / OIDC-only / OCM recipients
+ * @property {string} [given_name]    First/given name; set at OIDC JIT or via PATCH /api/auth/me/profile (PR 24)
+ * @property {string} [family_name]   Last/family name; set at OIDC JIT or via PATCH /api/auth/me/profile (PR 24)
+ * @property {string} [email_verified_at]  ISO 8601 timestamp of the first proof-of-email-control (PR 23). Omitted when unverified.
+ * @property {string} [preferred_locale]    User-chosen locale code (e.g. `"fr"`, `"zh-TW"`); omitted when unset. Round-trips via PATCH /api/auth/me/profile.
  */
 
 /**
@@ -253,3 +269,247 @@
  * @property {number|null} width
  * @property {number|null} height
  */
+
+// ------------------- grants
+
+/**
+ * @typedef {'read'|'create'|'share'|'comment'|'delete'|'update'} PermissionTypeEnum
+ */
+
+/**
+ * @typedef {'folder'|'file'} ResourceTypeEnum
+ */
+
+/**
+ * @typedef {Object} Resource
+ * @property {ResourceTypeEnum} type
+ * @property {String} id
+ */
+
+/**
+ * @typedef {'user'|'group'|'token'|'external'} SubjectTypeEnum
+ */
+
+/**
+ * @typedef {Object} Subject
+ * @property {SubjectTypeEnum} type
+ * @property {String} id
+ */
+
+/**
+ * @typedef {Object} Grant
+ * @property {string} id
+ * @property {string} granted_at  - ISO-8601 datetime string.
+ * @property {string} granted_by
+ * @property {Subject} subject
+ * @property {PermissionTypeEnum} permission
+ * @property {Resource} resource
+ * @property {string|null} [expires_at]  - ISO-8601 datetime string, or absent/null for no expiry.
+ */
+
+/**
+ * Roles: `viewer`, `commenter`, `editor`, `manager`, `admin`
+ */
+
+/**
+ * Configuration for `ResourceListComponent`.
+ * @typedef {Object} ResourceListConfig
+ * @property {boolean}  [selectable=true]      - Show per-item checkboxes and enable selection.
+ * @property {boolean}  [showFavorite=true]    - Show the favorite-star button on each item.
+ * @property {boolean}  [showOwner=false]      - Show the owner column initially.
+ * @property {boolean}  [showShareBadge=true]  - Show the shared-resource badge on items.
+ * @property {boolean}  [draggable=false]      - Mark items as draggable.
+ * @property {boolean}  [showContextMenu=true] - Enable the three-dots button and right-click menu.
+ * @property {string}   [itemModifierClass]    - Extra CSS class on every .file-item (e.g. 'favorite-item').
+ * @property {string}   [dateField='modified_at'] - Which date field to display in the date column.
+ * @property {string}   [dateLabel]            - Column header label for the date column.
+ * @property {(id: string, type: 'file'|'folder') => boolean} [isFavorite]  - State provider for favorite badge.
+ * @property {(id: string, type: 'file'|'folder') => boolean} [isShared]    - State provider for share badge.
+ * @property {(item: FileItem|FolderItem, event: MouseEvent) => void} [onOpen]           - Item open/navigate callback.
+ * @property {(item: FileItem|FolderItem) => Promise<void>}           [onFavoriteToggle] - Favorite-star click callback.
+ * @property {(item: FileItem|FolderItem, event: MouseEvent) => void} [onContextMenu]    - Context menu callback.
+ * @property {(selected: Array<FileItem|FolderItem>) => void}         [onSelectionChange] - Selection change callback.
+ */
+
+/**
+ * One item returned by `GET /api/grants/incoming/resources`.
+ * `resource_type` discriminates the shape of `resource`.
+ * @typedef {Object} SharedWithMeItem
+ * @property {ResourceTypeEnum}        resource_type
+ * @property {PermissionTypeEnum[]}    permissions   - All permissions the caller holds on this resource.
+ * @property {string}                  granted_at    - ISO-8601 timestamp of the earliest grant.
+ * @property {string}                  granted_by    - UUID of the user who created the grant.
+ * @property {FileItem|FolderItem}     resource      - Full resource details; shape follows resource_type.
+ */
+
+/**
+ * Response for `GET /api/grants/incoming/resources`.
+ * @typedef {Object} SharedWithMeResponse
+ * @property {SharedWithMeItem[]}  items
+ * @property {string|undefined}    [next_cursor]  - Absent when the last page is reached.
+ */
+
+/**
+ * One (subject, permissions) entry within an outgoing resource item.
+ * Mirrors the server's `OutgoingResourceGrantDto`. `subject_type` is the
+ * full set the backend may emit; the UI for My Shares filters out `'group'`
+ * before rendering (see `_excludeGroupGrants` in mySharesList.js) so only
+ * `'user'` and `'token'` rows actually reach the view layer there.
+ *
+ * @typedef {Object} OutgoingResourceGrant
+ * @property {string}                              grant_id
+ * @property {'user'|'group'|'token'|'external'}   subject_type
+ * @property {string}                              subject_id
+ * @property {string}                              subject_display - Username (users) or share name (tokens).
+ * @property {'viewer'|'editor'|'admin'}           role
+ * @property {string}                              granted_at   - ISO-8601
+ * @property {string|null}                         [expires_at] - ISO-8601 or absent.
+ * @property {boolean}                             has_password - True when a token subject has a password set.
+ */
+
+/**
+ * One item returned by `GET /api/grants/outgoing/resources`.
+ * @typedef {Object} OutgoingResourceItem
+ * @property {ResourceTypeEnum}          resource_type
+ * @property {string}                    first_shared_at  - ISO-8601 earliest grant date.
+ * @property {FileItem|FolderItem}       resource         - Full resource details.
+ * @property {OutgoingResourceGrant[]}   grants           - One entry per (subject, permissions).
+ */
+
+/**
+ * Response for `GET /api/grants/outgoing/resources`.
+ * @typedef {Object} OutgoingResourcesResponse
+ * @property {OutgoingResourceItem[]}  items
+ * @property {string|undefined}        [next_cursor]  - Absent when the last page is reached.
+ */
+
+/**
+ * One item returned by `GET /api/favorites/resources`.
+ * `resource_type` discriminates the shape of `resource`.
+ * @typedef {Object} FavoritesResourceItem
+ * @property {ResourceTypeEnum}    resource_type  - 'file' | 'folder'
+ * @property {string}              favorited_at   - ISO-8601 timestamp when the item was starred.
+ * @property {FileItem|FolderItem} resource       - Full resource details; shape follows resource_type.
+ */
+
+/**
+ * Response for `GET /api/favorites/resources`.
+ * @typedef {Object} FavoritesResourcesResponse
+ * @property {FavoritesResourceItem[]}  items
+ * @property {string|undefined}         [next_cursor]  - Absent when the last page is reached.
+ */
+
+/**
+ * @typedef {Object} ContactEmail
+ * @property {string}  email
+ * @property {string}  type        - e.g. "work", "home"
+ * @property {boolean} is_primary
+ */
+
+/**
+ * Mirrors the backend `ContactDto`.
+ * `id` equals the OxiCloud user UUID for contacts from the system address book.
+ * @typedef {Object} ContactItem
+ * @property {string}          id
+ * @property {string}          address_book_id
+ * @property {string}          uid             - vCard UID
+ * @property {string|null}     [full_name]
+ * @property {string|null}     [first_name]
+ * @property {string|null}     [last_name]
+ * @property {string|null}     [nickname]
+ * @property {ContactEmail[]}  email
+ * @property {string|null}     [organization]
+ * @property {string|null}     [title]
+ * @property {string|null}     [photo_url]
+ * @property {string}          created_at      - ISO-8601
+ * @property {string}          updated_at      - ISO-8601
+ * @property {string}          etag
+ * @property {'user'|'group'}  [_kind]         - Discriminator added by the share-modal autocomplete when merging contacts with ReBAC subject groups. Absent (or 'user') for plain contacts; 'group' indicates the row is a subject-group suggestion with a `name` field instead of contact details.
+ * @property {string}          [name]          - Present only when `_kind === 'group'` — the subject-group's display name.
+ */
+
+/**
+ * Mirrors the backend `AddressBookResponse`.
+ * @typedef {Object} AddressBookItem
+ * @property {string}       id
+ * @property {string}       name
+ * @property {string}       owner_id
+ * @property {string|null}  [description]
+ * @property {string|null}  [color]
+ * @property {boolean}      is_public
+ * @property {boolean}      is_readonly
+ * @property {boolean}      is_system
+ * @property {string}       created_at   - ISO-8601
+ * @property {string}       updated_at   - ISO-8601
+ */
+
+// ------------------- share modal
+
+/**
+ * Share roles (DTO-layer sugar for the ReBAC permission sets).
+ * @typedef {'viewer'|'editor'|'admin'} ShareRoleEnum
+ */
+
+/**
+ * One collaborator row in the share modal's People section.
+ * @typedef {Object} MemberEntry
+ * @property {Grant}         grant   - Representative grant (used for subject/resource info).
+ * @property {Grant[]}       _grants - All grants for this subject on the resource (may be > 1).
+ * @property {ShareRoleEnum} role    - Derived role label shown in the UI.
+ * @property {'keep'|'remove'|'change'|'new'} _op - Pending local operation.
+ * @property {string|null}  [expires_at]  - YYYY-MM-DD expiry date string, or null for no expiry.
+ * @property {string}       [_displayName] - Optional human-readable label (set for group subjects so the row can show the group name; user subjects resolve their name via `createUserVignette`).
+ * @property {boolean}      [_isVirtual]  - True when this row's subject is a virtual (system-managed) group, so the vignette renders with the virtual-group icon.
+ * @property {string}       [_invitedEmail] - Transient marker for an
+ *   email-invite that hasn't been committed yet. When set, the row
+ *   renders with `pendingEmailVignette` (no UUID known) and
+ *   `_applyAll` POSTs `subject.type=email` to `/api/grants`. Cleared
+ *   on the next `fetchOutgoingGrants` refresh once the server has
+ *   resolved the recipient to a real user UUID.
+ */
+
+/**
+ * Existing public link with a pending local operation.
+ * @typedef {Object} LinkEntry
+ * @property {ShareItem}  share   - The existing share object.
+ * @property {'keep'|'remove'|'edit'} _op - Pending local operation.
+ * @property {DraftLink|null} _draft - Updated fields when _op === 'edit'.
+ */
+
+/**
+ * A public link staged for creation (not yet committed).
+ * @typedef {Object} DraftLink
+ * @property {string}      name
+ * @property {string|null} password
+ * @property {string|null} expires_at  - ISO-8601 date string or null.
+ */
+
+// ------------------- ReBAC subject groups
+
+/**
+ * Mirrors `GroupDto` on the server (`subject_group_handler.rs::GroupDto`).
+ * @typedef {Object} GroupItem
+ * @property {string}        id
+ * @property {string}        name
+ * @property {string|null}   [description]
+ * @property {boolean}       is_virtual
+ * @property {string}        created_at   - ISO-8601
+ * @property {string}        updated_at   - ISO-8601
+ * @property {boolean}       can_manage   - True if the current caller may rename / delete / curate the membership.
+ * @property {number}        member_count - Direct-member count (users + nested groups, one level). The
+ *                                          `/groups/search` endpoint emits 0 to skip a per-row COUNT(*);
+ *                                          list/get/create/update return the real value.
+ */
+
+/**
+ * Response from `GET /api/groups` — paginated list of groups.
+ * @typedef {Object} GroupListResponse
+ * @property {GroupItem[]} items
+ * @property {number}      total
+ */
+
+/**
+ * One direct member of a group (tagged union: user or nested group).
+ * @typedef {{kind: 'user', id: string} | {kind: 'group', id: string}} GroupMemberItem
+ */
+

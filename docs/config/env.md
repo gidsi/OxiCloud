@@ -9,9 +9,10 @@ Most runtime variables use the `OXICLOUD_` prefix. A few build-time or allocator
 | `OXICLOUD_STORAGE_PATH` | `./storage` | Root storage directory |
 | `OXICLOUD_STATIC_PATH` | `./static` | Static files directory |
 | `OXICLOUD_SERVER_PORT` | `8086` | Server port |
-| `OXICLOUD_SERVER_HOST` | `127.0.0.1` | Server bind addressi (IPv4 or IPv6 allowed) |
+| `OXICLOUD_SERVER_HOST` | `127.0.0.1` | Server bind address (IPv4 or IPv6 allowed) |
 | `OXICLOUD_BASE_URL` | (auto) | Public base URL for share links; defaults to `http://{host}:{port}` |
 | `OXICLOUD_MAX_UPLOAD_SIZE` | `10737418240` | Maximum upload size in bytes (10 GB on 64-bit, 1 GB on 32-bit) |
+| `OXICLOUD_REUSE_PORT` | `false` | Enable `SO_REUSEPORT` so multiple processes can share the same port. **Disabled by default** — a second accidental instance will fail with "address already in use". Enable only for deliberate multi-worker setups (process supervisor, rolling restart). Not supported on Windows. |
 
 ## Database
 
@@ -170,6 +171,67 @@ Enables the Nextcloud-compatible API layer (`/remote.php/`, `/ocs/`, `/status.ph
 | `OXICLOUD_NEXTCLOUD_ENABLED` | `false` | Enable Nextcloud compatibility layer |
 | `OXICLOUD_NEXTCLOUD_INSTANCE_ID` | `ocnca` | Instance ID suffix used in `oc:id` formatting |
 | `OXICLOUD_NEXTCLOUD_VERSION` | `28.0.4` | Emulated Nextcloud version reported to clients (format: `major.minor.patch`) |
+
+## Outbound Email (SMTP)
+
+Used by the magic-link invitation flow and the login-via-email flow. When `OXICLOUD_SMTP_HOST` is empty (the default), the feature is disabled and any endpoint that needs email returns 503.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OXICLOUD_SMTP_HOST` | — | SMTP server hostname or IP. Empty disables the feature. |
+| `OXICLOUD_SMTP_PORT` | `587` | Submission port (587 STARTTLS, 465 implicit TLS, 25 plain) |
+| `OXICLOUD_SMTP_USER` | — | SASL username. Leave empty for anonymous relay. |
+| `OXICLOUD_SMTP_PASS` | — | SASL password |
+| `OXICLOUD_SMTP_FROM` | — | `From:` mailbox; bare address or RFC 5322 name-address (`OxiCloud <noreply@example.com>`) |
+| `OXICLOUD_SMTP_TLS` | `starttls` | Transport encryption: `starttls`, `tls`, or `none` (emits startup WARN) |
+
+There is also `OXICLOUD_SMTP_MOCK`  (false by default), this is for test purpose only, do not activate it
+
+### Reliability and retries
+
+OxiCloud does **not** spool mail. Each `send()` is a single attempt: if the remote SMTP server is unreachable, slow, or temporarily refusing the message, the send fails and the error is logged — there is no in-process retry, queue, or dead-letter handling. This keeps the HTTP path fast and the binary small at the cost of durability guarantees during a relay outage.
+
+For production deployments where you cannot afford to drop invitation mail during a brief relay outage, **point OxiCloud at a local MTA configured as a smarthost** (Postfix, OpenSMTPD, exim, or `msmtp-mta`/`nullmailer` for minimal setups). The local MTA owns the durable queue: it accepts the message from OxiCloud in milliseconds over the loopback, then retries with its own exponential backoff against your real upstream relay until the message is delivered or the queue lifetime expires.
+
+Typical local-relay config:
+
+```env
+OXICLOUD_SMTP_HOST=127.0.0.1
+OXICLOUD_SMTP_PORT=25
+OXICLOUD_SMTP_TLS=none           # loopback only — never over the network
+OXICLOUD_SMTP_FROM=OxiCloud <noreply@example.com>
+# OXICLOUD_SMTP_USER / _PASS unset — local MTA accepts loopback unauthenticated
+```
+
+Then configure the local MTA's smarthost / relayhost to your upstream provider (SendGrid, Amazon SES, your corporate relay, etc.). Verify durability by stopping the upstream relay, sending an invitation, restarting the relay, and confirming the mail eventually arrives.
+
+If you point `OXICLOUD_SMTP_HOST` directly at a remote SMTP server, treat the absence of retries as a documented constraint: a brief network glitch during invitation flow is a lost invite, and the recipient will need to be re-invited.
+
+## Magic-Link Authentication
+
+Configures the invite-by-email and login-via-email flows. Both require SMTP to be configured above.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OXICLOUD_MAGIC_LINK_TTL_HOURS` | `24` | Lifetime of a freshly-minted magic-link token, in hours |
+| `OXICLOUD_ALLOW_EXTERNAL_USERS` | `true` | Kill switch for the whole flow. `false` makes `POST /api/grants` reject `subject.type = "email"` for unknown addresses and `POST /api/auth/magic-link/send` return its uniform stub without issuing a token. |
+| `OXICLOUD_EXTERNAL_EMAIL_DOMAINS` | — | Comma-separated allowlist of email domains accepted when minting a new external user (case-insensitive, exact match on the post-`@` part). Empty = any domain is allowed, subject to `OXICLOUD_ALLOW_EXTERNAL_USERS`. Subdomains must be listed explicitly: `partner.com` does NOT match `eng.partner.com`. Example: `partner-a.com,partner-b.io`. |
+
+## Internationalization (server-rendered surfaces)
+
+Server-rendered HTML pages (magic-link landing, error pages) and outbound transactional emails go through the backend i18n layer. The set of available locales is **discovered at boot** by listing `static/locales/*.json` — no rebuild needed to add a 17th locale.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OXICLOUD_DEFAULT_LOCALE` | `en` | Fallback locale used when no stronger signal is available. Must match one of the locales under `static/locales/`; startup fails fast if you set it to a code with no corresponding JSON file. |
+
+The resolution priority differs by surface:
+
+- **HTML pages (anonymous, e.g. magic-link landing)** — `?lang=xx` query override, then the browser's `Accept-Language` header (q-weighted, with primary-tag fallback so `fr-FR` resolves to `fr` when no `fr-FR.json` is shipped), then this default.
+- **Emails to a known user** — the user's `preferred_locale` column (set via OIDC `locale` claim at JIT or via the UI language switcher), then this default.
+- **Emails to a brand-new external user being invited** — the inviter's `preferred_locale` (inheritance at row-creation), then this default.
+
+Today's shipped locales: `ar, de, en, es, fa, fr, hi, it, ja, ko, nl, pl, pt, ru, zh, zh-TW`. Missing translations on a non-English locale automatically fall back to English at the key level — adding a new locale with even a few translated keys works without manual gap-filling.
 
 ## Trusted Proxy
 

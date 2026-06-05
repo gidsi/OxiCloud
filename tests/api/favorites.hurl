@@ -1,6 +1,10 @@
 # =============================================================
 # OxiCloud – Favorites API end-to-end scenario
 # =============================================================
+# Depends on files-folders.hurl having run first:
+#   - home folder exists with sub-folders test1 and test2-renamed
+#   - test2-renamed contains hello-renamed.txt
+#
 # Run:
 #   hurl --variables-file tests/api/test.env --test tests/api/favorites.hurl
 # =============================================================
@@ -26,52 +30,18 @@ jsonpath "$.access_token" isString
 # ─────────────────────────────────────────────────────────────
 # Step 2 – No favorites yet
 # ─────────────────────────────────────────────────────────────
-GET {{base_url}}/api/favorites
+GET {{base_url}}/api/favorites/resources
 Authorization: Bearer {{token}}
 
 HTTP 200
 [Asserts]
-jsonpath "$" isCollection
-jsonpath "$" count == 0
+jsonpath "$.items" isCollection
+jsonpath "$.items" count == 0
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 2.5 – Create folders and upload a file
-# ─────────────────────────────────────────────────────────────
-POST {{base_url}}/api/folders
-Authorization: Bearer {{token}}
-Content-Type: application/json
-{
-  "name": "test1"
-}
-
-HTTP 201
-[Captures]
-test1_id: jsonpath "$.id"
-
-POST {{base_url}}/api/folders
-Authorization: Bearer {{token}}
-Content-Type: application/json
-{
-  "name": "test2"
-}
-
-HTTP 201
-[Captures]
-test2_id: jsonpath "$.id"
-
-POST {{base_url}}/api/files/upload
-Authorization: Bearer {{token}}
-[MultipartFormData]
-folder_id: {{test2_id}}
-file: file,fixtures/hello.txt; text/plain
-
-HTTP 201
-[Captures]
-file_id: jsonpath "$.id"
-
-# ─────────────────────────────────────────────────────────────
-# Step 3 – Check item existence (simulate what files-folders did)
+# Step 3 – Discover item IDs from the folder structure
+#           Folders are ORDER BY name: test1 ($[0]), test2-renamed ($[1])
 # ─────────────────────────────────────────────────────────────
 GET {{base_url}}/api/folders
 Authorization: Bearer {{token}}
@@ -80,24 +50,31 @@ HTTP 200
 [Captures]
 home_folder_id: jsonpath "$[0].id"
 
-GET {{base_url}}/api/folders/{{home_folder_id}}/contents
+
+GET {{base_url}}/api/folders/{{home_folder_id}}/resources?resource_types=folder
 Authorization: Bearer {{token}}
 
 HTTP 200
+[Captures]
+test1_id:  jsonpath "$.items[0].resource.id"
+test2_id:  jsonpath "$.items[1].resource.id"
 [Asserts]
-jsonpath "$[0].name" == "test1"
-jsonpath "$[1].name" == "test2"
+jsonpath "$.items[0].resource.name" == "test1"
+jsonpath "$.items[1].resource.name" == "test2-renamed"
+
 
 GET {{base_url}}/api/files?folder_id={{test2_id}}
 Authorization: Bearer {{token}}
 
 HTTP 200
+[Captures]
+file_id: jsonpath "$[0].id"
 [Asserts]
-jsonpath "$[0].name" == "hello.txt"
+jsonpath "$[0].name" == "hello-renamed.txt"
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 4 – Add hello.txt to favorites
+# Step 4 – Add hello-renamed.txt to favorites
 # ─────────────────────────────────────────────────────────────
 POST {{base_url}}/api/favorites/file/{{file_id}}
 Authorization: Bearer {{token}}
@@ -106,17 +83,17 @@ HTTP 201
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 5 – Favorites contains only hello.txt
+# Step 5 – Favorites contains only hello-renamed.txt
 # ─────────────────────────────────────────────────────────────
-GET {{base_url}}/api/favorites
+GET {{base_url}}/api/favorites/resources
 Authorization: Bearer {{token}}
 
 HTTP 200
 [Asserts]
-jsonpath "$" count == 1
-jsonpath "$[0].item_id" == {{file_id}}
-jsonpath "$[0].item_type" == "file"
-jsonpath "$[0].item_name" == "hello.txt"
+jsonpath "$.items" count == 1
+jsonpath "$.items[0].resource.id" == {{file_id}}
+jsonpath "$.items[0].resource_type" == "file"
+jsonpath "$.items[0].resource.name" == "hello-renamed.txt"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -131,18 +108,18 @@ HTTP 201
 # ─────────────────────────────────────────────────────────────
 # Step 7 – Favorites contains both items (order-independent)
 # ─────────────────────────────────────────────────────────────
-GET {{base_url}}/api/favorites
+GET {{base_url}}/api/favorites/resources
 Authorization: Bearer {{token}}
 
 HTTP 200
 [Asserts]
-jsonpath "$" count == 2
-jsonpath "$[*].item_id" contains {{file_id}}
-jsonpath "$[*].item_id" contains {{test1_id}}
+jsonpath "$.items" count == 2
+jsonpath "$.items[*].resource.id" contains {{file_id}}
+jsonpath "$.items[*].resource.id" contains {{test1_id}}
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 8 – Remove hello.txt from favorites
+# Step 8 – Remove hello-renamed.txt from favorites
 # ─────────────────────────────────────────────────────────────
 DELETE {{base_url}}/api/favorites/file/{{file_id}}
 Authorization: Bearer {{token}}
@@ -153,15 +130,15 @@ HTTP 200
 # ─────────────────────────────────────────────────────────────
 # Step 9 – Favorites contains only test1 folder
 # ─────────────────────────────────────────────────────────────
-GET {{base_url}}/api/favorites
+GET {{base_url}}/api/favorites/resources
 Authorization: Bearer {{token}}
 
 HTTP 200
 [Asserts]
-jsonpath "$" count == 1
-jsonpath "$[0].item_id" == {{test1_id}}
-jsonpath "$[0].item_type" == "folder"
-jsonpath "$[0].item_name" == "test1"
+jsonpath "$.items" count == 1
+jsonpath "$.items[0].resource.id" == {{test1_id}}
+jsonpath "$.items[0].resource_type" == "folder"
+jsonpath "$.items[0].resource.name" == "test1"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -176,9 +153,9 @@ HTTP 200
 # ─────────────────────────────────────────────────────────────
 # Step 11 – Favorites is empty again
 # ─────────────────────────────────────────────────────────────
-GET {{base_url}}/api/favorites
+GET {{base_url}}/api/favorites/resources
 Authorization: Bearer {{token}}
 
 HTTP 200
 [Asserts]
-jsonpath "$" count == 0
+jsonpath "$.items" count == 0

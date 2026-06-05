@@ -29,6 +29,10 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
 COPY static static
 COPY migrations migrations
+# askama templates — read at *compile time* by the derive macro, so
+# they must be present in the build stage even though they're embedded
+# into the final binary and never read from disk at runtime.
+COPY templates templates
 # Build with all optimizations (DATABASE_URL only needed at compile-time for sqlx)
 ARG DATABASE_URL="postgres://postgres:postgres@localhost/oxicloud"
 RUN DATABASE_URL="${DATABASE_URL}" cargo build --release

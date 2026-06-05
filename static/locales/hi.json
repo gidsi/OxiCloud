@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "यह साइन-इन लिंक अब वैध नहीं है",
+                "expired_body": "लिंक समाप्त हो गया हो सकता है या पहले से उपयोग किया जा चुका हो सकता है। हम आपको एक नया भेज सकते हैं — यह कुछ ही सेकंड में आपके इनबॉक्स में पहुँच जाएगा।",
+                "resend_to": "{{email}} को नया लिंक भेजें",
+                "generic_unavailable": "यह साइन-इन लिंक अब वैध नहीं है। यह पहले से उपयोग किया जा चुका हो सकता है या समाप्त हो गया हो सकता है। लॉगिन पृष्ठ से नया लिंक माँगें।",
+                "service_unavailable": "इस सर्वर पर मैजिक-लिंक साइन-इन सक्षम नहीं है।",
+                "internal_error": "साइन इन करते समय कुछ गलत हो गया। कृपया फिर से प्रयास करें।",
+                "resend_failure": "लिंक भेजते समय कुछ गलत हो गया। कृपया फिर से प्रयास करें।",
+                "cross_browser_title": "इस डिवाइस पर साइन-इन जारी रखें?",
+                "cross_browser_body": "आपने यह साइन-इन लिंक उससे भिन्न ब्राउज़र या डिवाइस में खोला है जहाँ से आपने इसका अनुरोध किया था।",
+                "cross_browser_warning": "यदि आपने यह लिंक माँगा है, तो आगे बढ़ना सुरक्षित है। यदि नहीं, तो इस पृष्ठ को बंद कर दें — जारी रखें पर क्लिक करने से कोई और आपके खाते में साइन-इन हो जाएगा।",
+                "cross_browser_continue": "जारी रखें और साइन इन करें",
+                "resend_confirmation_title": "अपना इनबॉक्स देखें",
+                "resend_confirmation_body": "यदि साइन-इन लिंक किसी सक्रिय खाते का था, तो अभी एक नया लिंक भेजा गया है। कृपया अपना इनबॉक्स देखें।",
+                "return_link": "OxiCloud पर वापस जाएँ"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} ने OxiCloud पर आपके साथ एक {{kind}} साझा किया",
+                    "body": "{{inviter}} ने OxiCloud पर आपके साथ एक {{kind}} साझा किया है।\n\nइसे नीचे दिए गए लिंक पर क्लिक करके खोलें:\n{{link}}\n\nलिंक केवल एक बार काम करता है और {{ttl_hours}} घंटों में समाप्त हो जाता है।\nयदि आप इस आमंत्रण की अपेक्षा नहीं कर रहे थे, तो आप इस संदेश को अनदेखा कर सकते हैं।\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "OxiCloud में साइन इन करें",
+                    "body": "नमस्ते,\n\nOxiCloud में साइन इन करने के लिए नीचे दिए गए लिंक का उपयोग करें। लिंक केवल एक बार काम करता है और {{ttl_minutes}} मिनट में समाप्त हो जाता है। इसे उसी डिवाइस पर खोलें जहाँ से आपने अनुरोध किया था।\n\n{{link}}\n\nयदि आपने यह साइन-इन लिंक नहीं माँगा था, तो आप इस संदेश को अनदेखा कर सकते हैं — किसी और कार्रवाई की आवश्यकता नहीं है।\n\n— OxiCloud"
+                },
+                "kind_file": "फ़ाइल",
+                "kind_folder": "फ़ोल्डर",
+                "english_fallback_divider": "--- अंग्रेज़ी संस्करण नीचे ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "न्यूनतम क्लाउड स्टोरेज सिस्टम"
@@ -10,7 +43,8 @@
         "favorites": "पसंदीदा",
         "photos": "फ़ोटो",
         "music": "संगीत",
-        "trash": "रद्दी"
+        "trash": "रद्दी",
+        "sharedwithme": "मेरे साथ साझा किए गए"
     },
     "photos": {
         "empty_state": "अभी कोई फ़ोटो नहीं",
@@ -125,7 +159,13 @@
         "about_description": "Rust और Clean Architecture से बना क्लाउड स्टोरेज प्लेटफ़ॉर्म। तेज़, सुरक्षित और निजी।",
         "admin_panel": "एडमिन पैनल",
         "profile": "मेरी प्रोफ़ाइल",
-        "role_user": "उपयोगकर्ता"
+        "role_user": "उपयोगकर्ता",
+        "theme": {
+            "light": "हल्का",
+            "dark": "गहरा",
+            "auto": "सिस्टम जैसा"
+        },
+        "manage_groups": "समूह प्रबंधित करें"
     },
     "share": {
         "dialogTitle": "शेयर लिंक",
@@ -269,7 +309,8 @@
             "archive": "संग्रह",
             "installer": "इंस्टॉलर",
             "code": "कोड"
-        }
+        },
+        "owner": "स्वामी"
     },
     "dialogs": {
         "rename_folder": "फ़ोल्डर का नाम बदलें",
@@ -329,7 +370,13 @@
         "move_error": "ले जाने में त्रुटि",
         "empty_name": "नाम खाली नहीं हो सकता",
         "name_exists": "इस नाम की फ़ाइल या फ़ोल्डर पहले से मौजूद है",
-        "generic_error": "एक त्रुटि हुई है"
+        "generic_error": "एक त्रुटि हुई है",
+        "group_name_invalid": "समूह का नाम ईमेल उपसर्ग प्रारूप के अनुरूप होना चाहिए (अक्षर, अंक, बिंदु, डैश, अंडरस्कोर; 1–64 वर्ण).",
+        "group_cycle": "यह सदस्य समूहों के बीच चक्रीय संदर्भ बनाएगा।",
+        "group_depth_exceeded": "यह नेस्टिंग गहराई अनुमत अधिकतम (8) से अधिक है।",
+        "group_virtual_immutable": "«Internal» समूह सिस्टम द्वारा प्रबंधित है और इसे संशोधित नहीं किया जा सकता।",
+        "group_not_found": "समूह नहीं मिला।",
+        "group_name_taken": "इस नाम का एक समूह पहले से मौजूद है।"
     },
     "breadcrumb": {
         "home": "होम"
@@ -339,15 +386,36 @@
         "empty_state": "रद्दी खाली है",
         "original_location": "मूल स्थान",
         "deleted_date": "हटाने की तिथि",
+        "remaining": "शेष",
         "actions": "कार्य",
         "restore": "पुनर्स्थापित करें",
         "delete_permanently": "स्थायी रूप से हटाएँ",
-        "empty_confirm": "क्या आप वाकई रद्दी खाली करना चाहते हैं? यह सभी आइटम स्थायी रूप से हटा देगा।"
+        "empty_confirm": "क्या आप वाकई रद्दी खाली करना चाहते हैं? यह सभी आइटम स्थायी रूप से हटा देगा।",
+        "groupby": {
+            "remaining_days": "शेष दिन",
+            "trashed_time": "हटाने का समय"
+        }
+    },
+    "daysRemaining": {
+        "expired": "समाप्त",
+        "today": "आज",
+        "tomorrow": "कल",
+        "inDays": "{{count}} दिन"
+    },
+    "expiryChip": {
+        "never": "कभी समाप्त नहीं होता",
+        "expired": "समाप्त",
+        "today": "आज समाप्त होता है",
+        "tomorrow": "कल समाप्त होता है",
+        "inDays": "{{count}} दिनों में समाप्त होता है",
+        "onDate": "{{date}} को समाप्त होता है"
     },
     "auth": {
         "login_title": "साइन इन",
         "username": "उपयोगकर्ता नाम",
         "username_placeholder": "अपना उपयोगकर्ता नाम दर्ज करें",
+        "login_identifier": "उपयोगकर्ता नाम या ईमेल",
+        "login_identifier_placeholder": "अपना उपयोगकर्ता नाम या ईमेल दर्ज करें",
         "password": "पासवर्ड",
         "password_placeholder": "अपना पासवर्ड दर्ज करें",
         "login_button": "साइन इन",
@@ -378,7 +446,14 @@
         "admin_create_error": "एडमिन खाता बनाने में त्रुटि",
         "or": "या",
         "sso_login": "SSO से साइन इन करें",
-        "sso_login_provider": "{{provider}} से साइन इन करें"
+        "sso_login_provider": "{{provider}} से साइन इन करें",
+        "magicLinkHint": "पासवर्ड नहीं है? अपना ईमेल दर्ज करें और हम आपको एक बार उपयोग होने वाला साइन-इन लिंक भेज देंगे।",
+        "magicLinkEmailLabel": "ईमेल पता",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "साइन-इन लिंक भेजें",
+        "magicLinkSent": "यदि उस ईमेल के लिए कोई खाता मौजूद है, तो एक साइन-इन लिंक भेज दिया गया है। अपना इनबॉक्स देखें।",
+        "magicLinkUnavailable": "इस सर्वर पर ईमेल द्वारा साइन-इन उपलब्ध नहीं है।",
+        "magicLinkNetworkError": "सर्वर से कनेक्ट नहीं हो सका: {{message}}"
     },
     "storage": {
         "title": "स्टोरेज",
@@ -428,7 +503,8 @@
         "clear": "हाल ही का साफ़ करें",
         "accessed": "एक्सेस किया",
         "empty_state": "कोई हाल की फ़ाइलें नहीं",
-        "empty_hint": "जो फ़ाइलें आप खोलेंगे वे यहाँ दिखेंगी"
+        "empty_hint": "जो फ़ाइलें आप खोलेंगे वे यहाँ दिखेंगी",
+        "loadMore": "और लोड करें"
     },
     "notifications": {
         "file_renamed": "फ़ाइल का नाम बदला गया",
@@ -660,6 +736,18 @@
         "minutes_ago": "{{n}} मिनट पहले",
         "hours_ago": "{{n}} घंटे पहले",
         "days_ago": "{{n}} दिन पहले",
+        "edit_profile": "प्रोफ़ाइल संपादित करें",
+        "edit_oidc_managed": "अपनी जानकारी (नाम, प्रथम नाम, प्रोफ़ाइल चित्र, …) बदलने के लिए, कृपया अपने पहचान प्रदाता पर इसे अद्यतन करें। आपके परिवर्तन अगले साइन-इन पर दिखाई देंगे।",
+        "username_claim_hint": "2–64 अक्षर, अक्षर / अंक / डॉट / डैश / अंडरस्कोर। एक बार चुनने के बाद, उपयोगकर्ता नाम नहीं बदला जा सकता (DAV/NextCloud क्लाइंट इस पर निर्भर करते हैं)।",
+        "username_already_claimed": "उपयोगकर्ता नाम सेट है और बदला नहीं जा सकता (DAV/NextCloud क्लाइंट इस पर निर्भर करते हैं)।",
+        "given_name": "प्रथम नाम",
+        "family_name": "अंतिम नाम",
+        "save_profile": "परिवर्तन सहेजें",
+        "profile_saved": "प्रोफ़ाइल अद्यतन की गई",
+        "profile_no_changes": "सहेजने के लिए कोई परिवर्तन नहीं।",
+        "profile_save_failed": "सहेजना विफल",
+        "username_taken_error": "यह उपयोगकर्ता नाम पहले से उपयोग में है।",
+        "username_immutable_error": "आपका उपयोगकर्ता नाम पहले से सेट है और यहाँ नहीं बदला जा सकता। यदि आपको नाम बदलने की आवश्यकता है तो किसी व्यवस्थापक से संपर्क करें।",
         "change_password": "पासवर्ड बदलें",
         "current_password": "वर्तमान पासवर्ड",
         "new_password": "नया पासवर्ड",
@@ -675,12 +763,84 @@
         "error_label_required": "कृपया एक लेबल दर्ज करें",
         "error_create_pw": "ऐप पासवर्ड बनाने में विफल",
         "confirm_revoke": "ऐप पासवर्ड \"{{label}}\" रद्द करें? इसका उपयोग करने वाले क्लाइंट काम करना बंद कर देंगे।",
-        "error_revoke": "रद्द करने में विफल"
+        "error_revoke": "रद्द करने में विफल",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "अपलोड हो रहा है...",
         "files": "फ़ाइलें",
         "complete": "{{count}} / {{total}} अपलोड हुए"
     },
-    "storage_quota_exceeded": "स्टोरेज कोटा पार हो गया"
+    "storage_quota_exceeded": "स्टोरेज कोटा पार हो गया",
+    "sharedwithme": {
+        "pageTitle": "मेरे साथ साझा किया",
+        "pageDescription": "फ़ाइलें और फ़ोल्डर जो अन्य उपयोगकर्ताओं ने आपके साथ साझा किए हैं",
+        "emptyStateTitle": "अभी तक आपके साथ कुछ भी साझा नहीं किया गया",
+        "emptyStateDesc": "अन्य उपयोगकर्ताओं द्वारा आपके साथ साझा किए गए आइटम यहाँ दिखाई देंगे",
+        "loadMore": "और लोड करें",
+        "sharedBy": "द्वारा साझा किया",
+        "colName": "नाम",
+        "colType": "प्रकार",
+        "colSharedBy": "द्वारा साझा किया",
+        "colDate": "साझाकरण तिथि",
+        "colPermissions": "अनुमतियाँ"
+    },
+    "groupby": {
+        "none": "कोई नहीं",
+        "title": "इसके अनुसार समूहीकृत करें",
+        "owner": "स्वामी",
+        "shareDate": "साझा तिथि",
+        "type": "प्रकार",
+        "type.folders": "फ़ोल्डर",
+        "accessedAt": "पहुँच की तारीख",
+        "modifiedAt": "संशोधन की तारीख",
+        "createdAt": "बनाने की तारीख",
+        "size": "आकार",
+        "favoriteDate": "पसंदीदा की तारीख",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "आज",
+        "last7days": "पिछले 7 दिन",
+        "last30days": "पिछले 30 दिन"
+    },
+    "groups": {
+        "title": "समूह प्रबंधित करें",
+        "create_button": "समूह बनाएँ",
+        "create_dialog_title": "नया समूह",
+        "edit_dialog_title": "समूह का नाम बदलें",
+        "name_label": "नाम",
+        "name_placeholder": "engineering",
+        "description_label": "विवरण (वैकल्पिक)",
+        "members_section": "सदस्य",
+        "add_member_placeholder": "उपयोगकर्ता या समूह जोड़ें…",
+        "no_members": "अभी तक कोई सदस्य नहीं।",
+        "remove_member": "हटाएँ",
+        "delete_group": "समूह हटाएँ",
+        "delete_confirm": "समूह \"{name}\" को हटाएँ? इस समूह से जुड़ी अनुमतियाँ रद्द कर दी जाएँगी।",
+        "empty_state": "अभी तक कोई समूह नहीं।",
+        "load_more": "और लोड करें",
+        "back_to_list": "वापस",
+        "loading": "लोड हो रहा है…",
+        "virtual_badge": "सिस्टम",
+        "member_count_zero": "कोई सदस्य नहीं",
+        "member_count_one": "1 सदस्य",
+        "member_count_other": "{count} सदस्य",
+        "delete_confirm_label": "पुष्टि के लिए समूह का नाम लिखें:",
+        "delete_confirm_mismatch": "पुष्टि के लिए समूह का नाम बिल्कुल वैसा ही लिखें।",
+        "virtual_internal_name": "आंतरिक"
+    }
 }

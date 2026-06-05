@@ -6,9 +6,7 @@ metadata:
 data:
   OXICLOUD_SERVER_PORT: {{ .Values.config.server.port | quote }}
   OXICLOUD_SERVER_HOST: {{ .Values.config.server.host | quote }}
-  {{- if .Values.config.server.baseUrl }}
   OXICLOUD_BASE_URL: {{ .Values.config.server.baseUrl | quote }}
-  {{- end }}
   OXICLOUD_ENABLE_AUTH: {{ .Values.config.features.enableAuth | quote }}
   OXICLOUD_ENABLE_FILE_SHARING: {{ .Values.config.features.enableSharing | quote }}
   MIMALLOC_PURGE_DELAY: {{ .Values.config.mimalloc.purgeDelay | quote }}

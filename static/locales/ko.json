@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "이 로그인 링크는 더 이상 유효하지 않습니다",
+                "expired_body": "링크가 만료되었거나 이미 사용되었을 수 있습니다. 새 링크를 보내드릴 수 있습니다 — 몇 초 안에 받은편지함에 도착합니다.",
+                "resend_to": "{{email}}로 새 링크 보내기",
+                "generic_unavailable": "이 로그인 링크는 더 이상 유효하지 않습니다. 이미 사용되었거나 만료되었을 수 있습니다. 로그인 페이지에서 새 링크를 요청하세요.",
+                "service_unavailable": "이 서버에서는 매직 링크 로그인이 활성화되어 있지 않습니다.",
+                "internal_error": "로그인 중 오류가 발생했습니다. 다시 시도해 주세요.",
+                "resend_failure": "링크 전송 중 오류가 발생했습니다. 다시 시도해 주세요.",
+                "cross_browser_title": "이 기기에서 로그인을 계속하시겠습니까?",
+                "cross_browser_body": "요청한 곳과 다른 브라우저나 기기에서 이 로그인 링크를 열었습니다.",
+                "cross_browser_warning": "이 링크를 본인이 요청했다면 안전하게 계속할 수 있습니다. 그렇지 않다면 이 페이지를 닫으세요 — 계속을 클릭하면 다른 사람이 당신의 계정에 로그인하게 됩니다.",
+                "cross_browser_continue": "계속하고 로그인",
+                "resend_confirmation_title": "받은편지함을 확인하세요",
+                "resend_confirmation_body": "로그인 링크가 활성 계정의 것이었다면 새 링크가 방금 전송되었습니다. 받은편지함을 확인하세요.",
+                "return_link": "OxiCloud로 돌아가기"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}}님이 OxiCloud에서 {{kind}}을(를) 공유했습니다",
+                    "body": "{{inviter}}님이 OxiCloud에서 {{kind}}을(를) 공유했습니다.\n\n아래 링크를 클릭하여 여세요:\n{{link}}\n\n링크는 한 번만 사용 가능하며 {{ttl_hours}}시간 후에 만료됩니다.\n이 초대를 예상하지 못했다면 이 메시지를 무시하셔도 됩니다.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "OxiCloud 로그인",
+                    "body": "안녕하세요,\n\n아래 링크를 사용하여 OxiCloud에 로그인하세요. 링크는 한 번만 사용 가능하며 {{ttl_minutes}}분 후에 만료됩니다. 요청한 것과 동일한 기기에서 여세요.\n\n{{link}}\n\n이 로그인 링크를 요청하지 않으셨다면 이 메시지를 무시하셔도 됩니다 — 추가 조치가 필요하지 않습니다.\n\n— OxiCloud"
+                },
+                "kind_file": "파일",
+                "kind_folder": "폴더",
+                "english_fallback_divider": "--- 영어 버전은 아래 ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "미니멀리스트 클라우드 스토리지 시스템"
@@ -10,7 +43,8 @@
         "favorites": "즐겨찾기",
         "photos": "사진",
         "music": "음악",
-        "trash": "휴지통"
+        "trash": "휴지통",
+        "sharedwithme": "나와 공유됨"
     },
     "photos": {
         "empty_state": "아직 사진이 없습니다",
@@ -125,7 +159,13 @@
         "about_description": "Rust와 Clean Architecture로 구축된 클라우드 스토리지 플랫폼. 빠르고, 안전하고, 프라이빗합니다.",
         "admin_panel": "관리자 패널",
         "profile": "내 프로필",
-        "role_user": "사용자"
+        "role_user": "사용자",
+        "theme": {
+            "light": "라이트",
+            "dark": "다크",
+            "auto": "시스템과 동일"
+        },
+        "manage_groups": "그룹 관리"
     },
     "share": {
         "dialogTitle": "공유 링크",
@@ -269,7 +309,8 @@
             "archive": "아카이브",
             "installer": "설치 프로그램",
             "code": "코드"
-        }
+        },
+        "owner": "소유자"
     },
     "dialogs": {
         "rename_folder": "폴더 이름 변경",
@@ -329,7 +370,13 @@
         "move_error": "이동 오류",
         "empty_name": "이름은 비워둘 수 없습니다",
         "name_exists": "같은 이름의 파일 또는 폴더가 이미 존재합니다",
-        "generic_error": "오류가 발생했습니다"
+        "generic_error": "오류가 발생했습니다",
+        "group_name_invalid": "그룹 이름은 이메일 접두사 형식과 일치해야 합니다(문자, 숫자, 점, 대시, 밑줄; 1–64자).",
+        "group_cycle": "이 구성원은 그룹 간 순환 참조를 만들 것입니다.",
+        "group_depth_exceeded": "중첩 깊이가 허용 최대값(8)을 초과합니다.",
+        "group_virtual_immutable": "«Internal» 그룹은 시스템이 관리하며 수정할 수 없습니다.",
+        "group_not_found": "그룹을 찾을 수 없습니다.",
+        "group_name_taken": "이 이름의 그룹이 이미 존재합니다."
     },
     "breadcrumb": {
         "home": "홈"
@@ -339,15 +386,36 @@
         "empty_state": "휴지통이 비어 있습니다",
         "original_location": "원래 위치",
         "deleted_date": "삭제일",
+        "remaining": "남음",
         "actions": "작업",
         "restore": "복원",
         "delete_permanently": "영구 삭제",
-        "empty_confirm": "휴지통을 비우시겠습니까? 모든 항목이 영구적으로 삭제됩니다."
+        "empty_confirm": "휴지통을 비우시겠습니까? 모든 항목이 영구적으로 삭제됩니다.",
+        "groupby": {
+            "remaining_days": "남은 일수",
+            "trashed_time": "삭제 시간"
+        }
+    },
+    "daysRemaining": {
+        "expired": "만료됨",
+        "today": "오늘",
+        "tomorrow": "내일",
+        "inDays": "{{count}}일"
+    },
+    "expiryChip": {
+        "never": "만료되지 않음",
+        "expired": "만료됨",
+        "today": "오늘 만료",
+        "tomorrow": "내일 만료",
+        "inDays": "{{count}}일 후 만료",
+        "onDate": "{{date}}에 만료"
     },
     "auth": {
         "login_title": "로그인",
         "username": "사용자 이름",
         "username_placeholder": "사용자 이름을 입력하세요",
+        "login_identifier": "사용자 이름 또는 이메일",
+        "login_identifier_placeholder": "사용자 이름 또는 이메일을 입력하세요",
         "password": "비밀번호",
         "password_placeholder": "비밀번호를 입력하세요",
         "login_button": "로그인",
@@ -378,7 +446,14 @@
         "admin_create_error": "관리자 계정 생성 오류",
         "or": "또는",
         "sso_login": "SSO로 로그인",
-        "sso_login_provider": "{{provider}}(으)로 로그인"
+        "sso_login_provider": "{{provider}}(으)로 로그인",
+        "magicLinkHint": "비밀번호가 없으신가요? 이메일을 입력하시면 일회용 로그인 링크를 보내드립니다.",
+        "magicLinkEmailLabel": "이메일 주소",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "로그인 링크 보내기",
+        "magicLinkSent": "해당 이메일에 대한 계정이 있는 경우 로그인 링크가 전송되었습니다. 받은편지함을 확인하세요.",
+        "magicLinkUnavailable": "이 서버에서는 이메일 로그인을 사용할 수 없습니다.",
+        "magicLinkNetworkError": "서버에 연결할 수 없습니다: {{message}}"
     },
     "storage": {
         "title": "저장소",
@@ -428,7 +503,8 @@
         "clear": "최근 항목 지우기",
         "accessed": "접근일",
         "empty_state": "최근 파일이 없습니다",
-        "empty_hint": "열어본 파일이 여기에 표시됩니다"
+        "empty_hint": "열어본 파일이 여기에 표시됩니다",
+        "loadMore": "더 불러오기"
     },
     "notifications": {
         "file_renamed": "파일 이름이 변경되었습니다",
@@ -660,6 +736,18 @@
         "minutes_ago": "{{n}}분 전",
         "hours_ago": "{{n}}시간 전",
         "days_ago": "{{n}}일 전",
+        "edit_profile": "프로필 편집",
+        "edit_oidc_managed": "정보(이름, 성, 프로필 사진 등)를 변경하려면 ID 공급자에서 업데이트하세요. 변경 사항은 다음 로그인 시 반영됩니다.",
+        "username_claim_hint": "2~64자, 영문자 / 숫자 / 점 / 하이픈 / 밑줄. 선택한 후에는 사용자 이름을 변경할 수 없습니다(DAV/NextCloud 클라이언트가 이에 의존합니다).",
+        "username_already_claimed": "사용자 이름이 설정되어 있어 변경할 수 없습니다(DAV/NextCloud 클라이언트가 이에 의존합니다).",
+        "given_name": "이름",
+        "family_name": "성",
+        "save_profile": "변경 사항 저장",
+        "profile_saved": "프로필이 업데이트되었습니다",
+        "profile_no_changes": "저장할 변경 사항이 없습니다.",
+        "profile_save_failed": "저장 실패",
+        "username_taken_error": "이미 사용 중인 사용자 이름입니다.",
+        "username_immutable_error": "사용자 이름이 이미 설정되어 있어 여기서 변경할 수 없습니다. 이름을 변경하려면 관리자에게 문의하세요.",
         "change_password": "비밀번호 변경",
         "current_password": "현재 비밀번호",
         "new_password": "새 비밀번호",
@@ -675,12 +763,84 @@
         "error_label_required": "라벨을 입력하세요",
         "error_create_pw": "앱 비밀번호 생성 실패",
         "confirm_revoke": "앱 비밀번호 \"{{label}}\"을(를) 취소하시겠습니까? 이 비밀번호를 사용하는 클라이언트가 작동하지 않게 됩니다.",
-        "error_revoke": "취소 실패"
+        "error_revoke": "취소 실패",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "업로드 중...",
         "files": "파일",
         "complete": "{{count}} / {{total}} 업로드됨"
     },
-    "storage_quota_exceeded": "저장 공간 할당량 초과"
+    "storage_quota_exceeded": "저장 공간 할당량 초과",
+    "sharedwithme": {
+        "pageTitle": "나와 공유됨",
+        "pageDescription": "다른 사용자가 나와 공유한 파일 및 폴더",
+        "emptyStateTitle": "아직 공유된 항목이 없습니다",
+        "emptyStateDesc": "다른 사용자가 공유한 항목이 여기에 표시됩니다",
+        "loadMore": "더 불러오기",
+        "sharedBy": "공유한 사람",
+        "colName": "이름",
+        "colType": "유형",
+        "colSharedBy": "공유한 사람",
+        "colDate": "공유 날짜",
+        "colPermissions": "권한"
+    },
+    "groupby": {
+        "none": "없음",
+        "title": "그룹화 기준",
+        "owner": "소유자",
+        "shareDate": "공유 날짜",
+        "type": "유형",
+        "type.folders": "폴더",
+        "accessedAt": "접근 날짜",
+        "modifiedAt": "수정 날짜",
+        "createdAt": "생성 날짜",
+        "size": "크기",
+        "favoriteDate": "즐겨찾기 날짜",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "오늘",
+        "last7days": "최근 7일",
+        "last30days": "최근 30일"
+    },
+    "groups": {
+        "title": "그룹 관리",
+        "create_button": "그룹 생성",
+        "create_dialog_title": "새 그룹",
+        "edit_dialog_title": "그룹 이름 변경",
+        "name_label": "이름",
+        "name_placeholder": "engineering",
+        "description_label": "설명(선택사항)",
+        "members_section": "구성원",
+        "add_member_placeholder": "사용자 또는 그룹 추가…",
+        "no_members": "아직 구성원이 없습니다.",
+        "remove_member": "제거",
+        "delete_group": "그룹 삭제",
+        "delete_confirm": "\"{name}\" 그룹을 삭제하시겠습니까? 이 그룹을 참조하는 모든 권한이 해제됩니다.",
+        "empty_state": "아직 그룹이 없습니다.",
+        "load_more": "더 보기",
+        "back_to_list": "뒤로",
+        "loading": "로딩 중…",
+        "virtual_badge": "시스템",
+        "member_count_zero": "구성원 없음",
+        "member_count_one": "구성원 1명",
+        "member_count_other": "구성원 {count}명",
+        "delete_confirm_label": "확인을 위해 그룹 이름을 입력하세요:",
+        "delete_confirm_mismatch": "확인을 위해 그룹 이름을 정확히 입력하세요.",
+        "virtual_internal_name": "내부"
+    }
 }

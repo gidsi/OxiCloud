@@ -91,11 +91,25 @@ pub trait UserStoragePort: Send + Sync + 'static {
         usage_bytes: i64,
     ) -> Result<(), DomainError>;
 
-    /// Lists users with pagination
-    async fn list_users(&self, limit: i64, offset: i64) -> Result<Vec<User>, DomainError>;
+    /// Lists users with pagination. `include_external` defaults to `false`
+    /// at every call site that surfaces users to other internal users
+    /// (autocomplete, sharee search, etc.); only the admin management UI
+    /// passes `true`. See [`UserRepository::list_users`] for the rationale.
+    async fn list_users(
+        &self,
+        limit: i64,
+        offset: i64,
+        include_external: bool,
+    ) -> Result<Vec<User>, DomainError>;
 
     /// Searches users by username or email (SQL ILIKE) with a limit.
-    async fn search_users(&self, query: &str, limit: i64) -> Result<Vec<User>, DomainError>;
+    /// See [`list_users`] for the meaning of `include_external`.
+    async fn search_users(
+        &self,
+        query: &str,
+        limit: i64,
+        include_external: bool,
+    ) -> Result<Vec<User>, DomainError>;
 
     /// Lists users by role (e.g., "admin" or "user")
     async fn list_users_by_role(&self, role: &str) -> Result<Vec<User>, DomainError>;
@@ -150,7 +164,21 @@ pub struct OidcIdClaims {
     pub email_verified: Option<bool>,
     pub preferred_username: Option<String>,
     pub name: Option<String>,
+    /// Standard OpenID claim `given_name` (first name). Populated on the
+    /// `User` row at JIT provisioning so the share-modal autocomplete and
+    /// the system address book can surface real names instead of just the
+    /// (often-cryptic) `preferred_username`.
+    pub given_name: Option<String>,
+    /// Standard OpenID claim `family_name` (last name). See `given_name`.
+    pub family_name: Option<String>,
     pub groups: Vec<String>,
+    pub picture: Option<String>,
+    /// Standard OpenID claim `locale` (BCP-47 language tag, e.g.
+    /// `"fr"`, `"zh-TW"`). Populated on the new `User` row at OIDC JIT
+    /// provisioning if the claim resolves against the server's
+    /// `LocaleRegistry`; ignored on subsequent logins so a later
+    /// UI-driven choice isn't overwritten by the IdP.
+    pub locale: Option<String>,
 }
 
 /// Port for OIDC operations — implemented in infrastructure layer

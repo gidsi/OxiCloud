@@ -1,0 +1,251 @@
+/* ── User Vignette — avatar circle + name inline component ────────────────────
+ *
+ * Reusable component that pairs a coloured initials circle with a display
+ * name resolved asynchronously.  Used in:
+ *  • Owner column (list view, SharedWithMe & Favorites sections)
+ *  • ShareModal member rows, chips, suggestion items
+ *  • User-menu toolbar button and dropdown header (avatar-only mode)
+ *
+ * Sizes: --xs (20 px) · --sm (24 px) · --list (36 px) · --md (32 px)
+ *        --lg (40 px) · --menu (38 px) · --xl (48 px)
+ * Colours: .uv-color-0..4  (applied by JS via _colorIndex(userId) % 5)
+ *
+ * All colours use CSS custom properties — no raw hex / rgb / named values.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.user-vignette {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.user-vignette__avatar {
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    flex-shrink: 0;
+    /* Diameter comes from `--avatar-size`, declared per size variant on
+       the wrapper so the origin badge (a wrapper sibling or an avatar
+       child) can size off the same value. Default fallback is `--sm`. */
+    width: var(--avatar-size, 24px);
+    height: var(--avatar-size, 24px);
+    font-size: 10px;
+    /* Anchor for `__origin--overlay` (the avatar-only-mode badge that
+       sits on the bottom-right corner of the picture). Harmless when
+       no overlay child is present. */
+    position: relative;
+}
+
+.user-vignette__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+/* ── Email mode (showEmail: true) ─────────────────────────────────────────── */
+
+/* Column wrapper used when both name and email are shown. */
+.user-vignette__info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    overflow: hidden;
+    flex: 1;
+}
+
+.user-vignette__email {
+    font-size: 12px;
+    color: var(--color-text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Size variants ─────────────────────────────────────────────────────────── */
+
+/* `--avatar-size` is the single source of truth for the diameter. The
+   `__avatar` element reads it for width/height; the `__origin` badge
+   reads it (via the wrapper's inheritance scope) to scale itself to a
+   fixed proportion of the avatar regardless of variant. The avatar's
+   own `font-size` (used for initials) stays per-variant because the
+   initials-to-avatar ratio is a deliberate design choice, not a fixed
+   fraction. */
+
+.user-vignette--xs {
+    --avatar-size: 20px;
+}
+.user-vignette--xs .user-vignette__avatar {
+    font-size: 9px;
+}
+
+.user-vignette--sm {
+    --avatar-size: 24px;
+}
+.user-vignette--sm .user-vignette__avatar {
+    font-size: 10px;
+}
+
+.user-vignette--list {
+    --avatar-size: 36px;
+}
+.user-vignette--list .user-vignette__avatar {
+    font-size: 13px;
+}
+
+.user-vignette--md {
+    --avatar-size: 32px;
+}
+.user-vignette--md .user-vignette__avatar {
+    font-size: 12px;
+}
+
+.user-vignette--lg {
+    --avatar-size: 40px;
+}
+.user-vignette--lg .user-vignette__avatar {
+    font-size: 15px;
+}
+
+.user-vignette--menu {
+    --avatar-size: 38px;
+}
+.user-vignette--menu .user-vignette__avatar {
+    font-size: 14px;
+}
+
+.user-vignette--xl {
+    --avatar-size: 48px;
+}
+.user-vignette--xl .user-vignette__avatar {
+    font-size: 17px;
+}
+
+/* ── Colour palette ────────────────────────────────────────────────────────── */
+
+/* Colours are shared with the ShareModal avatar palette.
+   Each class maps to a distinct hue via design-token variables.       */
+
+.uv-color-0 {
+    background: var(--color-badge-indigo-bg);
+    color: var(--color-badge-indigo-text);
+}
+
+.uv-color-1 {
+    background: var(--color-badge-green-bg);
+    color: var(--color-badge-green-text);
+}
+
+.uv-color-2 {
+    background: var(--color-badge-orange-bg);
+    color: var(--color-badge-orange-text);
+}
+
+.uv-color-3 {
+    background: var(--color-badge-blue-bg);
+    color: var(--color-badge-blue-text);
+}
+
+.uv-color-4 {
+    background: var(--color-badge-amber-bg);
+    color: var(--color-badge-amber-text);
+}
+
+/* ── Photo rendering ───────────────────────────────────────────────────────── */
+
+/* When a photo is available the JS replaces the initials text with an <img>.
+   The avatar <span> keeps its background color as a fallback while loading.
+   The `:not(.user-vignette__origin)` carve-out excludes the overlay badge
+   (avatar-only mode) which is also an `.oxi-icon` inside `.__avatar`
+   after SVG conversion — without the carve-out it would inherit the
+   100% / 100% sizing and fill the whole circle. */
+.user-vignette__avatar img,
+.user-vignette__avatar .oxi-icon:not(.user-vignette__origin) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    display: block;
+}
+
+/* ── Group variant ──────────────────────────────────────────────────────────
+ * `.user-vignette-group` is built by `components/groupVignette.js`. It reuses
+ * the user-vignette layout + size modifiers (`--xs/sm/md/list/lg/menu/xl`)
+ * so a row built from a group can swap in for a user without layout shift.
+ *
+ * The avatar circle is filled with a neutral surface colour and contains a
+ * `fa-user-group` icon instead of initials/photo. Single hue for every group
+ * (rather than the deterministic palette user avatars use) — this is a quick
+ * visual signal that the row represents a group, not a person.                  */
+
+.user-vignette-group .user-vignette__avatar {
+    background: var(--color-badge-blue-bg);
+    color: var(--color-badge-blue-text);
+}
+
+.user-vignette-group .user-vignette__avatar i {
+    /* Scale the inline-SVG icon (oxi-icon, replaced by icons.js) to fit the
+       circle. The base `<i>` is 1em — adjust so it sits centred with a small
+       padding inside the badge regardless of size modifier. */
+    width: 62%;
+    height: 62%;
+}
+
+.user-vignette-group .user-vignette__avatar .oxi-icon {
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Origin badge (external-user marker) ───────────────────────────────────
+ * Inline-flex sibling rendered to the right of the avatar + name. Shown
+ * ONLY for external users — internal users render the bare vignette
+ * (Ed's "external only" preference: quiet UI for the common case).
+ *
+ * Earlier iterations placed this inside `.__avatar` as an absolute-
+ * positioned corner badge. The corner approach failed once the avatar
+ * showed a user photo — the `<img>` masked the badge out. Pulling it
+ * out to a sibling keeps it visible regardless of avatar content.    */
+
+.user-vignette__origin {
+    flex-shrink: 0;
+    line-height: 1;
+    /* Default (sibling mode, with name): track the avatar's font-size
+       so the badge matches the row's text scale. The overlay mode
+       overrides this below with the explicit 30%-of-avatar-diameter
+       rule. */
+    font-size: 1em;
+}
+
+.user-vignette__origin--external {
+    color: var(--color-warning-orange-text);
+}
+
+/* Avatar-only renders (the user-menu toolbar button is the canonical
+   case) have no sibling row to anchor the badge against. The
+   `--overlay` modifier puts it on the bottom-right corner of the
+   picture at exactly 30% of the avatar diameter, regardless of size
+   variant. `--avatar-size` is declared per variant on the wrapper and
+   inherits to the badge via the cascade. Halo ring lifts the icon off
+   coloured avatars + the user's photo so it stays readable across the
+   palette. */
+.user-vignette__origin--overlay {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    /* `.oxi-icon` (the SVG that replaces the original `<i>`) is
+       `width: 1em; height: 1em`, so font-size IS the rendered size. */
+    font-size: calc(var(--avatar-size, 24px) * 0.3);
+    background: var(--color-bg-surface);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1.5px var(--color-bg-surface);
+}
+
+.user-vignette__origin.hidden {
+    display: none;
+}

@@ -3,23 +3,36 @@
  * Extracted from main.js to keep navigation concerns isolated.
  */
 
+import { applyGroupByMenuState } from '../core/groupBySync.js';
 import { i18n } from '../core/i18n.js';
-import { multiSelect } from '../features/files/multiSelect.js';
+import * as viewPrefs from '../core/viewPrefs.js';
+import { batchToolbar } from '../features/files/batchToolbar.js';
 import { favorites } from '../features/library/favorites.js';
 import { musicView } from '../features/library/music.js';
 import { photosView } from '../features/library/photos.js';
-import { recent } from '../features/library/recent.js';
-import { sharedView } from '../views/shared/sharedView.js';
-import { loadFiles } from './filesView.js';
-import { setActionsBarMode } from './main.js';
+import { grants } from '../model/grants.js';
+import { favoritesView } from '../views/favorites/favoritesView.js';
+import { mySharesView } from '../views/myShares/mySharesView.js';
+import { recentView } from '../views/recent/recentView.js';
+import { sharedWithMeView } from '../views/sharedWithMe/sharedWithMeView.js';
+import { trashView } from '../views/trash/trashView.js';
+import { filesView, loadFiles, refreshSharedBadges } from './filesView.js';
+import { setActionsBarMode, setGroupByView, syncGroupByMenu } from './main.js';
 import { app, appElements } from './state.js';
-import { loadTrashItems } from './trashView.js';
 import { ui } from './ui.js';
 
 /**
  * Sync the hidden class and inline display for the grid/list containers
  * based on the current view preference.
  */
+/**
+ * Restore the grid/list view preference for a section before rendering.
+ * @param {string} section  Matches `app.currentSection` values.
+ */
+function restoreView(section) {
+    app.currentView = viewPrefs.resolveView(section);
+}
+
 function syncViewContainers() {
     const filesList = document.getElementById('files-list');
     const gridViewBtn = document.getElementById('grid-view-btn');
@@ -122,6 +135,7 @@ function getSectionFromNavItem(navItem) {
 export const SECTIONS_MAPPER = {
     files: switchToFilesSection,
     shared: switchToSharedSection,
+    sharedwithme: switchToSharedWithMeSection,
     recent: switchToRecentFilesSection,
     favorites: switchToFavoritesSection,
     trash: switchToTrashSection,
@@ -152,10 +166,33 @@ function setCurrentSection(section) {
         appElements.pageTitle.setAttribute('data-i18n', titleKey);
     }
 
-    // Hide sharedView when switching to any other section
-    if (section !== 'shared' && sharedView) {
-        sharedView.hide();
+    // Hide mySharesView when switching to any other section
+    if (section !== 'shared') {
+        mySharesView.hide();
     }
+
+    // Hide "Load more" button when leaving the sharedwithme section
+    if (section !== 'sharedwithme' && sharedWithMeView) {
+        sharedWithMeView.hide();
+    }
+
+    // Hide favoritesView "Load more" button when leaving the favorites section
+    if (section !== 'favorites' && favoritesView) {
+        favoritesView.hide();
+    }
+
+    // Hide recentView "Load more" button when leaving the recent section
+    if (section !== 'recent' && recentView) {
+        recentView.hide();
+    }
+
+    // Hide trashView "Load more" button when leaving the trash section
+    if (section !== 'trash' && trashView) {
+        trashView.hide();
+    }
+
+    // Reset owner column — sections that need it re-enable it explicitly below.
+    ui.setOwnerColumnVisible(false);
 
     // Hide photosView when switching to any other section
     if (section !== 'photos' && photosView) {
@@ -177,21 +214,60 @@ function switchToSharedSection() {
     const breadcrumb = document.querySelector('.breadcrumb');
     breadcrumb?.classList.add('hidden');
 
-    // Hide actions-bar for shared view
-    setActionsBarMode('hidden');
+    // Show actions-bar with group-by controls only (no grid/list toggle —
+    // MySharesList is always in list mode).
+    setActionsBarMode('shared');
 
-    //reset files view + remove any error
-    ui.resetFilesList();
+    // Populate the group-by dropdown with this section's dimensions.
+    setGroupByView(mySharesView);
+    syncGroupByMenu(mySharesView.groupByDefs);
 
-    // Hide file containers
-    toggleFileContainer(false);
+    // Restore the saved group-by selection in the dropdown.
+    const msPrefs = viewPrefs.load('shared');
+    applyGroupByMenuState(msPrefs.groupBy, msPrefs.reversed);
 
-    // Show shared view
-    sharedView.init().then(() => {
-        sharedView.show();
-    });
+    // Show the files container always in list view — grid is not applicable here.
+    toggleFileContainer(true);
+    app.currentView = 'list';
+    syncViewContainers();
 
-    if (multiSelect) multiSelect.clear();
+    if (batchToolbar) batchToolbar.clear();
+
+    // Load and render items into the files container
+    mySharesView.init();
+}
+
+function switchToSharedWithMeSection() {
+    if (!setCurrentSection('sharedwithme')) return;
+
+    // Hide breadcrumb (only shown in Files view)
+    const breadcrumb = document.querySelector('.breadcrumb');
+    breadcrumb?.classList.add('hidden');
+
+    // Show actions-bar with view toggle (no upload / new-folder in this view)
+    setActionsBarMode('sharedwithme');
+
+    // Populate the group-by dropdown with this section's dimensions.
+    // Must be called AFTER setActionsBarMode() so the selector elements exist.
+    setGroupByView(sharedWithMeView);
+    syncGroupByMenu(sharedWithMeView.groupByDefs);
+
+    // Restore the saved group-by selection in the dropdown.
+    const swmPrefs = viewPrefs.load('sharedwithme');
+    applyGroupByMenuState(swmPrefs.groupBy, swmPrefs.reversed);
+
+    // Show the Owner column — names are resolved async after render.
+    ui.setOwnerColumnVisible(true);
+
+    // Show the standard files container and respect grid/list preference
+    toggleFileContainer(true);
+    restoreView('sharedwithme');
+    syncViewContainers();
+
+    if (batchToolbar) batchToolbar.clear();
+
+    // Load and render items into the files container
+    sharedWithMeView.init();
 }
 
 function switchToFilesSection() {
@@ -199,6 +275,15 @@ function switchToFilesSection() {
 
     // Set actions bar mode
     setActionsBarMode('files', true);
+    setGroupByView(filesView);
+    syncGroupByMenu(filesView.groupByDefs);
+
+    // Restore the saved group-by selection in the dropdown.
+    const filesPrefs = viewPrefs.load('files');
+    applyGroupByMenuState(filesPrefs.groupBy, filesPrefs.reversed);
+
+    // Show owner column in the Files section
+    ui.setOwnerColumnVisible(true);
 
     // Show breadcrumb (only in Files view)
     const breadcrumb = document.querySelector('.breadcrumb');
@@ -208,21 +293,31 @@ function switchToFilesSection() {
     toggleFileContainer(true);
 
     // ensure correct view
+    restoreView('files');
     syncViewContainers();
 
     //reset files view + remove any error
     ui.resetFilesList();
 
-    // Reset to home folder and update breadcrumb
-    app.currentPath = app.userHomeFolderId || '';
-    app.breadcrumbPath = [];
+    // Reset to home folder and update breadcrumb. External users have no
+    // home — leave `currentPath` as the caller set it (e.g. the magic-link
+    // landing's hash context) so loadFiles() doesn't fall through to
+    // `/api/folders//resources`. If `currentPath` is still empty by the
+    // time loadFiles() runs, it self-redirects to /#/sharedwithme.
+    if (!app.isExternalUser) {
+        app.currentPath = app.userHomeFolderId || '';
+        app.breadcrumbPath = [];
+    }
     ui.updateBreadcrumb();
-    if (multiSelect) multiSelect.clear();
+    if (batchToolbar) batchToolbar.clear();
 
-    // temp solution
-    sharedView.loadItems().then(() => {
-        loadFiles();
-    });
+    loadFiles();
+
+    // Refresh outgoing grants in the background and repaint badges once done.
+    // Badges are rendered synchronously from the in-memory cache, so any staleness
+    // from navigating away and back (or starting on a different section) is corrected
+    // without blocking the file list render.
+    grants.fetchOutgoingGrants().then(() => refreshSharedBadges());
 }
 
 function switchToFavoritesSection() {
@@ -230,6 +325,15 @@ function switchToFavoritesSection() {
 
     // Set actions bar mode
     setActionsBarMode('favorites');
+    setGroupByView(favoritesView);
+    syncGroupByMenu(favoritesView.groupByDefs);
+
+    // Restore the saved group-by selection in the dropdown.
+    const favPrefs = viewPrefs.load('favorites');
+    applyGroupByMenuState(favPrefs.groupBy, favPrefs.reversed);
+
+    // Show the Owner column — names are resolved async after render.
+    ui.setOwnerColumnVisible(true);
 
     // Hide breadcrumb (only shown in Files view)
     const breadcrumb = document.querySelector('.breadcrumb');
@@ -239,32 +343,32 @@ function switchToFavoritesSection() {
     toggleFileContainer(true);
 
     // ensure correct view
+    restoreView('favorites');
     syncViewContainers();
 
-    //reset files view + remove any error
-    ui.resetFilesList();
+    if (batchToolbar) batchToolbar.clear();
 
-    if (favorites) {
-        // temp solution
-        sharedView.loadItems().then(() => {
-            favorites.displayFavorites();
-        });
-    } else {
-        console.error('Favorites module not loaded or initialized');
-        ui.showError(`
-                <i class="fas fa-exclamation-circle empty-state-icon error"></i>
-                <p>Error loading the favorites module</p>
-            `);
-    }
+    // Prefetch isFavorite cache in background (non-blocking)
+    favorites.init();
 
-    if (multiSelect) multiSelect.clear();
+    // Load and render via the cursor-paginated view
+    favoritesView.init();
 }
 
 function switchToRecentFilesSection() {
     if (!setCurrentSection('recent')) return;
 
-    // Set actions bar mode
+    // Set actions bar mode with group-by support
     setActionsBarMode('recent');
+    setGroupByView(recentView);
+    syncGroupByMenu(recentView.groupByDefs);
+
+    // Restore the saved group-by selection in the dropdown.
+    const recentPrefs = viewPrefs.load('recent');
+    applyGroupByMenuState(recentPrefs.groupBy, recentPrefs.reversed);
+
+    // Show the Owner column
+    ui.setOwnerColumnVisible(true);
 
     // Hide breadcrumb (only shown in Files view)
     const breadcrumb = document.querySelector('.breadcrumb');
@@ -274,23 +378,12 @@ function switchToRecentFilesSection() {
     toggleFileContainer(true);
 
     // ensure correct view
+    restoreView('recent');
     syncViewContainers();
 
-    //reset files view + remove any error
-    ui.resetFilesList();
+    if (batchToolbar) batchToolbar.clear();
 
-    if (recent) {
-        sharedView.loadItems().then(() => {
-            recent.displayRecentFiles();
-        });
-    } else {
-        console.error('Recent files module not loaded or initialized');
-        ui.showError(`
-                <i class="fas fa-exclamation-circle empty-state-icon error"></i>
-                <p>Error loading the recent module</p>
-            `);
-    }
-    if (multiSelect) multiSelect.clear();
+    recentView.init();
 }
 
 function switchToPhotosSection() {
@@ -313,7 +406,7 @@ function switchToPhotosSection() {
     if (photosView) {
         photosView.show();
     }
-    if (multiSelect) multiSelect.clear();
+    if (batchToolbar) batchToolbar.clear();
 }
 
 function switchToTrashSection() {
@@ -328,17 +421,22 @@ function switchToTrashSection() {
     toggleFileContainer(true);
 
     setActionsBarMode('trash');
+    setGroupByView(trashView);
+    syncGroupByMenu(trashView.groupByDefs);
+    const trashPrefs = viewPrefs.load('trash');
+    applyGroupByMenuState(trashPrefs.groupBy || 'remainingDays', trashPrefs.reversed);
 
     //reset files view + remove any error
     ui.resetFilesList();
 
     //ensure buttons match the current view
+    restoreView('trash');
     syncViewContainers();
 
-    // Load trash items
-    loadTrashItems();
+    // Load trash items (cursor-based view)
+    trashView.init();
 
-    if (multiSelect) multiSelect.clear();
+    if (batchToolbar) batchToolbar.clear();
 }
 
 function switchToMusicSection() {
@@ -365,16 +463,39 @@ function switchToMusicSection() {
     if (musicView) {
         musicView.show();
     }
-    if (multiSelect) multiSelect.clear();
+    if (batchToolbar) batchToolbar.clear();
+}
+
+/**
+ * Activate the Files section UI (nav state, breadcrumb, actions bar,
+ * files container, grid/list sync) WITHOUT resetting `app.currentPath`
+ * or `app.breadcrumbPath`.
+ *
+ * Used by `selectFolder` when the user clicks a folder from a
+ * non-files section (e.g. "Shared with me") so the Files view is
+ * fully set up before the folder content loads.
+ */
+function activateFilesUI() {
+    setCurrentSection('files');
+    setActionsBarMode('files', true);
+    setGroupByView(filesView);
+    syncGroupByMenu(filesView.groupByDefs);
+    const breadcrumb = document.querySelector('.breadcrumb');
+    breadcrumb?.classList.remove('hidden');
+    toggleFileContainer(true);
+    syncViewContainers();
+    if (batchToolbar) batchToolbar.clear();
 }
 
 export {
+    activateFilesUI,
     switchToFavoritesSection,
     switchToFilesSection,
     switchToMusicSection,
     switchToPhotosSection,
     switchToRecentFilesSection,
     switchToSharedSection,
+    switchToSharedWithMeSection,
     switchToTrashSection,
     syncViewContainers
 };

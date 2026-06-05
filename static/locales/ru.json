@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "Эта ссылка для входа больше не действительна",
+                "expired_body": "Срок действия ссылки мог истечь, или она уже была использована. Мы можем отправить вам новую — она придёт в ваш почтовый ящик через несколько секунд.",
+                "resend_to": "Отправить новую ссылку на {{email}}",
+                "generic_unavailable": "Эта ссылка для входа больше не действительна. Возможно, она уже использовалась или срок её действия истёк. Запросите новую ссылку на странице входа.",
+                "service_unavailable": "Вход по magic-ссылке не включён на этом сервере.",
+                "internal_error": "При входе произошла ошибка. Пожалуйста, попробуйте ещё раз.",
+                "resend_failure": "При отправке ссылки произошла ошибка. Пожалуйста, попробуйте ещё раз.",
+                "cross_browser_title": "Продолжить вход на этом устройстве?",
+                "cross_browser_body": "Вы открыли эту ссылку для входа в браузере или на устройстве, отличном от того, где она была запрошена.",
+                "cross_browser_warning": "Если эту ссылку запросили вы, можно безопасно продолжить. В противном случае закройте эту страницу — нажатие «Продолжить» приведёт к входу другого человека в вашу учётную запись.",
+                "cross_browser_continue": "Продолжить и войти",
+                "resend_confirmation_title": "Проверьте ваш почтовый ящик",
+                "resend_confirmation_body": "Если ссылка для входа принадлежала активной учётной записи, новая ссылка только что была отправлена. Пожалуйста, проверьте ваш почтовый ящик.",
+                "return_link": "Вернуться в OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} поделился(ась) с вами {{kind}} в OxiCloud",
+                    "body": "{{inviter}} поделился(ась) с вами {{kind}} в OxiCloud.\n\nОткройте, нажав на ссылку ниже:\n{{link}}\n\nСсылка работает один раз и истекает через {{ttl_hours}} часов.\nЕсли вы не ожидали этого приглашения, можете спокойно проигнорировать это сообщение.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "Вход в OxiCloud",
+                    "body": "Здравствуйте,\n\nИспользуйте ссылку ниже, чтобы войти в OxiCloud. Ссылка работает один раз и истекает через {{ttl_minutes}} минут. Откройте её на том же устройстве, где вы её запросили.\n\n{{link}}\n\nЕсли вы не запрашивали эту ссылку для входа, можете спокойно проигнорировать это сообщение — никаких дальнейших действий не требуется.\n\n— OxiCloud"
+                },
+                "kind_file": "файл",
+                "kind_folder": "папку",
+                "english_fallback_divider": "--- Английская версия ниже ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "Минималистичная система облачного хранения"
@@ -10,7 +43,8 @@
         "favorites": "Избранное",
         "photos": "Фото",
         "music": "Музыка",
-        "trash": "Корзина"
+        "trash": "Корзина",
+        "sharedwithme": "Доступно мне"
     },
     "photos": {
         "empty_state": "Фотографий пока нет",
@@ -125,7 +159,13 @@
         "about_description": "Платформа облачного хранения на Rust с чистой архитектурой. Быстрая, безопасная и конфиденциальная.",
         "admin_panel": "Панель администратора",
         "profile": "Мой профиль",
-        "role_user": "Пользователь"
+        "role_user": "Пользователь",
+        "theme": {
+            "light": "Светлая",
+            "dark": "Тёмная",
+            "auto": "Как в системе"
+        },
+        "manage_groups": "Управление группами"
     },
     "share": {
         "dialogTitle": "Ссылка для обмена",
@@ -269,7 +309,8 @@
             "archive": "Архив",
             "installer": "Установщик",
             "code": "Код"
-        }
+        },
+        "owner": "Владелец"
     },
     "dialogs": {
         "rename_folder": "Переименовать папку",
@@ -329,7 +370,13 @@
         "move_error": "Ошибка перемещения",
         "empty_name": "Имя не может быть пустым",
         "name_exists": "Файл или папка с таким именем уже существует",
-        "generic_error": "Произошла ошибка"
+        "generic_error": "Произошла ошибка",
+        "group_name_invalid": "Имя группы должно соответствовать формату префикса эл. почты (буквы, цифры, точка, дефис, подчёркивание; 1–64 символов).",
+        "group_cycle": "Этот участник создаст циклическую ссылку между группами.",
+        "group_depth_exceeded": "Глубина вложенности превышает допустимый максимум (8).",
+        "group_virtual_immutable": "Группа «Internal» управляется системой и не может быть изменена.",
+        "group_not_found": "Группа не найдена.",
+        "group_name_taken": "Группа с таким именем уже существует."
     },
     "breadcrumb": {
         "home": "Главная"
@@ -339,15 +386,36 @@
         "empty_state": "Корзина пуста",
         "original_location": "Исходное расположение",
         "deleted_date": "Дата удаления",
+        "remaining": "Осталось",
         "actions": "Действия",
         "restore": "Восстановить",
         "delete_permanently": "Удалить навсегда",
-        "empty_confirm": "Вы уверены, что хотите очистить корзину? Все элементы будут удалены навсегда."
+        "empty_confirm": "Вы уверены, что хотите очистить корзину? Все элементы будут удалены навсегда.",
+        "groupby": {
+            "remaining_days": "Осталось дней",
+            "trashed_time": "Время удаления"
+        }
+    },
+    "daysRemaining": {
+        "expired": "Истёк",
+        "today": "Сегодня",
+        "tomorrow": "Завтра",
+        "inDays": "{{count}} дн."
+    },
+    "expiryChip": {
+        "never": "Никогда не истекает",
+        "expired": "Истёк",
+        "today": "Истекает сегодня",
+        "tomorrow": "Истекает завтра",
+        "inDays": "Истекает через {{count}} дн.",
+        "onDate": "Истекает {{date}}"
     },
     "auth": {
         "login_title": "Вход",
         "username": "Имя пользователя",
         "username_placeholder": "Введите имя пользователя",
+        "login_identifier": "Имя пользователя или email",
+        "login_identifier_placeholder": "Введите имя пользователя или email",
         "password": "Пароль",
         "password_placeholder": "Введите пароль",
         "login_button": "Войти",
@@ -378,7 +446,14 @@
         "admin_create_error": "Ошибка создания аккаунта администратора",
         "or": "или",
         "sso_login": "Войти через SSO",
-        "sso_login_provider": "Войти через {{provider}}"
+        "sso_login_provider": "Войти через {{provider}}",
+        "magicLinkHint": "Нет пароля? Введите ваш email, и мы пришлём вам одноразовую ссылку для входа.",
+        "magicLinkEmailLabel": "Адрес электронной почты",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "Отправить ссылку для входа",
+        "magicLinkSent": "Если для этого адреса существует учётная запись, ссылка для входа отправлена. Проверьте входящие.",
+        "magicLinkUnavailable": "Вход по электронной почте недоступен на этом сервере.",
+        "magicLinkNetworkError": "Не удалось подключиться к серверу: {{message}}"
     },
     "storage": {
         "title": "Хранилище",
@@ -428,7 +503,8 @@
         "clear": "Очистить недавние",
         "accessed": "Открыт",
         "empty_state": "Нет недавних файлов",
-        "empty_hint": "Открытые вами файлы будут отображаться здесь"
+        "empty_hint": "Открытые вами файлы будут отображаться здесь",
+        "loadMore": "Загрузить ещё"
     },
     "notifications": {
         "file_renamed": "Файл переименован",
@@ -660,6 +736,18 @@
         "minutes_ago": "{{n}} мин назад",
         "hours_ago": "{{n}} ч назад",
         "days_ago": "{{n}} дн назад",
+        "edit_profile": "Редактировать профиль",
+        "edit_oidc_managed": "Чтобы изменить ваши данные (имя, фамилию, фотографию профиля, …), обновите их у вашего провайдера идентификации. Изменения появятся при следующем входе.",
+        "username_claim_hint": "2–64 символа, буквы / цифры / точка / дефис / подчёркивание. После выбора имя пользователя нельзя изменить (клиенты DAV/NextCloud зависят от него).",
+        "username_already_claimed": "Имя пользователя установлено и не может быть изменено (клиенты DAV/NextCloud зависят от него).",
+        "given_name": "Имя",
+        "family_name": "Фамилия",
+        "save_profile": "Сохранить изменения",
+        "profile_saved": "Профиль обновлён",
+        "profile_no_changes": "Нет изменений для сохранения.",
+        "profile_save_failed": "Не удалось сохранить",
+        "username_taken_error": "Это имя пользователя уже занято.",
+        "username_immutable_error": "Ваше имя пользователя уже установлено и не может быть изменено здесь. Свяжитесь с администратором, если нужно переименовать.",
         "change_password": "Изменить пароль",
         "current_password": "Текущий пароль",
         "new_password": "Новый пароль",
@@ -675,12 +763,84 @@
         "error_label_required": "Введите метку",
         "error_create_pw": "Не удалось создать пароль",
         "confirm_revoke": "Отозвать пароль «{{label}}»? Клиенты перестанут работать.",
-        "error_revoke": "Не удалось отозвать"
+        "error_revoke": "Не удалось отозвать",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "Загрузка...",
         "files": "файлов",
         "complete": "{{count}} / {{total}} загружено"
     },
-    "storage_quota_exceeded": "Превышена квота хранилища"
+    "storage_quota_exceeded": "Превышена квота хранилища",
+    "sharedwithme": {
+        "pageTitle": "Доступно мне",
+        "pageDescription": "Файлы и папки, которые другие пользователи предоставили вам",
+        "emptyStateTitle": "Вам ещё ничего не предоставлено",
+        "emptyStateDesc": "Элементы, которые другие пользователи предоставят вам, появятся здесь",
+        "loadMore": "Загрузить ещё",
+        "sharedBy": "Предоставлено",
+        "colName": "Имя",
+        "colType": "Тип",
+        "colSharedBy": "Предоставлено",
+        "colDate": "Дата предоставления",
+        "colPermissions": "Права"
+    },
+    "groupby": {
+        "none": "Нет",
+        "title": "Группировать по",
+        "owner": "Владелец",
+        "shareDate": "Дата общего доступа",
+        "type": "Тип",
+        "type.folders": "Папки",
+        "accessedAt": "Дата доступа",
+        "modifiedAt": "Дата изменения",
+        "createdAt": "Дата создания",
+        "size": "Размер",
+        "favoriteDate": "Дата добавления в избранное",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "Сегодня",
+        "last7days": "Последние 7 дней",
+        "last30days": "Последние 30 дней"
+    },
+    "groups": {
+        "title": "Управление группами",
+        "create_button": "Создать группу",
+        "create_dialog_title": "Новая группа",
+        "edit_dialog_title": "Переименовать группу",
+        "name_label": "Имя",
+        "name_placeholder": "инженеры",
+        "description_label": "Описание (необязательно)",
+        "members_section": "Участники",
+        "add_member_placeholder": "Добавить пользователя или группу…",
+        "no_members": "Пока нет участников.",
+        "remove_member": "Удалить",
+        "delete_group": "Удалить группу",
+        "delete_confirm": "Удалить группу «{name}»? Все привязанные к ней разрешения будут отозваны.",
+        "empty_state": "Пока нет групп.",
+        "load_more": "Загрузить ещё",
+        "back_to_list": "Назад",
+        "loading": "Загрузка…",
+        "virtual_badge": "Системная",
+        "member_count_zero": "Нет участников",
+        "member_count_one": "1 участник",
+        "member_count_other": "{count} участников",
+        "delete_confirm_label": "Введите имя группы для подтверждения:",
+        "delete_confirm_mismatch": "Введите имя группы точно для подтверждения.",
+        "virtual_internal_name": "Внутренние"
+    }
 }

@@ -13,12 +13,15 @@ pub mod file_handler;
 pub mod folder_handler;
 pub mod grant_handler;
 pub mod i18n_handler;
+pub mod magic_link_handler;
 pub mod music_handler;
 pub mod photos_handler;
 pub mod recent_handler;
 pub mod search_handler;
 pub mod share_handler;
+pub mod subject_group_handler;
 pub mod trash_handler;
+pub mod users_handler;
 pub mod webdav_handler;
 pub mod wopi_handler;
 

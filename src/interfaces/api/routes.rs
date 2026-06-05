@@ -58,9 +58,10 @@ use crate::interfaces::api::handlers::file_handler::{
     delete_file, download_file, get_file_metadata, get_thumbnail, list_files_query,
     move_file_simple, rename_file, upload_file_with_thumbnails, upload_thumbnail,
 };
+#[allow(deprecated)]
 use crate::interfaces::api::handlers::folder_handler::{
     create_folder, delete_folder_with_trash, download_folder_zip, get_folder, list_folder_contents,
-    list_folder_contents_paginated, list_folder_listing, list_root_folders,
+    list_folder_contents_paginated, list_folder_listing, list_folder_resources, list_root_folders,
     list_root_folders_paginated, move_folder, rename_folder,
 };
 use crate::interfaces::api::handlers::i18n_handler::{
@@ -152,6 +153,9 @@ pub fn create_public_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppStat
 /// These routes require authentication when auth is enabled.
 /// Receives the fully-assembled `AppState` and extracts all needed services
 /// from it, avoiding a long parameter list.
+// Legacy folder endpoints (contents, listing) are kept for backward-compat;
+// they are marked #[deprecated] so the OpenAPI spec shows them as deprecated.
+#[allow(deprecated)]
 pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
     // Extract services from the pre-built AppState
     let folder_service = app_state.applications.folder_service_concrete.clone();
@@ -162,7 +166,8 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
     let share_service = app_state.share_service.clone();
     let favorites_service = app_state.favorites_service.clone();
     let recent_service = app_state.recent_service.clone();
-    let authorization = app_state.authorization.clone();
+    // authorization is no longer extracted separately — the grants router now
+    // uses app_state directly so handlers can access all services.
 
     // Initialize the batch operations service
     let mut batch_service_builder = BatchOperationService::default(
@@ -191,6 +196,7 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
             "/{id}/contents/paginated",
             get(list_folder_contents_paginated),
         )
+        .route("/{id}/resources", get(list_folder_resources))
         .route("/{id}/rename", put(rename_folder))
         .route("/{id}/move", put(move_folder))
         .with_state(folder_service.clone());
@@ -299,7 +305,10 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
         Router::new()
     };
 
-    // Create routes for ReBAC grants (/api/grants) — single state: the authz engine.
+    // Create routes for ReBAC grants (/api/grants).
+    // State is Arc<AppState> so that the new list_shared_with_me handler can
+    // access file/folder services. Existing handlers still extract
+    // State<Arc<PgAclEngine>> via the FromRef impl in di.rs.
     let grants_router = {
         use crate::interfaces::api::handlers::grant_handler;
         Router::new()
@@ -308,17 +317,26 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
             .route("/{id}", delete(grant_handler::revoke_grant))
             .route("/role", put(grant_handler::set_role))
             .route("/incoming", get(grant_handler::list_incoming))
+            .route(
+                "/incoming/resources",
+                get(grant_handler::list_shared_with_me),
+            )
             .route("/outgoing", get(grant_handler::list_outgoing))
-            .with_state(authorization.clone())
+            .route("/outgoing/resources", get(grant_handler::list_my_shares))
+            .with_state(app_state.clone())
     };
 
     // Create a router without the i18n routes
     // Create routes for favorites if the service is available
     let favorites_router = if let Some(favorites_service) = favorites_service.clone() {
-        use crate::interfaces::api::handlers::favorites_handler;
+        #[allow(deprecated)]
+        use crate::interfaces::api::handlers::favorites_handler::{
+            self, get_favorites, list_favorites_resources,
+        };
 
         Router::new()
-            .route("/", get(favorites_handler::get_favorites))
+            .route("/", get(get_favorites)) // deprecated — kept for external compat
+            .route("/resources", get(list_favorites_resources))
             .route("/batch", post(favorites_handler::batch_add_favorites))
             .route(
                 "/{item_type}/{item_id}",
@@ -335,10 +353,12 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
 
     // Create routes for recent items if the service is available
     let recent_router = if let Some(recent_service) = recent_service.clone() {
+        #[allow(deprecated)]
         use crate::interfaces::api::handlers::recent_handler;
 
         Router::new()
-            .route("/", get(recent_handler::get_recent_items))
+            .route("/", get(recent_handler::get_recent_items)) // deprecated — kept for external compat
+            .route("/resources", get(recent_handler::list_recent_resources))
             .route(
                 "/{item_type}/{item_id}",
                 post(recent_handler::record_item_access),
@@ -408,13 +428,17 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
     if let Some(_trash_service_ref) = trash_service.clone() {
         tracing::info!("Setting up trash routes for trash view");
 
+        #[allow(deprecated)]
         let trash_router = Router::new()
-            .route("/", get(trash_handler::get_trash_items))
+            // Literal paths first — order matters for axum overlap handling
+            // when a wildcard like /{id} could otherwise capture them.
+            .route("/", get(trash_handler::get_trash_items)) // deprecated — kept for external compat
+            .route("/resources", get(trash_handler::get_trash_resources))
+            .route("/empty", delete(trash_handler::empty_trash))
             .route("/files/{id}", delete(trash_handler::move_file_to_trash))
             .route("/folders/{id}", delete(trash_handler::move_folder_to_trash))
             .route("/{id}/restore", post(trash_handler::restore_from_trash))
             .route("/{id}", delete(trash_handler::delete_permanently))
-            .route("/empty", delete(trash_handler::empty_trash))
             .with_state(app_state.clone());
 
         router = router.nest("/trash", trash_router);
@@ -535,6 +559,21 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
     // Admin settings routes (protected by admin_guard inside the handler)
     let admin_router = admin_handler::admin_routes().with_state(app_state.clone());
     router = router.nest("/admin", admin_router);
+
+    // ReBAC subject-group management. All mutating routes are admin-gated;
+    // /api/groups/search is authenticated-only so the share dialog can list
+    // groups as recipients.
+    let group_router =
+        crate::interfaces::api::handlers::subject_group_handler::subject_group_routes()
+            .with_state(app_state.clone());
+    router = router.nest("/groups", group_router);
+
+    // Per-user profile lookup `/api/users/{id}` — authenticated only,
+    // throttled by a per-caller limiter inside the handler. External
+    // callers are 403'd in the service layer.
+    let users_router = crate::interfaces::api::handlers::users_handler::user_routes()
+        .with_state(app_state.clone());
+    router = router.nest("/users", users_router);
 
     // Transparent compression (gzip + brotli) for all API responses.
     // tower-http negotiates via Accept-Encoding and skips already-compressed

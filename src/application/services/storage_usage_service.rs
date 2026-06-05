@@ -127,7 +127,10 @@ impl StorageUsagePort for StorageUsageService {
         info!("Starting batch update of all users' storage usage");
 
         // Get the list of all users
-        let users = self.user_repository.list_users(1000, 0).await?;
+        // include_external=false — external users carry no storage by
+        // construction (DB CHECK `users_external_no_storage`), so there's
+        // nothing to compute for them.
+        let users = self.user_repository.list_users(1000, 0, false).await?;
 
         let mut update_tasks = Vec::new();
 

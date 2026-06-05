@@ -125,6 +125,38 @@ Never duplicate logic across handlers or services. If the same behaviour is need
 
 This rule prevents drift between layers and ensures every code path goes through the same policy. New service methods that touch a user-scoped resource must take `caller_id: Uuid` and call `authz.require(...)` before any read or mutation.
 
+### Audit logging for denials and rejections
+
+**Every permission denial or auth rejection MUST emit a structured audit log line before returning the error.** Without one, security-relevant outcomes are invisible to operators and incident response loses its primary signal.
+
+The convention:
+
+```rust
+tracing::info!(
+    target: "audit",
+    event = "<domain>.<outcome>",     // e.g. "authz.denied", "auth.login_rejected",
+                                       //      "magic_link.redemption_rejected",
+                                       //      "user_profile.rejected"
+    reason = "<short_key>",            // stable machine-readable key for filtering
+                                       // (e.g. "bad_password", "expired", "no_visibility_path")
+    // …structured fields naming the actors / targets…
+    caller_id = %caller_id,            // or subject_id, user_id, granted_by, etc.
+    target_id = %target_id,            // or resource_id, subject_id, etc.
+    "👮🏻‍♂️ human-readable message: …",  // helpful for live tailing, do not parse
+);
+```
+
+Rules:
+
+- **`target: "audit"`** routes the line to the audit channel (separable from operational `oxicloud::*` debug noise).
+- **`event`** uses the dotted form `<domain>.<verb_past_tense>` and stays stable — log aggregators key off it.
+- **`reason`** is a machine-readable enum-style key. Don't reword across releases. New denial cause → new `reason` value, never repurpose an existing one.
+- **Structured fields** carry every actor/target involved (`caller_id`, `target_id`, `resource_id`, `subject_id`, role, is_external flag, etc.). Request id and client IP come from the request-scope span automatically — don't duplicate them.
+- **Anti-enumeration is preserved.** Returning `NotFound` to the caller while logging the real reason internally is the canonical pattern (e.g. `user_profile.rejected` with `reason = "external_caller_no_relationship"` returns 404, never 403). Operators see the truth; the attacker sees the same response shape regardless of whether the user exists.
+- **Success paths stay quiet** by default — every authorized request would otherwise flood the log. Use `tracing::debug!` with `target: "oxicloud::authz"` (or similar) when a low-volume granted-trace helps debugging. Reserve `tracing::info!(target: "audit", …)` for outcomes worth surfacing in security reviews.
+
+Canonical examples to mirror: `authz.denied` in `application/ports/authorization_ports.rs::require`, `auth.login_rejected` and `magic_link.redemption_rejected` and `user_profile.rejected` in `application/services/auth_application_service.rs`.
+
 # Frontend part
 
 ## Code conventions

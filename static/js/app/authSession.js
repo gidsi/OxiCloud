@@ -3,14 +3,46 @@
  */
 
 import { getCsrfHeaders } from '../core/csrf.js';
-import { loadFiles } from './filesView.js';
+import { i18n } from '../core/i18n.js';
 import { updateStorageUsageDisplay } from './main.js';
 import { app } from './state.js';
 import { ui } from './ui.js';
+import { updateUserMenuData } from './userMenu.js';
 
 /**
  * @import {User} from '../core/types.js'
  */
+
+/**
+ * Apply the server's `preferred_locale` to this browser if it differs
+ * from the currently-active one.
+ *
+ * The page initially renders in whichever locale `i18n.initI18n()`
+ * picked from localStorage / Accept-Language. After `/api/auth/me`
+ * returns we know the user's persisted choice; if this is a fresh
+ * browser (no `oxicloud-locale` in localStorage) or the local copy
+ * drifted (user changed their preference elsewhere), switching here
+ * is what makes "sign in on phone, see UI in the language I picked on
+ * my laptop" work.
+ *
+ * Safeguards:
+ *  - `null` / `undefined` server value means "no preference stored" →
+ *    leave the browser-picked locale alone.
+ *  - When the server value matches the active locale we skip
+ *    `setLocale` entirely to avoid a no-op `translatePage()` flash.
+ *  - `setLocale` itself writes the new value back via PATCH; that's
+ *    benign here (server already agrees) and avoids special-casing
+ *    the call site.
+ *
+ * @param {string|undefined|null} serverLocale
+ */
+function _syncPreferredLocale(serverLocale) {
+    if (!serverLocale) return;
+    if (i18n.getCurrentLocale && i18n.getCurrentLocale() === serverLocale) return;
+    i18n.setLocale(serverLocale).catch((err) => {
+        console.debug('locale: sync from server failed:', err?.message ?? err);
+    });
+}
 
 /**
  *
@@ -39,6 +71,12 @@ async function refreshUserData() {
         console.log('Storage from server: used=', userData.storage_used_bytes, 'quota=', userData.storage_quota_bytes);
 
         localStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+        app.isExternalUser = !!userData.is_external;
+        // PR C: sync the server-stored preferred_locale to this device.
+        // Triggered on every `/api/auth/me` fetch, but `_syncPreferredLocale`
+        // short-circuits when the active locale already matches so we
+        // don't trigger an unnecessary translatePage() pass.
+        _syncPreferredLocale(userData.preferred_locale);
         updateStorageUsageDisplay(userData);
         return userData;
     } catch (error) {
@@ -93,17 +131,20 @@ async function checkAuthentication() {
         console.log('Checking session via /api/auth/me...');
 
         /** @type {User} */
+        /** @type {User} */
         const userData = JSON.parse(localStorage.getItem(USER_DATA_KEY) || '{}');
-        if (userData.username) {
+        // Restore the external-user flag eagerly from cache so the
+        // resolveHomeFolder short-circuit fires before the /api/auth/me
+        // refresh completes. The parse may produce a sparse object on
+        // first load — `is_external` defaulting to falsy is correct
+        // for the internal-user-by-default contract.
+        app.isExternalUser = !!userData.is_external;
+        // Gate on `id` — `username` is optional since PR 16 (users can
+        // sign in with no claimed handle, e.g. magic-link recipients).
+        // The UUID is the canonical signal that we have a populated DTO.
+        if (userData.id) {
             // We have cached user data — render immediately, refresh in background
-            const userInitials = userData.username.substring(0, 2).toUpperCase();
-            document.querySelectorAll('.user-avatar, .user-menu-avatar').forEach((el) => {
-                el.textContent = userInitials;
-            });
-            const menuName = document.getElementById('user-menu-name');
-            const menuEmail = document.getElementById('user-menu-email');
-            if (menuName) menuName.textContent = userData.username;
-            if (menuEmail) menuEmail.textContent = userData.email || '';
+            updateUserMenuData();
 
             updateStorageUsageDisplay(userData);
 
@@ -140,17 +181,27 @@ async function checkAuthentication() {
             await resolveHomeFolder();
             window.dispatchEvent(new CustomEvent('authenticationDone'));
         } else {
-            // No cached user data — must verify session from server
+            // No cached user data — must verify session from server.
+            // This is the first-load path for magic-link redemptions
+            // (cookies set server-side, no prior localStorage).
             console.log('No cached user data, fetching from server');
             try {
                 const freshData = await refreshUserData();
-                if (freshData?.username) {
-                    const userInitials = freshData.username.substring(0, 2).toUpperCase();
-                    document.querySelectorAll('.user-avatar, .user-menu-avatar').forEach((el) => {
-                        el.textContent = userInitials;
-                    });
+                // See the cached-branch comment above: gate on `id`, not
+                // `username`. A magic-link recipient who hasn't claimed
+                // a handle yet returns a valid DTO with `username`
+                // omitted, and treating that as "couldn't retrieve
+                // user data" produced an infinite login → home loop.
+                if (freshData?.id) {
+                    updateUserMenuData();
                     updateStorageUsageDisplay(freshData);
-                    resolveHomeFolder().then(() => loadFiles());
+                    await resolveHomeFolder();
+                    // Defer to the `authenticationDone` listener in main.js
+                    // so the hash-driven section + path init runs in one
+                    // place (was previously a `loadFiles()` here which
+                    // bypassed the hash context and produced
+                    // `/api/folders//resources` for external users).
+                    window.dispatchEvent(new CustomEvent('authenticationDone'));
                 } else {
                     console.warn('Could not retrieve user data, redirecting to login');
                     localStorage.removeItem(USER_DATA_KEY);
@@ -171,6 +222,16 @@ async function checkAuthentication() {
 
 async function resolveHomeFolder() {
     if (app.userHomeFolderId) return;
+    // External users (grant-only recipients) do not own a home folder
+    // by design — see `HomeFolderLifecycleHook::provision_if_needed`
+    // which short-circuits on `is_external`. Skip the fetch + leave
+    // `userHomeFolderId` null so downstream code knows to land them on
+    // /#/sharedwithme instead of /files.
+    if (app.isExternalUser) {
+        console.log('External user — skipping home-folder resolution');
+        app.breadcrumbPath = [];
+        return;
+    }
     try {
         const response = await fetch('/api/folders', {
             credentials: 'same-origin'

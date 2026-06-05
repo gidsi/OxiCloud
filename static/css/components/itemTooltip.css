@@ -1,0 +1,92 @@
+/* ── Item tooltip — "technical sheet" ─────────────────────────────────────── */
+/*                                                                             */
+/* Absolutely overlays `.search-slot` in the top-bar. The search bar stays in  */
+/* place underneath; only the tooltip's opacity is animated, so there is no    */
+/* second element to keep in sync and no display:none flicker between rapid    */
+/* hover transitions. RTL just works (inset:0).                                */
+/*                                                                             */
+/* 3-column CSS grid:  [icon]  [label]  [value]                                */
+/* All values start at the same x position regardless of label width.          */
+
+.path-tooltip {
+    /* Cover the search slot, sit above it (later in DOM order). */
+    position: absolute;
+    inset: 0;
+    /* Opaque background so the search bar underneath is fully masked. */
+    background-color: var(--color-bg-surface);
+
+    display: grid;
+    grid-template-columns: 1em max-content 1fr;
+    column-gap: 0.6em;
+    row-gap: 6px;
+    align-items: center;
+
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+
+    pointer-events: none;
+
+    /* Show instantly. The hide direction (.hidden) overrides this with a
+       1s delay so the tooltip lingers after the mouse leaves an item;
+       rapid item-to-item moves cancel the pending fade before it fires. */
+    opacity: 1;
+    transition: opacity 0.2s ease 0s;
+}
+
+/* Hidden state — override the global `.hidden { display:none !important }`
+   so we can fade with opacity instead of snapping to display:none. */
+.path-tooltip.hidden {
+    display: grid !important;
+    opacity: 0;
+    transition-delay: 1s;
+}
+
+/* Icon column */
+.path-tooltip__icon {
+    color: var(--color-text-faint);
+    font-size: 0.7rem;
+    text-align: center;
+    justify-self: center;
+}
+
+/* Label column */
+.path-tooltip__label {
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.path-tooltip__label::after {
+    content: ":";
+}
+
+/* Value column */
+.path-tooltip__value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+/* Path value uses monospace to read folder separators clearly */
+.path-tooltip__value--path {
+    font-family: monospace;
+}
+
+/* "?" placeholder when data is absent */
+.path-tooltip__value--unknown {
+    color: var(--color-text-faint);
+    font-style: italic;
+}
+
+/* ── Vignette inside tooltip ─────────────────────────────────────────────── */
+/* The vignette name hard-codes 14px; scale it down to match the tooltip.    */
+
+.path-tooltip .user-vignette {
+    overflow: hidden;
+    min-width: 0;
+}
+
+.path-tooltip .user-vignette__name {
+    font-size: 0.75rem;
+}

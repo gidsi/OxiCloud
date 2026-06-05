@@ -1,16 +1,50 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "لم يعد رابط تسجيل الدخول صالحًا",
+                "expired_body": "ربما انتهت صلاحية الرابط أو تم استخدامه بالفعل. يمكننا إرسال رابط جديد لك — سيصل إلى صندوق الوارد خلال ثوانٍ.",
+                "resend_to": "أرسل رابطًا جديدًا إلى {{email}}",
+                "generic_unavailable": "لم يعد رابط تسجيل الدخول صالحًا. ربما تم استخدامه بالفعل أو انتهت صلاحيته. اطلب رابطًا جديدًا من صفحة تسجيل الدخول.",
+                "service_unavailable": "تسجيل الدخول عبر الرابط السحري غير مفعّل على هذا الخادم.",
+                "internal_error": "حدث خطأ أثناء تسجيل الدخول. يُرجى المحاولة مرة أخرى.",
+                "resend_failure": "حدث خطأ أثناء إرسال الرابط. يُرجى المحاولة مرة أخرى.",
+                "cross_browser_title": "هل تريد متابعة تسجيل الدخول على هذا الجهاز؟",
+                "cross_browser_body": "لقد فتحت رابط تسجيل الدخول في متصفح أو جهاز مختلف عن الجهاز الذي طلبته منه.",
+                "cross_browser_warning": "إذا كنت قد طلبت هذا الرابط، فمن الآمن المتابعة. إذا لم تطلبه، أغلق هذه الصفحة — النقر على «متابعة» سيُسجّل دخول شخص آخر إلى حسابك.",
+                "cross_browser_continue": "متابعة وتسجيل الدخول",
+                "resend_confirmation_title": "تحقق من صندوق الوارد",
+                "resend_confirmation_body": "إذا كان رابط تسجيل الدخول ينتمي إلى حساب نشط، فقد تم للتو إرسال رابط جديد. يُرجى التحقق من صندوق الوارد.",
+                "return_link": "العودة إلى OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "شارك {{inviter}} معك {{kind}} على OxiCloud",
+                    "body": "شارك {{inviter}} معك {{kind}} على OxiCloud.\n\nافتحه بالنقر على الرابط أدناه:\n{{link}}\n\nيعمل الرابط مرة واحدة وتنتهي صلاحيته خلال {{ttl_hours}} ساعة.\nإذا لم تكن تتوقع هذه الدعوة، يمكنك تجاهل هذه الرسالة.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "تسجيل الدخول إلى OxiCloud",
+                    "body": "مرحبًا،\n\nاستخدم الرابط أدناه لتسجيل الدخول إلى OxiCloud. يعمل الرابط مرة واحدة وتنتهي صلاحيته خلال {{ttl_minutes}} دقيقة. افتحه على الجهاز نفسه الذي طلبت منه الرابط.\n\n{{link}}\n\nإذا لم تطلب رابط تسجيل الدخول هذا، يمكنك تجاهل هذه الرسالة — لا حاجة لأي إجراء إضافي.\n\n— OxiCloud"
+                },
+                "kind_file": "ملف",
+                "kind_folder": "مجلد",
+                "english_fallback_divider": "--- النسخة الإنجليزية أدناه ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "نظام تخزين سحابي بسيط"
     },
     "nav": {
         "files": "الملفات",
-        "shared": "المشترك",
+        "shared": "مشاركاتي",
         "recent": "الأخيرة",
         "favorites": "المفضلة",
         "photos": "الصور",
         "music": "الموسيقى",
-        "trash": "سلة المهملات"
+        "trash": "سلة المهملات",
+        "sharedwithme": "مشتركة معي"
     },
     "photos": {
         "empty_state": "لا توجد صور بعد",
@@ -125,7 +159,13 @@
         "about_description": "منصة تخزين سحابي مبنية بـ Rust و Clean Architecture. سريعة وآمنة وخاصة.",
         "admin_panel": "لوحة الإدارة",
         "profile": "ملفي الشخصي",
-        "role_user": "مستخدم"
+        "role_user": "مستخدم",
+        "theme": {
+            "light": "فاتح",
+            "dark": "داكن",
+            "auto": "مثل النظام"
+        },
+        "manage_groups": "إدارة المجموعات"
     },
     "share": {
         "dialogTitle": "رابط المشاركة",
@@ -269,7 +309,8 @@
             "archive": "أرشيف",
             "installer": "مثبّت",
             "code": "كود"
-        }
+        },
+        "owner": "المالك"
     },
     "dialogs": {
         "rename_folder": "إعادة تسمية المجلد",
@@ -329,7 +370,13 @@
         "move_error": "خطأ في النقل",
         "empty_name": "لا يمكن أن يكون الاسم فارغاً",
         "name_exists": "ملف أو مجلد بهذا الاسم موجود بالفعل",
-        "generic_error": "حدث خطأ"
+        "generic_error": "حدث خطأ",
+        "group_name_invalid": "يجب أن يتطابق اسم المجموعة مع صيغة بادئة البريد الإلكتروني (حروف، أرقام، نقطة، شرطة، شرطة سفلية؛ 1–64 حرفًا).",
+        "group_cycle": "سينشئ هذا العضو مرجعًا دائريًا بين المجموعات.",
+        "group_depth_exceeded": "تتجاوز عمق التعشيش الحد الأقصى المسموح (8).",
+        "group_virtual_immutable": "مجموعة «Internal» تدار من قبل النظام ولا يمكن تعديلها.",
+        "group_not_found": "المجموعة غير موجودة.",
+        "group_name_taken": "توجد بالفعل مجموعة بهذا الاسم."
     },
     "breadcrumb": {
         "home": "الرئيسية"
@@ -339,15 +386,36 @@
         "empty_state": "سلة المهملات فارغة",
         "original_location": "الموقع الأصلي",
         "deleted_date": "تاريخ الحذف",
+        "remaining": "المتبقي",
         "actions": "الإجراءات",
         "restore": "استعادة",
         "delete_permanently": "حذف نهائياً",
-        "empty_confirm": "هل أنت متأكد أنك تريد تفريغ سلة المهملات؟ سيتم حذف جميع العناصر نهائياً."
+        "empty_confirm": "هل أنت متأكد أنك تريد تفريغ سلة المهملات؟ سيتم حذف جميع العناصر نهائياً.",
+        "groupby": {
+            "remaining_days": "الأيام المتبقية",
+            "trashed_time": "وقت الحذف"
+        }
+    },
+    "daysRemaining": {
+        "expired": "منتهية الصلاحية",
+        "today": "اليوم",
+        "tomorrow": "غدًا",
+        "inDays": "{{count}} يوم"
+    },
+    "expiryChip": {
+        "never": "لا تنتهي الصلاحية",
+        "expired": "منتهية الصلاحية",
+        "today": "تنتهي الصلاحية اليوم",
+        "tomorrow": "تنتهي الصلاحية غدًا",
+        "inDays": "تنتهي الصلاحية خلال {{count}} يوم",
+        "onDate": "تنتهي الصلاحية في {{date}}"
     },
     "auth": {
         "login_title": "تسجيل الدخول",
         "username": "اسم المستخدم",
         "username_placeholder": "أدخل اسم المستخدم",
+        "login_identifier": "اسم المستخدم أو البريد الإلكتروني",
+        "login_identifier_placeholder": "أدخل اسم المستخدم أو البريد الإلكتروني",
         "password": "كلمة المرور",
         "password_placeholder": "أدخل كلمة المرور",
         "login_button": "تسجيل الدخول",
@@ -378,7 +446,14 @@
         "admin_create_error": "خطأ في إنشاء حساب المسؤول",
         "or": "أو",
         "sso_login": "تسجيل الدخول عبر SSO",
-        "sso_login_provider": "تسجيل الدخول عبر {{provider}}"
+        "sso_login_provider": "تسجيل الدخول عبر {{provider}}",
+        "magicLinkHint": "ليس لديك كلمة مرور؟ أدخل بريدك الإلكتروني وسنرسل لك رابط تسجيل دخول لمرة واحدة.",
+        "magicLinkEmailLabel": "عنوان البريد الإلكتروني",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "إرسال رابط تسجيل الدخول",
+        "magicLinkSent": "إذا كان هناك حساب لهذا البريد الإلكتروني، فسيتم إرسال رابط تسجيل الدخول. تحقق من صندوق الوارد.",
+        "magicLinkUnavailable": "تسجيل الدخول عبر البريد الإلكتروني غير متاح على هذا الخادم.",
+        "magicLinkNetworkError": "تعذر الوصول إلى الخادم: {{message}}"
     },
     "storage": {
         "title": "التخزين",
@@ -428,7 +503,8 @@
         "clear": "مسح الأخيرة",
         "accessed": "تم الوصول",
         "empty_state": "لا توجد ملفات حديثة",
-        "empty_hint": "الملفات التي تفتحها ستظهر هنا"
+        "empty_hint": "الملفات التي تفتحها ستظهر هنا",
+        "loadMore": "تحميل المزيد"
     },
     "notifications": {
         "file_renamed": "تمت إعادة تسمية الملف",
@@ -660,6 +736,18 @@
         "minutes_ago": "منذ {{n}} دقيقة",
         "hours_ago": "منذ {{n}} ساعة",
         "days_ago": "منذ {{n}} يوم",
+        "edit_profile": "تعديل الملف الشخصي",
+        "edit_oidc_managed": "لتغيير معلوماتك (الاسم، الاسم الأول، صورة الملف الشخصي، …)، يرجى تحديثها لدى مزود الهوية. ستظهر تغييراتك عند تسجيل الدخول التالي.",
+        "username_claim_hint": "2-64 حرفًا، أحرف / أرقام / نقطة / شرطة / شرطة سفلية. بمجرد الاختيار، لا يمكن تغيير اسم المستخدم (عملاء DAV/NextCloud يعتمدون عليه).",
+        "username_already_claimed": "اسم المستخدم محدد ولا يمكن تغييره (عملاء DAV/NextCloud يعتمدون عليه).",
+        "given_name": "الاسم الأول",
+        "family_name": "اسم العائلة",
+        "save_profile": "حفظ التغييرات",
+        "profile_saved": "تم تحديث الملف الشخصي",
+        "profile_no_changes": "لا توجد تغييرات لحفظها.",
+        "profile_save_failed": "فشل الحفظ",
+        "username_taken_error": "اسم المستخدم هذا مستخدم بالفعل.",
+        "username_immutable_error": "اسم المستخدم الخاص بك محدد بالفعل ولا يمكن تغييره هنا. اتصل بالمسؤول إذا كنت بحاجة إلى إعادة التسمية.",
         "change_password": "تغيير كلمة المرور",
         "current_password": "كلمة المرور الحالية",
         "new_password": "كلمة المرور الجديدة",
@@ -675,12 +763,84 @@
         "error_label_required": "أدخل تسمية",
         "error_create_pw": "فشل إنشاء كلمة المرور",
         "confirm_revoke": "إلغاء كلمة المرور \"{{label}}\"؟ ستتوقف العملاء عن العمل.",
-        "error_revoke": "فشل الإلغاء"
+        "error_revoke": "فشل الإلغاء",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "جارٍ الرفع...",
         "files": "ملفات",
         "complete": "{{count}} / {{total}} تم الرفع"
     },
-    "storage_quota_exceeded": "تجاوز حصة التخزين"
+    "storage_quota_exceeded": "تجاوز حصة التخزين",
+    "sharedwithme": {
+        "pageTitle": "مشترك معي",
+        "pageDescription": "الملفات والمجلدات التي شاركها معك مستخدمون آخرون",
+        "emptyStateTitle": "لم يُشارك معك أي شيء بعد",
+        "emptyStateDesc": "ستظهر هنا العناصر التي يشاركها معك مستخدمون آخرون",
+        "loadMore": "تحميل المزيد",
+        "sharedBy": "مشترك من قِبل",
+        "colName": "الاسم",
+        "colType": "النوع",
+        "colSharedBy": "مشترك من قِبل",
+        "colDate": "تاريخ المشاركة",
+        "colPermissions": "الصلاحيات"
+    },
+    "groupby": {
+        "none": "لا شيء",
+        "title": "التجميع حسب",
+        "owner": "المالك",
+        "shareDate": "تاريخ المشاركة",
+        "type": "النوع",
+        "type.folders": "المجلدات",
+        "accessedAt": "تاريخ الوصول",
+        "modifiedAt": "تاريخ التعديل",
+        "createdAt": "تاريخ الإنشاء",
+        "size": "الحجم",
+        "favoriteDate": "تاريخ المفضلة",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "اليوم",
+        "last7days": "آخر 7 أيام",
+        "last30days": "آخر 30 يومًا"
+    },
+    "groups": {
+        "title": "إدارة المجموعات",
+        "create_button": "إنشاء مجموعة",
+        "create_dialog_title": "مجموعة جديدة",
+        "edit_dialog_title": "إعادة تسمية المجموعة",
+        "name_label": "الاسم",
+        "name_placeholder": "engineering",
+        "description_label": "الوصف (اختياري)",
+        "members_section": "الأعضاء",
+        "add_member_placeholder": "إضافة مستخدم أو مجموعة…",
+        "no_members": "لا يوجد أعضاء بعد.",
+        "remove_member": "إزالة",
+        "delete_group": "حذف المجموعة",
+        "delete_confirm": "حذف المجموعة \"{name}\"؟ سيتم إلغاء الصلاحيات المرتبطة بهذه المجموعة.",
+        "empty_state": "لا توجد مجموعات بعد.",
+        "load_more": "تحميل المزيد",
+        "back_to_list": "رجوع",
+        "loading": "جارٍ التحميل…",
+        "virtual_badge": "النظام",
+        "member_count_zero": "لا يوجد أعضاء",
+        "member_count_one": "عضو واحد",
+        "member_count_other": "{count} أعضاء",
+        "delete_confirm_label": "اكتب اسم المجموعة للتأكيد:",
+        "delete_confirm_mismatch": "اكتب اسم المجموعة كما هو للتأكيد.",
+        "virtual_internal_name": "داخلي"
+    }
 }

@@ -1,0 +1,7 @@
+{{ body }}
+{%- if let Some(en) = english_fallback %}
+
+{{ divider }}
+
+{{ en }}
+{%- endif %}

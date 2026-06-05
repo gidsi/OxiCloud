@@ -1,20 +1,20 @@
 use axum::{
     Router,
     extract::{Json, Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, post, put},
 };
 
 use crate::application::dtos::settings_dto::{
     AdminCreateUserDto, AdminResetPasswordDto, DashboardStatsDto, ListUsersQueryDto,
-    MigrationStateDto, SaveOidcSettingsDto, SaveStorageSettingsDto, StartMigrationDto,
-    TestOidcConnectionDto, TestStorageConnectionDto, UpdateUserActiveDto, UpdateUserQuotaDto,
-    UpdateUserRoleDto, VerifyMigrationDto,
+    MigrationStateDto, SaveOidcSettingsDto, SaveStorageSettingsDto, SendSmtpTestDto, SmtpInfoDto,
+    SmtpTestResultDto, StartMigrationDto, TestOidcConnectionDto, TestStorageConnectionDto,
+    UpdateUserActiveDto, UpdateUserQuotaDto, UpdateUserRoleDto, VerifyMigrationDto,
 };
-use crate::application::ports::auth_ports::TokenServicePort;
 use crate::common::di::AppState;
 use crate::interfaces::errors::AppError;
+use crate::interfaces::middleware::admin::require_admin;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -58,45 +58,22 @@ pub fn admin_routes() -> Router<Arc<AppState>> {
         .route("/settings/registration", put(set_registration_setting))
         // Audio metadata
         .route("/audio/metadata/reextract", post(reextract_audio_metadata))
+        // SMTP diagnostics
+        .route("/smtp/info", get(get_smtp_info))
+        .route("/smtp/test", post(send_smtp_test))
+        // Test-only capture endpoint. The handler short-circuits to 404
+        // when `OXICLOUD_SMTP_MOCK` is off, so production deployments
+        // can route the path freely without leaking inboxes.
+        .route("/smtp/test/captured", get(get_captured_email))
 }
 
 /// Validate JWT and require admin role. Returns (user_id, role).
+///
+/// Thin wrapper over the shared `require_admin` middleware helper so this
+/// handler keeps a stable signature while the implementation lives next to
+/// the new `subject_group_handler` that also needs it.
 async fn admin_guard(state: &AppState, headers: &HeaderMap) -> Result<(Uuid, String), AppError> {
-    let auth = state
-        .auth_service
-        .as_ref()
-        .ok_or_else(|| AppError::internal_error("Auth service not configured"))?;
-
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
-        .or_else(|| {
-            crate::interfaces::api::cookie_auth::extract_cookie_value(
-                headers,
-                crate::interfaces::api::cookie_auth::ACCESS_COOKIE,
-            )
-        })
-        .ok_or_else(|| AppError::unauthorized("Authorization token required"))?;
-
-    let claims = auth
-        .token_service
-        .validate_token(&token)
-        .map_err(|e| AppError::unauthorized(format!("Invalid token: {}", e)))?;
-
-    if claims.role != "admin" {
-        return Err(AppError::new(
-            StatusCode::FORBIDDEN,
-            "Admin access required",
-            "Forbidden",
-        ));
-    }
-
-    Ok((
-        Uuid::parse_str(&claims.sub)
-            .map_err(|_| AppError::internal_error("Invalid user ID in token"))?,
-        claims.role,
-    ))
+    require_admin(state, headers).await
 }
 
 /// GET /api/admin/settings/oidc — get OIDC settings for the admin panel
@@ -108,6 +85,7 @@ async fn admin_guard(state: &AppState, headers: &HeaderMap) -> Result<(Uuid, Str
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_oidc_settings(
@@ -138,6 +116,7 @@ pub async fn get_oidc_settings(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn save_oidc_settings(
@@ -198,6 +177,7 @@ async fn test_oidc_connection(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_storage_settings(
@@ -228,6 +208,7 @@ pub async fn get_storage_settings(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn save_storage_settings(
@@ -288,6 +269,7 @@ async fn test_storage_connection(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_migration_status(
@@ -309,6 +291,7 @@ pub async fn get_migration_status(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn start_migration(
@@ -386,6 +369,7 @@ pub async fn start_migration(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn pause_migration(
@@ -416,6 +400,7 @@ pub async fn pause_migration(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn resume_migration(
@@ -447,6 +432,7 @@ pub async fn resume_migration(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn complete_migration(
@@ -486,6 +472,7 @@ pub async fn complete_migration(
         (status = 403, description = "Admin required"),
         (status = 500, description = "Verification failed")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn verify_migration(
@@ -563,6 +550,7 @@ fn migration_state_to_dto(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn generate_encryption_key(
@@ -619,6 +607,7 @@ fn build_backend_from_config(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_general_settings(
@@ -660,6 +649,7 @@ pub async fn get_general_settings(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_dashboard_stats(
@@ -750,6 +740,7 @@ pub async fn get_dashboard_stats(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn list_users(
@@ -798,6 +789,7 @@ pub async fn list_users(
         (status = 403, description = "Admin required"),
         (status = 404, description = "User not found")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_user(
@@ -834,6 +826,7 @@ pub async fn get_user(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn delete_user(
@@ -883,6 +876,7 @@ pub async fn delete_user(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn update_user_role(
@@ -933,6 +927,7 @@ pub async fn update_user_role(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn update_user_active(
@@ -987,6 +982,7 @@ pub async fn update_user_active(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn update_user_quota(
@@ -1032,6 +1028,7 @@ pub async fn update_user_quota(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn create_user(
@@ -1072,6 +1069,7 @@ pub async fn create_user(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn reset_user_password(
@@ -1121,6 +1119,7 @@ pub async fn reset_user_password(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn get_registration_setting(
@@ -1151,6 +1150,7 @@ pub async fn get_registration_setting(
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Admin required")
     ),
+    security(("bearerAuth" = [])),
     tag = "admin"
 )]
 pub async fn set_registration_setting(
@@ -1214,4 +1214,201 @@ async fn reextract_audio_metadata(
         "processed": result.processed,
         "failed": result.failed,
     })))
+}
+
+// ─────────────────────────────────────────────────────
+// SMTP diagnostics
+// ─────────────────────────────────────────────────────
+//
+// The SMTP backend is configured exclusively via OXICLOUD_SMTP_* env
+// vars (see docs/config/env.md). The admin UI uses these two endpoints
+// purely for diagnostics:
+//   - `get_smtp_info` shows the current runtime config (read-only — no
+//     write endpoint exists; operators edit `.env` and restart).
+//   - `send_smtp_test` sends a hardcoded confirmation mail to a
+//     recipient supplied by the admin, returning the SMTP server's
+//     response so the operator can correlate it with their relay logs.
+
+/// GET /api/admin/smtp/info — read-only view of the running SMTP config.
+#[utoipa::path(
+    get,
+    path = "/api/admin/smtp/info",
+    responses(
+        (status = 200, description = "Current SMTP settings", body = SmtpInfoDto),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Admin required"),
+    ),
+    security(("bearerAuth" = [])),
+    tag = "admin"
+)]
+async fn get_smtp_info(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    admin_guard(&state, &headers).await?;
+
+    let smtp = &state.core.config.smtp;
+    let info = SmtpInfoDto {
+        enabled: smtp.is_enabled() && state.email_sender.is_some(),
+        host: smtp.host.clone(),
+        port: smtp.port,
+        tls: match smtp.tls {
+            crate::common::config::SmtpTlsMode::Starttls => "starttls".to_string(),
+            crate::common::config::SmtpTlsMode::Tls => "tls".to_string(),
+            crate::common::config::SmtpTlsMode::None => "none".to_string(),
+        },
+        from: smtp.from.clone(),
+        user_state: if smtp.user.is_empty() {
+            "<anon>"
+        } else {
+            "<set>"
+        },
+    };
+
+    Ok(Json(info))
+}
+
+/// GET /api/admin/smtp/test/captured?to=<email> — test-only inbox lookup.
+///
+/// Returns the most recently captured outbound message for `to` when
+/// `OXICLOUD_SMTP_MOCK=true`. In production / non-mock mode this
+/// returns 404 to keep the endpoint inert.
+async fn get_captured_email(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(params): Query<CapturedEmailQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    admin_guard(&state, &headers).await?;
+
+    if !std::env::var("OXICLOUD_SMTP_MOCK")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false)
+    {
+        return Err(AppError::not_found(
+            "Capture endpoint is only available when OXICLOUD_SMTP_MOCK=true",
+        ));
+    }
+
+    let recipient = params.to.trim();
+    if recipient.is_empty() {
+        return Err(AppError::bad_request("`to` query parameter is required"));
+    }
+
+    let Some(mock) = state.mock_email_sender.as_ref() else {
+        return Err(AppError::not_found(
+            "Mock sender is not active (set OXICLOUD_SMTP_MOCK=true)",
+        ));
+    };
+
+    match mock.last_for(recipient).await {
+        Some(captured) => Ok(Json((*captured).clone())),
+        None => Err(AppError::not_found(format!(
+            "No captured message for '{}'",
+            recipient
+        ))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CapturedEmailQuery {
+    to: String,
+}
+
+/// POST /api/admin/smtp/test — send a diagnostic email to `dto.to`.
+///
+/// Returns 200 regardless of SMTP outcome; the body's `success` flag
+/// + `code`/`message` (or `error`) tell the frontend what to render.
+/// This keeps SMTP-level failures (4xx/5xx replies, connection
+/// timeouts) as ordinary diagnostic data rather than HTTP errors.
+#[utoipa::path(
+    post,
+    path = "/api/admin/smtp/test",
+    request_body = SendSmtpTestDto,
+    responses(
+        (status = 200, description = "Send attempt completed", body = SmtpTestResultDto),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Admin required"),
+        (status = 503, description = "SMTP not configured"),
+    ),
+    security(("bearerAuth" = [])),
+    tag = "admin"
+)]
+async fn send_smtp_test(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(dto): Json<SendSmtpTestDto>,
+) -> Result<impl IntoResponse, AppError> {
+    let (admin_id, _) = admin_guard(&state, &headers).await?;
+
+    let recipient = dto.to.trim().to_string();
+    if recipient.is_empty() {
+        return Err(AppError::bad_request("Recipient address is required"));
+    }
+
+    let sender = state.email_sender.as_ref().ok_or_else(|| {
+        AppError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SMTP is not configured (set OXICLOUD_SMTP_HOST in .env to enable)",
+            "ServiceUnavailable",
+        )
+    })?;
+
+    let message = crate::application::ports::email_sender::EmailMessage {
+        to: recipient.clone(),
+        subject: "OxiCloud SMTP test".to_string(),
+        text_body: format!(
+            "This is a diagnostic message sent from your OxiCloud instance.\n\
+             \n\
+             If you are reading this, your SMTP relay accepted the message — \
+             outbound email is wired up correctly.\n\
+             \n\
+             Triggered by admin user id {} on {}.\n",
+            admin_id,
+            chrono::Utc::now().to_rfc3339(),
+        ),
+        html_body: None,
+    };
+
+    tracing::info!(
+        target: "audit",
+        event = "smtp.test_send",
+        admin_id = %admin_id,
+        recipient = %recipient,
+    );
+
+    let result = match sender.send(message).await {
+        Ok(outcome) => {
+            tracing::info!(
+                target: "audit",
+                event = "smtp.test_send_ok",
+                admin_id = %admin_id,
+                recipient = %recipient,
+                code = outcome.code,
+                message = %outcome.message,
+            );
+            SmtpTestResultDto {
+                success: true,
+                code: Some(outcome.code),
+                message: Some(outcome.message),
+                error: None,
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "audit",
+                event = "smtp.test_send_failed",
+                admin_id = %admin_id,
+                recipient = %recipient,
+                error = %e.message,
+            );
+            SmtpTestResultDto {
+                success: false,
+                code: None,
+                message: None,
+                error: Some(e.message),
+            }
+        }
+    };
+
+    Ok(Json(result))
 }

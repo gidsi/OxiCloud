@@ -10,12 +10,14 @@ mod dav_principal_pg_repository;
 mod device_code_pg_repository;
 mod favorites_pg_repository;
 pub mod file_metadata_repository;
+mod magic_link_token_pg_repository;
 mod nextcloud_object_id_repository;
 pub mod playlist_pg_repository;
 mod recent_items_pg_repository;
 mod session_pg_repository;
 mod settings_pg_repository;
 mod share_pg_repository;
+mod subject_group_pg_repository;
 mod transaction_utils;
 mod user_pg_repository;
 
@@ -40,6 +42,7 @@ pub use file_blob_read_repository::FileBlobReadRepository;
 pub use file_blob_write_repository::FileBlobWriteRepository;
 pub use file_metadata_repository::FileMetadataRepository;
 pub use folder_db_repository::FolderDbRepository;
+pub use magic_link_token_pg_repository::MagicLinkTokenPgRepository;
 pub use nextcloud_object_id_repository::NextcloudObjectIdRepository;
 pub use playlist_pg_repository::{
     AudioMetadataPgRepository, PlaylistItemPgRepository, PlaylistPgRepository,
@@ -48,6 +51,7 @@ pub use recent_items_pg_repository::RecentItemsPgRepository;
 pub use session_pg_repository::SessionPgRepository;
 pub use settings_pg_repository::SettingsPgRepository;
 pub use share_pg_repository::SharePgRepository;
+pub use subject_group_pg_repository::SubjectGroupPgRepository;
 pub use trash_db_repository::TrashDbRepository;
 pub use user_pg_repository::UserPgRepository;
 

@@ -94,7 +94,11 @@ pub fn extract_client_ip<B>(req: &Request<B>) -> String {
 }
 
 /// Build a rate-limit response with the standard `Retry-After` header.
-fn too_many_requests(retry_after: u64) -> Response {
+///
+/// Public so handlers that do their own (non-middleware) rate checks —
+/// e.g. the email-invite branch of `POST /api/grants`, where the limit
+/// only applies to one subject variant — can return the same shape.
+pub fn too_many_requests(retry_after: u64) -> Response {
     let body = serde_json::json!({
         "error": "Too many requests",
         "retry_after_secs": retry_after,

@@ -2,24 +2,29 @@
  * User menu, profile modal and logout logic
  */
 
+import { createUserVignette } from '../components/userVignette.js';
 import { getCsrfHeaders } from '../core/csrf.js';
 import { formatFileSize, formatQuotaSize } from '../core/formatters.js';
 import { i18n } from '../core/i18n.js';
-import { ui } from './ui.js';
+import { groupsView } from '../views/groups/groupsView.js';
 
 function setupUserMenu() {
     const wrapper = document.getElementById('user-menu-wrapper');
     const avatarBtn = document.getElementById('user-avatar-btn');
     const menu = document.getElementById('user-menu');
     const logoutBtn = document.getElementById('user-menu-logout');
-    const themeBtn = document.getElementById('user-menu-theme');
+    const themeSegmented = document.getElementById('user-menu-theme-segmented');
     const aboutBtn = document.getElementById('user-menu-about');
     const adminBtn = document.getElementById('user-menu-admin');
+    const groupsBtn = document.getElementById('user-menu-groups');
     const adminDivider = document.getElementById('user-menu-admin-divider');
     const profileBtn = document.getElementById('user-menu-profile');
     const roleBadge = document.getElementById('user-menu-role-badge');
 
     if (!wrapper || !avatarBtn || !menu) return;
+
+    // Populate avatar and name immediately from localStorage on every page load.
+    updateUserMenuData();
 
     avatarBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -38,6 +43,12 @@ function setupUserMenu() {
             const isAdmin = userData.role === 'admin';
             if (adminBtn) {
                 isAdmin ? adminBtn.classList.remove('hidden') : adminBtn.classList.add('hidden');
+            }
+            if (groupsBtn) {
+                // v1: admin-only. v2 will broaden to "has any manageable
+                // group" — change the right-hand side here without touching
+                // anything else.
+                isAdmin ? groupsBtn.classList.remove('hidden') : groupsBtn.classList.add('hidden');
             }
             if (adminDivider) {
                 isAdmin ? adminDivider.classList.remove('hidden') : adminDivider.classList.add('hidden');
@@ -61,53 +72,49 @@ function setupUserMenu() {
         });
     }
 
-    if (themeBtn) {
-        const pill = document.getElementById('theme-toggle-pill');
-
-        // Sync pill UI with current theme state
-        function syncThemePill() {
-            const isDark = localStorage.getItem('oxicloud_theme') === 'dark';
-            if (pill) {
-                if (isDark) {
-                    pill.classList.add('active');
-                } else {
-                    pill.classList.remove('active');
-                }
-            }
-            // Ensure document theme matches localStorage
-            if (isDark) {
-                document.documentElement.setAttribute('data-theme', 'dark');
-            } else {
-                document.documentElement.removeAttribute('data-theme');
-            }
+    if (themeSegmented) {
+        /**
+         * Read the current selection. Returns `'auto'` when no explicit choice
+         * is stored — that's the default and means "follow OS preference".
+         * @returns {'light' | 'dark' | 'auto'}
+         */
+        function currentMode() {
+            const saved = localStorage.getItem('oxicloud_theme');
+            return saved === 'light' || saved === 'dark' ? saved : 'auto';
         }
 
-        // Initialize pill state on load
-        syncThemePill();
-
-        themeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            // Toggle theme based on current state, not pill state
-            const currentIsDark = localStorage.getItem('oxicloud_theme') === 'dark';
-            const newIsDark = !currentIsDark;
-
-            localStorage.setItem('oxicloud_theme', newIsDark ? 'dark' : 'light');
-
-            if (newIsDark) {
-                document.documentElement.setAttribute('data-theme', 'dark');
+        /**
+         * Apply a mode: persist it, stamp the html attribute (or remove it
+         * for 'auto' so CSS `color-scheme: light dark` resolves via OS), and
+         * highlight the matching button.
+         * @param {'light' | 'dark' | 'auto'} mode
+         */
+        function applyMode(mode) {
+            if (mode === 'auto') {
+                localStorage.setItem('oxicloud_theme', 'auto');
+                document.documentElement.removeAttribute('data-color-scheme');
             } else {
-                document.documentElement.removeAttribute('data-theme');
+                localStorage.setItem('oxicloud_theme', mode);
+                document.documentElement.setAttribute('data-color-scheme', mode);
             }
+            themeSegmented.querySelectorAll('.theme-segmented__opt').forEach((b) => {
+                const el = /** @type {HTMLElement} */ (b);
+                const isActive = el.dataset.mode === mode;
+                el.classList.toggle('theme-segmented__opt--active', isActive);
+                el.setAttribute('aria-checked', String(isActive));
+            });
+        }
 
-            if (pill) {
-                if (newIsDark) {
-                    pill.classList.add('active');
-                } else {
-                    pill.classList.remove('active');
-                }
-            }
+        // Initial highlight (theme-init.js already stamped the attribute).
+        applyMode(currentMode());
 
-            ui.showNotification(newIsDark ? '🌙' : '☀️', newIsDark ? 'Dark mode enabled' : 'Light mode enabled');
+        themeSegmented.addEventListener('click', (e) => {
+            const btn = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest('.theme-segmented__opt'));
+            if (!btn) return;
+            e.stopPropagation();
+            const mode = /** @type {'light' | 'dark' | 'auto'} */ (btn.dataset.mode);
+            if (mode !== 'light' && mode !== 'dark' && mode !== 'auto') return;
+            applyMode(mode);
         });
     }
 
@@ -115,6 +122,13 @@ function setupUserMenu() {
         adminBtn.addEventListener('click', () => {
             wrapper.classList.remove('open');
             window.location.href = '/admin';
+        });
+    }
+
+    if (groupsBtn) {
+        groupsBtn.addEventListener('click', () => {
+            wrapper.classList.remove('open');
+            groupsView.open();
         });
     }
 
@@ -156,20 +170,43 @@ function setupUserMenu() {
     fetchAppVersion();
 }
 
+/**
+ * Mount avatar-only vignettes for the toolbar button and the dropdown header.
+ * Called whenever user data in localStorage changes (login, photo save, etc.).
+ *
+ * The toolbar button (#user-avatar-btn) and the menu header (.user-menu-header)
+ * are the stable mount points.  Both receive a fresh vignette each call so
+ * the photo / initials are always in sync with the current localStorage state.
+ *
+ * @param {string} userId
+ */
+function _mountAvatarVignettes(userId) {
+    const avatarBtn = document.getElementById('user-avatar-btn');
+    if (avatarBtn) {
+        avatarBtn.replaceChildren(createUserVignette(userId, 'menu', { showName: false }));
+    }
+
+    const menuHeader = document.querySelector('.user-menu-header');
+    if (menuHeader) {
+        menuHeader.replaceChildren(createUserVignette(userId, 'xl', { showName: true, showEmail: true }));
+    }
+}
+
+/**
+ * @returns {void}
+ */
 function updateUserMenuData() {
     const USER_DATA_KEY = 'oxicloud_user';
+    /** @type {import('../core/types.js').User} */
     const userData = JSON.parse(localStorage.getItem(USER_DATA_KEY) || '{}');
 
-    const nameEl = document.getElementById('user-menu-name');
-    const emailEl = document.getElementById('user-menu-email');
-    const avatarEl = document.getElementById('user-menu-avatar');
     const storageFill = document.getElementById('user-menu-storage-fill');
     const storageText = document.getElementById('user-menu-storage-text');
 
-    if (userData.username) {
-        if (nameEl) nameEl.textContent = userData.username;
-        if (emailEl) emailEl.textContent = userData.email || '';
-        if (avatarEl) avatarEl.textContent = userData.username.substring(0, 2).toUpperCase();
+    // Username is optional (PR 16) — gate on `id` only; the avatar
+    // mount needs the UUID, not the handle.
+    if (userData.id) {
+        _mountAvatarVignettes(userData.id);
     }
 
     const usedBytes = userData.storage_used_bytes || 0;
@@ -202,8 +239,10 @@ async function fetchAppVersion() {
 function showUserProfileModal() {
     const USER_DATA_KEY = 'oxicloud_user';
     const userData = JSON.parse(localStorage.getItem(USER_DATA_KEY) || '{}');
-    const username = userData.username || 'User';
+    // Username is optional (PR 16); fall back to email so usernameless
+    // recipients (magic-link sign-ins) still get a recognizable label.
     const email = userData.email || '';
+    const username = userData.username || email || 'User';
     const role = userData.role || 'user';
     const initials = username.substring(0, 2).toUpperCase();
     const usedBytes = userData.storage_used_bytes || 0;
@@ -287,4 +326,4 @@ async function logout() {
     window.location.href = '/login';
 }
 
-export { logout, setupUserMenu, showUserProfileModal };
+export { logout, setupUserMenu, showUserProfileModal, updateUserMenuData };

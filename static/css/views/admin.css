@@ -970,6 +970,45 @@ details[open] summary {
     color: var(--color-text-heading);
 }
 
+/* Simple two-column "key: value" table used by the SMTP admin panel.
+   Designed for the SMTP-info read-only view where the values
+   (hostnames, full mailboxes, status strings) are too long for the
+   centered stat-card layout above. */
+.smtp-info-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 24px;
+    background: var(--color-bg-hover);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+.smtp-info-table th,
+.smtp-info-table td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+    word-break: break-word;
+}
+.smtp-info-table tr:last-child th,
+.smtp-info-table tr:last-child td {
+    border-bottom: none;
+}
+.smtp-info-table th {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    width: 220px;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.smtp-info-table td {
+    color: var(--color-text-heading);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.95rem;
+}
+
 .storage-backend-selector {
     display: flex;
     gap: 12px;

@@ -5,12 +5,14 @@ use crate::application::ports::auth_ports::{
     OidcIdClaims, OidcServicePort, PasswordHasherPort, SessionStoragePort, TokenServicePort,
     UserStoragePort,
 };
-use crate::application::ports::folder_ports::FolderUseCase;
-use crate::application::services::folder_service::FolderService;
+use crate::application::ports::user_lifecycle::{DeletionMode, LogoutReason};
+use crate::application::services::user_lifecycle_service::UserLifecycleService;
 use crate::common::config::OidcConfig;
 use crate::common::errors::{DomainError, ErrorKind};
+use crate::domain::entities::magic_link_token::{MagicLinkResourceKind, MagicLinkStatus};
 use crate::domain::entities::session::Session;
 use crate::domain::entities::user::{User, UserRole};
+use crate::domain::repositories::magic_link_token_repository::MagicLinkTokenRepository;
 use crate::infrastructure::repositories::pg::SessionPgRepository;
 use crate::infrastructure::repositories::pg::UserPgRepository;
 use crate::infrastructure::services::jwt_service::JwtTokenService;
@@ -37,6 +39,55 @@ pub enum OidcCallbackResult {
         user_id: Uuid,
         username: String,
     },
+}
+
+/// Outcome of a successful magic-link redemption. The auth tokens are
+/// the same shape as a password login; the optional resource fields tell
+/// the handler whether to deep-link to the invited resource or fall back
+/// to the generic `/shared-with-me` landing.
+/// Outcome of a `register` call. The handler maps this to either an
+/// anti-enumerated uniform 200 (when SMTP is available — there's a
+/// "check your email" cover story for the user) or the classic
+/// 201/409 split (when SMTP is unavailable — without the cover story,
+/// uniform responses would just be misleading UX with no security
+/// benefit). Either way the service emits the same audit-log entries.
+#[derive(Debug, Clone)]
+pub enum RegisterResult {
+    /// Boxed to avoid the `large_enum_variant` clippy warning —
+    /// `UserDto` is ~250 bytes, the other variants are zero-sized,
+    /// so a heap-pointer indirection keeps the enum's stack size
+    /// small. `register` is called once per request; the
+    /// allocation cost is negligible.
+    Created(Box<UserDto>),
+    UsernameTaken,
+    EmailTaken,
+}
+
+/// Outcome of a `redeem_magic_link` call (PR 22).
+///
+/// - `Allowed(redemption)` — the token is valid and the browser
+///   binding either matched or was overridden via the user's
+///   explicit cross-browser confirmation. The token has been
+///   atomically marked used.
+/// - `NeedsCrossBrowserConfirm` — the token carries a
+///   `request_challenge` but the incoming cookie didn't match.
+///   The handler should render a confirmation page; the user
+///   clicks Continue and we re-redeem with `cross_browser_confirmed = true`.
+///   The token is NOT marked used yet — it stays redeemable.
+#[derive(Debug)]
+pub enum MagicLinkRedeemResult {
+    /// Boxed to keep the enum's stack size small — `MagicLinkRedemption`
+    /// is ~350 bytes while `NeedsCrossBrowserConfirm` is zero-sized.
+    /// One redemption per request; the heap indirection is negligible.
+    Allowed(Box<MagicLinkRedemption>),
+    NeedsCrossBrowserConfirm,
+}
+
+#[derive(Debug, Clone)]
+pub struct MagicLinkRedemption {
+    pub auth: AuthResponseDto,
+    pub resource_kind: Option<MagicLinkResourceKind>,
+    pub resource_id: Option<Uuid>,
 }
 
 /// Tracks a pending OIDC authorization flow (CSRF + PKCE + nonce)
@@ -71,7 +122,12 @@ pub struct AuthApplicationService {
     session_storage: Arc<SessionPgRepository>,
     password_hasher: Arc<Argon2PasswordHasher>,
     token_service: Arc<JwtTokenService>,
-    folder_service: Option<Arc<FolderService>>,
+    /// Dispatcher for user-lifecycle events. `None` only in tests that don't
+    /// exercise the lifecycle path; production DI always wires this.
+    /// HomeFolderLifecycleHook (registered on this dispatcher) owns the
+    /// per-user folder provisioning that AuthApplicationService used to do
+    /// inline pre-PR 3.
+    user_lifecycle: Option<Arc<UserLifecycleService>>,
     /// Path to the storage directory, used for disk-space–aware quota calculation
     storage_path: PathBuf,
     oidc: RwLock<OidcState>,
@@ -81,6 +137,9 @@ pub struct AuthApplicationService {
     /// Pending one-time token codes for secure token delivery after OIDC callback.
     /// Auto-expires after 60 seconds via moka TTL; max 10 000 entries for DoS protection.
     pending_oidc_tokens: Cache<String, PendingOidcToken>,
+    /// Magic-link token repository — populated when the magic-link feature
+    /// is enabled (PR 8+). `None` means redemption endpoints return 503.
+    magic_link_repo: Option<Arc<dyn MagicLinkTokenRepository>>,
 }
 
 impl AuthApplicationService {
@@ -96,7 +155,7 @@ impl AuthApplicationService {
             session_storage,
             password_hasher,
             token_service,
-            folder_service: None,
+            user_lifecycle: None,
             storage_path,
             oidc: RwLock::new(OidcState {
                 service: None,
@@ -110,7 +169,22 @@ impl AuthApplicationService {
                 .max_capacity(10_000)
                 .time_to_live(Duration::from_secs(60))
                 .build(),
+            magic_link_repo: None,
         }
+    }
+
+    /// Wire the magic-link token repository. Called from the DI factory
+    /// when the magic-link feature is configured. Mirrors the
+    /// `with_oidc` / `with_user_lifecycle` builder pattern.
+    pub fn with_magic_link_repo(mut self, repo: Arc<dyn MagicLinkTokenRepository>) -> Self {
+        self.magic_link_repo = Some(repo);
+        self
+    }
+
+    /// Whether magic-link redemption is wired. Handlers should check this
+    /// before attempting to redeem a token; `false` → return 503.
+    pub fn magic_link_enabled(&self) -> bool {
+        self.magic_link_repo.is_some()
     }
 
     /// Returns the default quota for the given role, capped to the available
@@ -159,9 +233,11 @@ impl AuthApplicationService {
         }
     }
 
-    /// Configures the folder service, needed to create personal folders
-    pub fn with_folder_service(mut self, folder_service: Arc<FolderService>) -> Self {
-        self.folder_service = Some(folder_service);
+    /// Configures the user-lifecycle dispatcher. Wired by the DI factory
+    /// after core services are up. PR 1: only AuditLifecycleHook is
+    /// registered, so calls without this configured silently no-op.
+    pub fn with_user_lifecycle(mut self, lifecycle: Arc<UserLifecycleService>) -> Self {
+        self.user_lifecycle = Some(lifecycle);
         self
     }
 
@@ -216,19 +292,38 @@ impl AuthApplicationService {
         state.service.clone()
     }
 
-    pub async fn register(&self, dto: RegisterDto) -> Result<UserDto, DomainError> {
-        // Check for duplicate user
-        if self
-            .user_storage
-            .get_user_by_username(&dto.username)
-            .await
-            .is_ok()
+    /// Public registration. Returns one of three outcomes:
+    /// - `Created(user)` — a user was actually created
+    /// - `UsernameTaken` / `EmailTaken` — collision; no DB write
+    ///
+    /// The handler decides the HTTP shape based on whether SMTP is
+    /// available (anti-enumeration uniform 200 vs classic 201/409).
+    /// The service emits the same audit-log entries either way — the
+    /// audit channel is the source of truth for the actual outcome.
+    ///
+    /// Real failures (DB error, password too short, etc.) surface as
+    /// `Err`.
+    pub async fn register(&self, dto: RegisterDto) -> Result<RegisterResult, DomainError> {
+        // Username uniqueness (only when a username was supplied — None
+        // is the "claim later" path, multiple NULLs are allowed by the
+        // UNIQUE index per Postgres semantics).
+        if let Some(ref username) = dto.username
+            && self
+                .user_storage
+                .get_user_by_username(username)
+                .await
+                .is_ok()
         {
-            return Err(DomainError::new(
-                ErrorKind::AlreadyExists,
-                "User",
-                format!("User '{}' already exists", dto.username),
-            ));
+            tracing::info!(
+                target: "audit",
+                event = "auth.register",
+                reason = "username_taken",
+                attempted_username = %username,
+                attempted_email = %dto.email,
+                "🛂 register collision: username '{}' already exists",
+                username,
+            );
+            return Ok(RegisterResult::UsernameTaken);
         }
 
         if self
@@ -237,11 +332,15 @@ impl AuthApplicationService {
             .await
             .is_ok()
         {
-            return Err(DomainError::new(
-                ErrorKind::AlreadyExists,
-                "User",
-                format!("Email '{}' is already registered", dto.email),
-            ));
+            tracing::info!(
+                target: "audit",
+                event = "auth.register",
+                reason = "email_taken",
+                attempted_email = %dto.email,
+                "🛂 register collision: email '{}' is already registered",
+                dto.email,
+            );
+            return Ok(RegisterResult::EmailTaken);
         }
 
         // SECURITY: Public registration ALWAYS creates regular users.
@@ -249,42 +348,66 @@ impl AuthApplicationService {
         //   1. The one-time /api/setup endpoint (first boot)
         //   2. The admin panel (admin_create_user)
         let role = UserRole::User;
-
-        // Quota based on role, capped to available disk space
         let quota = self.capped_quota(&role);
 
-        // Validate password length before hashing
-        if dto.password.len() < 8 {
-            return Err(DomainError::new(
+        // Validate password length before hashing — only when one is
+        // supplied. Omitted password means the user opts into the
+        // magic-link bootstrap path.
+        let password_hash = match dto.password {
+            Some(ref pw) => {
+                if pw.len() < 8 {
+                    return Err(DomainError::new(
+                        ErrorKind::InvalidInput,
+                        "User",
+                        "Password must be at least 8 characters long",
+                    ));
+                }
+                Some(self.password_hasher.hash_password(pw).await?)
+            }
+            None => None,
+        };
+
+        let user = User::new(
+            dto.email.clone(),
+            dto.username.clone(),
+            password_hash,
+            None,
+            None,
+            role,
+            quota,
+            false,
+        )
+        .map_err(|e| {
+            DomainError::new(
                 ErrorKind::InvalidInput,
                 "User",
-                "Password must be at least 8 characters long",
-            ));
-        }
-
-        // Hash the password using the infrastructure service
-        let password_hash = self.password_hasher.hash_password(&dto.password).await?;
-
-        // Create user with the pre-generated hash
-        let user = User::new(dto.username.clone(), dto.email, password_hash, role, quota).map_err(
-            |e| {
-                DomainError::new(
-                    ErrorKind::InvalidInput,
-                    "User",
-                    format!("Error creating user: {}", e),
-                )
-            },
-        )?;
+                format!("Error creating user: {}", e),
+            )
+        })?;
 
         // Save user
         let created_user = self.user_storage.create_user(user).await?;
 
-        // Create personal folder for the user
-        self.create_personal_folder(&dto.username, created_user.id())
-            .await;
+        // Lifecycle: HomeFolderLifecycleHook handles personal-folder
+        // creation (was inlined here pre-PR 3); audit log + future
+        // provisioning steps land here too.
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_created(&created_user).await;
+        }
 
-        tracing::info!("User registered: {}", created_user.id());
-        Ok(UserDto::from(created_user))
+        tracing::info!(
+            target: "audit",
+            event = "auth.register",
+            reason = "created",
+            user_id = %created_user.id(),
+            username = %created_user.display_for_audit(),
+            email = %created_user.email(),
+            is_external = false,
+            "🛂 user registered",
+        );
+        Ok(RegisterResult::Created(Box::new(UserDto::from(
+            created_user,
+        ))))
     }
 
     /// Create the first admin user during initial system setup.
@@ -302,11 +425,11 @@ impl AuthApplicationService {
         password: String,
     ) -> Result<UserDto, DomainError> {
         // Validate username
-        if username.len() < 3 || username.len() > 32 {
+        if username.len() < 3 || username.len() > 254 {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "User",
-                "Username must be between 3 and 32 characters".to_string(),
+                "Username must be between 3 and 254 characters".to_string(),
             ));
         }
 
@@ -346,7 +469,17 @@ impl AuthApplicationService {
         let quota = self.capped_quota(&role);
         let password_hash = self.password_hasher.hash_password(&password).await?;
 
-        let user = User::new(username.clone(), email, password_hash, role, quota).map_err(|e| {
+        let user = User::new(
+            email,
+            Some(username.clone()),
+            Some(password_hash),
+            None,
+            None,
+            role,
+            quota,
+            false,
+        )
+        .map_err(|e| {
             DomainError::new(
                 ErrorKind::InvalidInput,
                 "User",
@@ -356,9 +489,13 @@ impl AuthApplicationService {
 
         let created_user = self.user_storage.create_user(user).await?;
 
-        // Create personal folder for the admin
-        self.create_personal_folder(&username, created_user.id())
-            .await;
+        // Lifecycle: notify hooks. PR 3 moves home-folder creation into
+        // HomeFolderLifecycleHook fired here.
+        // Lifecycle: HomeFolderLifecycleHook provisions the admin's
+        // home folder. Audit logs the creation event.
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_created(&created_user).await;
+        }
 
         tracing::info!(
             "Initial admin created via setup: {} ({})",
@@ -369,17 +506,42 @@ impl AuthApplicationService {
     }
 
     pub async fn login(&self, dto: LoginDto) -> Result<AuthResponseDto, DomainError> {
-        // Find user
-        let mut user = self
-            .user_storage
-            .get_user_by_username(&dto.username)
-            .await
-            .map_err(|_| {
-                DomainError::new(ErrorKind::AccessDenied, "Auth", "Invalid credentials")
-            })?;
+        // Dispatch on `@` in the input: presence of `@` means an email
+        // was typed, absence means a username. The two namespaces are
+        // provably disjoint (PR 16 forbids `@` in usernames), so this
+        // is unambiguous — one DB lookup, no fallback chain.
+        let lookup = if dto.username.contains('@') {
+            self.user_storage.get_user_by_email(&dto.username).await
+        } else {
+            self.user_storage.get_user_by_username(&dto.username).await
+        };
+        let mut user = lookup.map_err(|_| {
+            // Audit: unknown-identifier login attempt. Reason key kept
+            // stable so log search can aggregate without parsing the
+            // human-readable message. Caller's client IP + request id
+            // are attached automatically by the request-scope span.
+            tracing::info!(
+                target: "audit",
+                event = "auth.login_rejected",
+                reason = "unknown_user",
+                attempted_username = %dto.username,
+                "🔐 login rejected: no such user '{}'",
+                dto.username,
+            );
+            DomainError::new(ErrorKind::AccessDenied, "Auth", "Invalid credentials")
+        })?;
 
         // Check if user is active
         if !user.is_active() {
+            tracing::info!(
+                target: "audit",
+                event = "auth.login_rejected",
+                reason = "account_deactivated",
+                user_id = %user.id(),
+                username = %user.display_for_audit(),
+                "🔐 login rejected: account deactivated for '{}'",
+                user.display_for_audit(),
+            );
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
                 "Auth",
@@ -387,18 +549,53 @@ impl AuthApplicationService {
             ));
         }
 
-        // Verify password using the injected hasher
-        let is_valid = self
-            .password_hasher
-            .verify_password(&dto.password, user.password_hash())
-            .await?;
-
-        if !is_valid {
+        // Verify password using the injected hasher. If the user has no
+        // password configured (externals, OIDC-only), short-circuit to
+        // "invalid credentials" — the password-login path never accepts
+        // a NULL hash.
+        let Some(hash) = user.password_hash() else {
+            tracing::info!(
+                target: "audit",
+                event = "auth.login_rejected",
+                reason = "no_password",
+                user_id = %user.id(),
+                username = %user.display_for_audit(),
+                "🔐 login rejected: user has no password configured for '{}'",
+                user.display_for_audit(),
+            );
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
                 "Auth",
                 "Invalid credentials",
             ));
+        };
+        let is_valid = self
+            .password_hasher
+            .verify_password(&dto.password, hash)
+            .await?;
+
+        if !is_valid {
+            tracing::info!(
+                target: "audit",
+                event = "auth.login_rejected",
+                reason = "bad_password",
+                user_id = %user.id(),
+                username = %user.display_for_audit(),
+                "🔐 login rejected: bad password for '{}'",
+                user.display_for_audit(),
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Invalid credentials",
+            ));
+        }
+
+        // Lifecycle: dispatch login BEFORE register_login() so hooks
+        // observing `last_login_at().is_none()` see "first ever login"
+        // correctly. See tip #1 in user_lifecycle.rs.
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_login(&user).await;
         }
 
         // Update last login
@@ -432,6 +629,218 @@ impl AuthApplicationService {
         })
     }
 
+    /// Redeem a magic-link token and emit a fresh session in one shot.
+    ///
+    /// The flow:
+    /// 1. Look up the token in the repo. Unknown token → `NotFound`.
+    /// 2. Atomically transition `Pending → Used` via the repo's
+    ///    `mark_used()` (single SQL UPDATE with `WHERE status='pending'`).
+    ///    A second redemption attempt receives `Ok(false)` and is rejected
+    ///    as `AccessDenied`.
+    /// 3. Load the user, verify they're active.
+    /// 4. Dispatch `on_user_login` (so HomeFolderLifecycleHook can
+    ///    safety-net any internal user whose first credential happens
+    ///    to be a magic link — externals short-circuit by `is_external()`).
+    /// 5. Register login + persist + issue session in the same pipeline
+    ///    as password login.
+    ///
+    /// The returned `MagicLinkRedemption` carries the resource target so
+    /// the handler can build the redirect URL.
+    ///
+    /// Returns `ServiceUnavailable` (mapped from `NotImplemented`) when
+    /// the magic-link repo isn't wired — the handler maps that to HTTP 503.
+    ///
+    /// `incoming_challenge` is the value the handler read from the
+    /// browser's `oxicloud_magic_request` cookie (or `None` if absent).
+    /// `cross_browser_confirmed` is `true` when the user has clicked
+    /// through the cross-browser confirmation page (PR 22).
+    pub async fn redeem_magic_link(
+        &self,
+        token: &str,
+        incoming_challenge: Option<&str>,
+        cross_browser_confirmed: bool,
+    ) -> Result<MagicLinkRedeemResult, DomainError> {
+        let repo = self.magic_link_repo.as_ref().ok_or_else(|| {
+            DomainError::new(
+                ErrorKind::NotImplemented,
+                "MagicLink",
+                "magic-link feature is not configured on this server",
+            )
+        })?;
+
+        let mlt = repo.find_by_token(token).await?.ok_or_else(|| {
+            // Audit: unknown / forged magic-link redemption. The first
+            // 8 chars of the bogus token are logged so a recurring
+            // probe pattern is recognisable without dumping the full
+            // secret to the log stream.
+            let token_preview: String = token.chars().take(8).collect();
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.redemption_rejected",
+                reason = "unknown_token",
+                token_prefix = %token_preview,
+                "🔗 magic-link rejected: unknown token (prefix='{}…')",
+                token_preview,
+            );
+            DomainError::new(
+                ErrorKind::NotFound,
+                "MagicLink",
+                "unknown or invalid magic link",
+            )
+        })?;
+
+        // Friendly early-rejection messages. The atomic `mark_used`
+        // below is the canonical single-use guard.
+        if mlt.status() == MagicLinkStatus::Used {
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.redemption_rejected",
+                reason = "already_used",
+                token_id = %mlt.id(),
+                user_id = %mlt.user_id(),
+                "🔗 magic-link rejected: token already used for user {}",
+                mlt.user_id(),
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "MagicLink",
+                "this magic link has already been used",
+            ));
+        }
+        if mlt.is_expired() {
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.redemption_rejected",
+                reason = "expired",
+                token_id = %mlt.id(),
+                user_id = %mlt.user_id(),
+                "🔗 magic-link rejected: token expired for user {}",
+                mlt.user_id(),
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "MagicLink",
+                "this magic link has expired",
+            ));
+        }
+
+        // PR 22 — browser binding for login-via-email tokens. When the
+        // token carries a `request_challenge`, compare it against the
+        // cookie the handler extracted. Mismatch surfaces as a
+        // cross-browser confirmation page (the handler renders the
+        // HTML); the user clicks Continue and we re-enter with
+        // `cross_browser_confirmed = true`. Invitation tokens have no
+        // challenge — they bypass this check entirely (cross-device by
+        // design). The token is NOT marked used on the prompt path —
+        // it stays redeemable for the confirm round-trip.
+        if let Some(expected) = mlt.request_challenge()
+            && !cross_browser_confirmed
+            && incoming_challenge != Some(expected)
+        {
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.cross_browser_prompt",
+                token_id = %mlt.id(),
+                user_id = %mlt.user_id(),
+                incoming_present = incoming_challenge.is_some(),
+                "🔗 magic-link cross-browser: cookie absent or mismatched for user {}",
+                mlt.user_id(),
+            );
+            return Ok(MagicLinkRedeemResult::NeedsCrossBrowserConfirm);
+        }
+
+        let consumed = repo.mark_used(mlt.id()).await?;
+        if !consumed {
+            // Either a concurrent redemption beat us, or the row was
+            // marked expired by the sweeper between our find and update.
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.redemption_rejected",
+                reason = "race_or_swept",
+                token_id = %mlt.id(),
+                user_id = %mlt.user_id(),
+                "🔗 magic-link rejected: lost race to mark_used (user {})",
+                mlt.user_id(),
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "MagicLink",
+                "this magic link has already been used",
+            ));
+        }
+
+        let mut user = self.user_storage.get_user_by_id(mlt.user_id()).await?;
+        if !user.is_active() {
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.redemption_rejected",
+                reason = "account_deactivated",
+                token_id = %mlt.id(),
+                user_id = %user.id(),
+                username = %user.display_for_audit(),
+                "🔗 magic-link rejected: account deactivated for '{}'",
+                user.display_for_audit(),
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Account deactivated",
+            ));
+        }
+
+        // Dispatch BEFORE register_login so hooks observing
+        // `last_login_at().is_none()` see "first ever login" correctly.
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_login(&user).await;
+        }
+        user.register_login();
+        // PR 23: clicking the magic-link IS proof of email control —
+        // stamp the verification (idempotent, preserves the first
+        // timestamp). Applies to both invitation and login-via-email
+        // tokens.
+        user.mark_email_verified();
+        self.user_storage.update_user(user.clone()).await?;
+
+        let access_token = self.token_service.generate_access_token(&user)?;
+        let refresh_token = self.token_service.generate_refresh_token();
+        let session = Session::new(
+            user.id(),
+            refresh_token.clone(),
+            None,
+            None,
+            self.token_service.refresh_token_expiry_days(),
+            Uuid::new_v4(),
+        );
+        self.session_storage.create_session(session).await?;
+
+        tracing::info!(
+            target: "audit",
+            event = "magic_link.redeemed",
+            user_id = %user.id(),
+            username = %user.display_for_audit(),
+            is_external = user.is_external(),
+            resource_kind = ?mlt.resource_kind(),
+            resource_id = ?mlt.resource_id(),
+            cross_browser_confirmed = cross_browser_confirmed,
+        );
+
+        let auth = AuthResponseDto {
+            user: UserDto::from(user),
+            access_token,
+            refresh_token,
+            token_type: "Bearer".to_string(),
+            expires_in: self.token_service.refresh_token_expiry_secs(),
+        };
+
+        Ok(MagicLinkRedeemResult::Allowed(Box::new(
+            MagicLinkRedemption {
+                auth,
+                resource_kind: mlt.resource_kind(),
+                resource_id: mlt.resource_id(),
+            },
+        )))
+    }
+
     /// Verifies username/password credentials without creating a session.
     pub async fn verify_credentials(
         &self,
@@ -454,10 +863,14 @@ impl AuthApplicationService {
             ));
         }
 
-        let is_valid = self
-            .password_hasher
-            .verify_password(password, user.password_hash())
-            .await?;
+        let Some(hash) = user.password_hash() else {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Invalid credentials",
+            ));
+        };
+        let is_valid = self.password_hasher.verify_password(password, hash).await?;
 
         if !is_valid {
             return Err(DomainError::new(
@@ -469,7 +882,7 @@ impl AuthApplicationService {
 
         Ok(crate::application::dtos::user_dto::CurrentUser {
             id: user.id(),
-            username: user.username().to_string(),
+            username: user.username().unwrap_or("").to_string(),
             email: user.email().to_string(),
             role: user.role().to_string(),
         })
@@ -496,6 +909,13 @@ impl AuthApplicationService {
             self.session_storage
                 .revoke_session_family(session.family_id())
                 .await?;
+            // Lifecycle: TokenReused logout — fired once per logical
+            // revoke-family call. PR 4 may refine to per-session firing.
+            if let Some(lc) = &self.user_lifecycle
+                && let Ok(user) = self.user_storage.get_user_by_id(session.user_id()).await
+            {
+                lc.dispatch_logout(user, LogoutReason::TokenReused);
+            }
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
                 "Auth",
@@ -576,6 +996,15 @@ impl AuthApplicationService {
         // Revoke session
         self.session_storage.revoke_session(session.id()).await?;
 
+        // Lifecycle: notify hooks. One extra DB roundtrip per logout
+        // (user load) is acceptable — logout is rare. Failure to load
+        // the user is non-fatal: we already revoked the session.
+        if let Some(lc) = &self.user_lifecycle
+            && let Ok(user) = self.user_storage.get_user_by_id(user_id).await
+        {
+            lc.dispatch_logout(user, LogoutReason::UserInitiated);
+        }
+
         Ok(())
     }
 
@@ -607,9 +1036,16 @@ impl AuthApplicationService {
         }
 
         // Verify current password using the injected hasher
+        let Some(hash) = user.password_hash() else {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Current password is incorrect",
+            ));
+        };
         let is_valid = self
             .password_hasher
-            .verify_password(&dto.current_password, user.password_hash())
+            .verify_password(&dto.current_password, hash)
             .await?;
 
         if !is_valid {
@@ -634,15 +1070,68 @@ impl AuthApplicationService {
             .password_hasher
             .hash_password(&dto.new_password)
             .await?;
-        user.update_password_hash(new_hash);
+        user.update_password_hash(Some(new_hash));
 
         // Save updated user
-        self.user_storage.update_user(user).await?;
+        self.user_storage.update_user(user.clone()).await?;
 
         // Optional: revoke all sessions to force re-login with new password
         self.session_storage
             .revoke_all_user_sessions(user_id)
             .await?;
+
+        // Lifecycle: PasswordChanged logout — fired once per logical
+        // revoke-all call. PR 4 may refine to per-session firing.
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_logout(user, LogoutReason::PasswordChanged);
+        }
+
+        Ok(())
+    }
+
+    /// Update the profile image for a non-OIDC user.
+    pub async fn update_user_image(
+        &self,
+        caller_id: Uuid,
+        image: Option<String>,
+    ) -> Result<(), DomainError> {
+        let user = self.user_storage.get_user_by_id(caller_id).await?;
+
+        if user.is_oidc_user() {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "User",
+                "Avatar is managed by your identity provider and cannot be changed here",
+            ));
+        }
+
+        if let Some(ref img) = image {
+            const MAX_BYTES: usize = 524_288; // 512 KiB
+            if img.len() > MAX_BYTES {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    "Image exceeds maximum allowed size (512 KiB)",
+                ));
+            }
+            let valid = img.starts_with("https://")
+                || img.starts_with("http://")
+                || img.starts_with("data:image/png;base64,")
+                || img.starts_with("data:image/webp;base64,")
+                || img.starts_with("data:image/jpeg;base64,");
+            if !valid {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    "Image must be an https/http URL or a data URI (png, webp, jpeg)",
+                ));
+            }
+        }
+
+        self.user_storage
+            .update_image(caller_id, image)
+            .await
+            .map_err(DomainError::from)?;
 
         Ok(())
     }
@@ -652,9 +1141,333 @@ impl AuthApplicationService {
         Ok(UserDto::from(user))
     }
 
+    /// Apply a profile update on behalf of the calling user (PR 24).
+    ///
+    /// Hard rules:
+    /// - **OIDC users are rejected outright (403)** — their profile
+    ///   fields are owned by the IdP. Mirroring writes here would
+    ///   create silent divergence.
+    /// - **Username is claim-once**: present in `dto` ↔ caller's
+    ///   current username must be `None`. Subsequent attempts are
+    ///   rejected with 409 `UsernameImmutable`. The immutability
+    ///   avoids DAV / NextCloud client breakage (paths include the
+    ///   username as a stable identifier).
+    /// - **Username uniqueness** is enforced on claim against other
+    ///   users (`get_user_by_username`).
+    /// - **Given / family names** are freely settable; passing an
+    ///   empty string is rejected (use no field for "no change").
+    ///
+    /// The method is idempotent on no-op DTOs (all fields absent) and
+    /// emits an `auth.profile_updated` audit line listing which fields
+    /// changed.
+    pub async fn update_profile_with_perms(
+        &self,
+        caller_id: Uuid,
+        dto: crate::application::dtos::user_dto::UpdateProfileDto,
+        locale_registry: &crate::common::locale::LocaleRegistry,
+    ) -> Result<UserDto, DomainError> {
+        let mut user = self.user_storage.get_user_by_id(caller_id).await?;
+
+        if user.is_oidc_user() {
+            tracing::info!(
+                target: "audit",
+                event = "auth.profile_update_rejected",
+                reason = "oidc_user",
+                caller_id = %caller_id,
+                "👤 profile update rejected: caller is OIDC-managed",
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "User",
+                "Your profile is managed by the identity provider and \
+                 cannot be edited here. Update it at the IdP — changes \
+                 will propagate on your next sign-in.",
+            ));
+        }
+
+        let mut changed: Vec<&'static str> = Vec::new();
+
+        // ── Username (claim-once) ──────────────────────────────
+        if let Some(ref candidate) = dto.username {
+            if user.username().is_some() {
+                tracing::info!(
+                    target: "audit",
+                    event = "auth.profile_update_rejected",
+                    reason = "username_immutable",
+                    caller_id = %caller_id,
+                    "👤 profile update rejected: username already claimed",
+                );
+                return Err(DomainError::new(
+                    ErrorKind::AlreadyExists,
+                    "User",
+                    "Username is already claimed and cannot be changed. \
+                     Contact an administrator if you need to rename.",
+                ));
+            }
+            // Uniqueness against other users.
+            if self
+                .user_storage
+                .get_user_by_username(candidate)
+                .await
+                .is_ok()
+            {
+                tracing::info!(
+                    target: "audit",
+                    event = "auth.profile_update_rejected",
+                    reason = "username_taken",
+                    caller_id = %caller_id,
+                    attempted_username = %candidate,
+                    "👤 profile update rejected: username '{}' is taken",
+                    candidate,
+                );
+                return Err(DomainError::new(
+                    ErrorKind::AlreadyExists,
+                    "User",
+                    format!("Username '{}' is already taken", candidate),
+                ));
+            }
+            user.set_username(candidate.clone()).map_err(|e| {
+                DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    format!("Invalid username: {}", e),
+                )
+            })?;
+            changed.push("username");
+        }
+
+        // ── Given / family names ───────────────────────────────
+        if let Some(ref g) = dto.given_name {
+            if g.trim().is_empty() {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    "given_name cannot be an empty string. Omit the field \
+                     to leave it unchanged.",
+                ));
+            }
+            user.set_given_name(Some(g.clone()));
+            changed.push("given_name");
+        }
+        if let Some(ref f) = dto.family_name {
+            if f.trim().is_empty() {
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    "family_name cannot be an empty string. Omit the field \
+                     to leave it unchanged.",
+                ));
+            }
+            user.set_family_name(Some(f.clone()));
+            changed.push("family_name");
+        }
+
+        // ── Preferred locale ─────────────────────────────────────
+        // Treat `""` as an explicit clear (frontend may send the empty
+        // string when the user picks "Use server default"). Any other
+        // non-empty value must resolve against the LocaleRegistry — an
+        // unknown code is a 400 so the client can show the user a
+        // useful error rather than silently dropping the change.
+        if let Some(ref code) = dto.preferred_locale {
+            let trimmed = code.trim();
+            if trimmed.is_empty() {
+                user.set_preferred_locale(None);
+                changed.push("preferred_locale");
+            } else if let Some(canonical) = locale_registry.parse(trimmed) {
+                user.set_preferred_locale(Some(canonical.as_str().to_string()));
+                changed.push("preferred_locale");
+            } else {
+                tracing::info!(
+                    target: "audit",
+                    event = "auth.profile_update_rejected",
+                    reason = "unknown_locale",
+                    caller_id = %caller_id,
+                    attempted_locale = %trimmed,
+                    "👤 profile update rejected: locale '{}' not in registry",
+                    trimmed,
+                );
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    format!(
+                        "Unknown locale '{}'. Use one of the codes returned \
+                         by /api/i18n/locales.",
+                        trimmed,
+                    ),
+                ));
+            }
+        }
+
+        if changed.is_empty() {
+            // No-op — return the current user without a DB write.
+            return Ok(UserDto::from(user));
+        }
+
+        let updated = self.user_storage.update_user(user).await?;
+        tracing::info!(
+            target: "audit",
+            event = "auth.profile_updated",
+            caller_id = %caller_id,
+            fields = ?changed,
+            "👤 profile updated for {}",
+            caller_id,
+        );
+        Ok(UserDto::from(updated))
+    }
+
     // Alias for consistency with handler method
     pub async fn get_user_by_id(&self, user_id: Uuid) -> Result<UserDto, DomainError> {
         self.get_user(user_id).await
+    }
+
+    /// Visibility-checked profile lookup for `GET /api/users/{id}`.
+    ///
+    /// Returns `NotFound` (not `AccessDenied`) when the caller has no
+    /// legitimate relationship with the target — anti-enumeration: an
+    /// attacker probing random UUIDs cannot distinguish "user doesn't
+    /// exist" from "exists but you can't see them".
+    ///
+    /// Visibility rule, evaluated top-to-bottom:
+    ///   1. **Self lookup** — `caller_id == target_id` always succeeds.
+    ///   2. **Shared-grant relationship** — caller and target appear
+    ///      together on at least one row of `storage.access_grants`,
+    ///      either direction (caller-as-granter / target-as-subject,
+    ///      or target-as-granter / caller-as-subject). Applies to both
+    ///      internal and external callers. This is what lets an
+    ///      external user resolve the display name + photo of the
+    ///      internal user who shared a folder with them — the
+    ///      `granted_by` column on the grant Bob received is Alice's
+    ///      user_id, and SharedWithMe needs to render her vignette.
+    ///   3. **External callers stop here.** Any remaining check would
+    ///      let them enumerate the user directory; they have no
+    ///      legitimate need beyond resolving people they're already in
+    ///      a grant relationship with.
+    ///   4. *(Internal callers only)* Target is internal AND
+    ///      `expose_system_users` is on → already broadly visible via
+    ///      the system address book; no extra check.
+    ///   5. *(Internal callers only)* Caller is admin → always visible.
+    ///   6. Anything else → `NotFound`.
+    ///
+    /// Subject-group co-membership is intentionally NOT a visibility
+    /// path in v1; can be added later if a concrete need surfaces.
+    pub async fn get_user_profile(
+        &self,
+        caller_id: Uuid,
+        target_id: Uuid,
+        expose_system_users: bool,
+        pool: &sqlx::PgPool,
+    ) -> Result<UserDto, DomainError> {
+        let caller = self.user_storage.get_user_by_id(caller_id).await?;
+
+        // (1) Self.
+        if caller_id == target_id {
+            return Ok(UserDto::from(caller));
+        }
+
+        // Anti-enumeration: NotFound for everything that doesn't pass.
+        // Convert a real NotFound on `target` to the same anonymous 404,
+        // so existence isn't leaked through differential responses.
+        let target = match self.user_storage.get_user_by_id(target_id).await {
+            Ok(u) => u,
+            Err(e) if e.kind == ErrorKind::NotFound => {
+                tracing::info!(
+                    target: "audit",
+                    event = "user_profile.rejected",
+                    reason = "target_not_found",
+                    caller_id = %caller_id,
+                    caller_is_external = caller.is_external(),
+                    target_id = %target_id,
+                    "👮🏻‍♂️ user-profile rejected: target '{}' does not exist (caller {})",
+                    target_id,
+                    caller_id,
+                );
+                return Err(DomainError::new(
+                    ErrorKind::NotFound,
+                    "User",
+                    "User not found",
+                ));
+            }
+            Err(e) => return Err(e),
+        };
+
+        // (2) Shared-grant relationship — works for both internal and
+        // external callers. LIMIT 1 + the (granted_by) and
+        // (subject_type, subject_id) indexes keep this cheap.
+        let related: Option<i32> = sqlx::query_scalar(
+            r#"
+            SELECT 1
+              FROM storage.access_grants
+             WHERE (granted_by = $1 AND subject_type = 'user' AND subject_id = $2)
+                OR (granted_by = $2 AND subject_type = 'user' AND subject_id = $1)
+             LIMIT 1
+            "#,
+        )
+        .bind(caller_id)
+        .bind(target_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            DomainError::internal_error("UserProfile", format!("visibility query: {}", e))
+        })?;
+
+        if related.is_some() {
+            return Ok(UserDto::from(target));
+        }
+
+        // (3) External callers stop here — no directory enumeration.
+        if caller.is_external() {
+            // Audit: an external user tried to look up someone they
+            // don't share a grant with. Surfaces enumeration probes
+            // from compromised magic-link sessions.
+            tracing::info!(
+                target: "audit",
+                event = "user_profile.rejected",
+                reason = "external_caller_no_relationship",
+                caller_id = %caller_id,
+                target_id = %target_id,
+                target_is_external = target.is_external(),
+                "👮🏻‍♂️ user-profile rejected: external user '{}' has no grant relationship with '{}'",
+                caller_id,
+                target_id,
+            );
+            return Err(DomainError::new(
+                ErrorKind::NotFound,
+                "User",
+                "User not found",
+            ));
+        }
+
+        // (4) Internal target + system-address-book exposed: already public.
+        if !target.is_external() && expose_system_users {
+            return Ok(UserDto::from(target));
+        }
+
+        // (5) Admin caller: always visible.
+        if caller.role() == UserRole::Admin {
+            return Ok(UserDto::from(target));
+        }
+
+        // (6) No relationship — anti-enumeration NotFound.
+        // Audit: an internal user with no visibility path probed a user
+        // they don't share with. Usually benign (stale UI state), but
+        // recurring patterns from the same caller are worth surfacing.
+        tracing::info!(
+            target: "audit",
+            event = "user_profile.rejected",
+            reason = "no_visibility_path",
+            caller_id = %caller_id,
+            target_id = %target_id,
+            target_is_external = target.is_external(),
+            "👮🏻‍♂️ user-profile rejected: internal user '{}' has no visibility on '{}' (target is_external={})",
+            caller_id,
+            target_id,
+            target.is_external(),
+        );
+        Err(DomainError::new(
+            ErrorKind::NotFound,
+            "User",
+            "User not found",
+        ))
     }
 
     // New method to get user by username - needed for admin user handling
@@ -683,13 +1496,30 @@ impl AuthApplicationService {
         Ok(admin_users.len() as i64)
     }
 
+    /// Lists internal users only. External (grant-only) users are filtered
+    /// out so that internal-user surfaces — system address book, OCS
+    /// sharee search, etc. — never expose external identities. Admin
+    /// surfaces that need the full list should call
+    /// [`list_users_including_external`] instead.
     pub async fn list_users(&self, limit: i64, offset: i64) -> Result<Vec<UserDto>, DomainError> {
-        let users = self.user_storage.list_users(limit, offset).await?;
+        let users = self.user_storage.list_users(limit, offset, false).await?;
         Ok(users.into_iter().map(UserDto::from).collect())
     }
 
+    /// Admin-only: lists users including external (grant-only) recipients.
+    /// Used by the admin user-management UI.
+    pub async fn list_users_including_external(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<UserDto>, DomainError> {
+        let users = self.user_storage.list_users(limit, offset, true).await?;
+        Ok(users.into_iter().map(UserDto::from).collect())
+    }
+
+    /// Searches internal users only. See [`list_users`] for the rationale.
     pub async fn search_users(&self, query: &str, limit: i64) -> Result<Vec<UserDto>, DomainError> {
-        let users = self.user_storage.search_users(query, limit).await?;
+        let users = self.user_storage.search_users(query, limit, false).await?;
         Ok(users.into_iter().map(UserDto::from).collect())
     }
 
@@ -703,11 +1533,11 @@ impl AuthApplicationService {
         dto: crate::application::dtos::settings_dto::AdminCreateUserDto,
     ) -> Result<UserDto, DomainError> {
         // Validate username length
-        if dto.username.len() < 3 || dto.username.len() > 32 {
+        if dto.username.len() < 3 || dto.username.len() > 254 {
             return Err(DomainError::new(
                 ErrorKind::InvalidInput,
                 "User",
-                "Username must be between 3 and 32 characters".to_string(),
+                "Username must be between 3 and 254 characters".to_string(),
             ));
         }
 
@@ -755,21 +1585,74 @@ impl AuthApplicationService {
             _ => UserRole::User,
         };
 
-        // Determine quota, capped to available disk space
-        let quota = dto.quota_bytes.unwrap_or_else(|| self.capped_quota(&role));
+        let is_external = dto.is_external.unwrap_or(false);
 
-        // Hash password
+        // Forbid external + admin combo. The DB `users_external_not_admin`
+        // CHECK constraint would catch this too, but a 400 with an
+        // explanatory message is friendlier than a generic 500 from a
+        // constraint violation. See the CHECK definition in
+        // migrations/20260612000002_auth_users_is_external.sql for the
+        // rationale.
+        if is_external && matches!(role, UserRole::Admin) {
+            return Err(DomainError::new(
+                ErrorKind::InvalidInput,
+                "User",
+                "External users cannot be admins. To promote an external user to admin, \
+                 first convert them to internal (set is_external = false), then update \
+                 the role separately."
+                    .to_string(),
+            ));
+        }
+
+        // External users never own storage. The DB `users_external_no_storage`
+        // CHECK constraint enforces this; setting quota=0 here keeps the
+        // domain consistent and matches `User::new(..., is_external = true)`.
+        let quota = if is_external {
+            0
+        } else {
+            dto.quota_bytes.unwrap_or_else(|| self.capped_quota(&role))
+        };
+
+        // Hash password (kept for both internal and external users — for
+        // external users it's currently unused since they authenticate via
+        // magic-link / OIDC, but the DB column is NOT NULL).
         let password_hash = self.password_hasher.hash_password(&dto.password).await?;
 
-        // Create domain entity
-        let user =
-            User::new(dto.username.clone(), email, password_hash, role, quota).map_err(|e| {
-                DomainError::new(
-                    ErrorKind::InvalidInput,
-                    "User",
-                    format!("Error creating user: {}", e),
-                )
-            })?;
+        // Create domain entity. External users are created with
+        // is_external=true and role forced to User (the admin+external
+        // combo was rejected above). For external users the supplied
+        // password hash is persisted so the audit trail is preserved,
+        // even though they authenticate via magic-link / OIDC.
+        let user = if is_external {
+            User::new(
+                email,
+                Some(dto.username.clone()),
+                Some(password_hash),
+                None,
+                None,
+                UserRole::User,
+                0,
+                true,
+            )
+        } else {
+            User::new(
+                email,
+                Some(dto.username.clone()),
+                Some(password_hash),
+                None,
+                None,
+                role,
+                quota,
+                false,
+            )
+        }
+        .map_err(|e| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "User",
+                format!("Error creating user: {}", e),
+            )
+        })?;
 
         // Persist
         let created = self.user_storage.create_user(user).await?;
@@ -781,11 +1664,19 @@ impl AuthApplicationService {
                 .await?;
         }
 
-        // Create personal folder
-        self.create_personal_folder(&dto.username, created.id())
-            .await;
+        // Lifecycle: HomeFolderLifecycleHook handles the home-folder
+        // provisioning (idempotent + short-circuits on is_external).
+        // Audit logs the creation event.
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_created(&created).await;
+        }
 
-        tracing::info!("Admin created user: {} ({})", dto.username, created.id());
+        tracing::info!(
+            "Admin created user: {} ({}, is_external={})",
+            dto.username,
+            created.id(),
+            created.is_external()
+        );
         Ok(UserDto::from(created))
     }
 
@@ -831,12 +1722,51 @@ impl AuthApplicationService {
         Ok(UserDto::from(user))
     }
 
-    /// Delete a user by ID (admin only)
+    /// Delete a user by ID (admin only).
+    ///
+    /// Runs the whole flow in a single transaction so the lifecycle
+    /// hooks (`SessionRevocationLifecycleHook` revoking sessions with
+    /// audit, `AuthzCacheLifecycleHook` invalidating the Moka cache,
+    /// `HomeFolderLifecycleHook` for future trash policy, …) can do
+    /// their work atomically with the user DELETE. If any hook returns
+    /// `Err`, the transaction rolls back and the user remains intact.
     pub async fn delete_user_admin(&self, user_id: Uuid) -> Result<(), DomainError> {
-        // Prevent deleting yourself
         let user = self.user_storage.get_user_by_id(user_id).await?;
-        tracing::info!("Admin deleting user: {} ({})", user.username(), user_id);
-        self.user_storage.delete_user(user_id).await
+        tracing::info!(
+            "Admin deleting user: {} ({})",
+            user.display_for_audit(),
+            user_id
+        );
+
+        let mut tx = self
+            .user_storage
+            .pool()
+            .begin()
+            .await
+            .map_err(|e| DomainError::internal_error("Auth", format!("begin tx: {}", e)))?;
+
+        // Hooks run inside the tx, BEFORE the user DELETE. They see the
+        // row still present and can write cleanup queries against the
+        // same tx (e.g. session revocation with per-session audit).
+        if let Some(lc) = &self.user_lifecycle {
+            lc.dispatch_deleted(&user, DeletionMode::AdminDelete, &mut tx)
+                .await?;
+        }
+
+        // Now the DELETE — FK CASCADE handles the downstream cleanup
+        // (sessions, folders, files, …) for anything the hooks didn't
+        // explicitly remove.
+        sqlx::query("DELETE FROM auth.users WHERE id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DomainError::internal_error("Auth", format!("delete user: {}", e)))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| DomainError::internal_error("Auth", format!("commit: {}", e)))?;
+
+        Ok(())
     }
 
     /// Activate or deactivate a user (admin only)
@@ -1024,6 +1954,7 @@ impl AuthApplicationService {
         &self,
         code: &str,
         state: &str,
+        locale_registry: &crate::common::locale::LocaleRegistry,
     ) -> Result<OidcCallbackResult, DomainError> {
         // 0. Validate CSRF state and retrieve PKCE verifier + nonce + optional NC token
         //    (entry is auto-expired by moka TTL — remove returns None if expired)
@@ -1072,7 +2003,10 @@ impl AuthApplicationService {
                     email: user_info.email.or(claims.email),
                     preferred_username: user_info.preferred_username.or(claims.preferred_username),
                     name: user_info.name.or(claims.name),
+                    given_name: user_info.given_name.or(claims.given_name),
+                    family_name: user_info.family_name.or(claims.family_name),
                     email_verified: user_info.email_verified.or(claims.email_verified),
+                    locale: user_info.locale.or(claims.locale),
                     groups: if user_info.groups.is_empty() {
                         claims.groups
                     } else {
@@ -1128,8 +2062,20 @@ impl AuthApplicationService {
             .await
         {
             Ok(mut existing_user) => {
-                // User exists — update last login
+                // User exists — dispatch login BEFORE register_login() so
+                // hooks observe `last_login_at = None` on the very first
+                // login (see tip #1 in the trait docstring).
+                if let Some(lc) = &self.user_lifecycle {
+                    lc.dispatch_login(&existing_user).await;
+                }
                 existing_user.register_login();
+                existing_user.set_image(claims.picture.clone());
+                // PR 23: retroactive email verification for OIDC users
+                // who predate the column. The OIDC callback already
+                // enforced `claims.email_verified == true` upstream, so
+                // any user reaching this branch has a verified email
+                // by the IdP's word; stamping is safe and idempotent.
+                existing_user.mark_email_verified();
                 self.user_storage.update_user(existing_user.clone()).await?;
                 existing_user
             }
@@ -1206,13 +2152,15 @@ impl AuthApplicationService {
                     username = format!("{}_{}", &username[..username.len().min(27)], suffix);
                 }
 
-                let new_user = User::new_oidc(
-                    username.clone(),
+                let mut new_user = User::new(
                     oidc_email,
+                    Some(username.clone()),
+                    None,
+                    Some(provider_name.clone()),
+                    Some(claims.sub.clone()),
                     role,
                     quota,
-                    provider_name.clone(),
-                    claims.sub.clone(),
+                    false,
                 )
                 .map_err(|e| {
                     DomainError::new(
@@ -1221,12 +2169,40 @@ impl AuthApplicationService {
                         format!("Failed to create OIDC user: {}", e),
                     )
                 })?;
+                new_user.set_image(claims.picture.clone());
+                new_user.set_given_name(claims.given_name.clone());
+                new_user.set_family_name(claims.family_name.clone());
+                // PR C: provision the user's preferred_locale from the
+                // OIDC `locale` claim AT JIT ONLY. Subsequent logins
+                // never re-apply this — a UI-driven choice ("I prefer
+                // English even though my IdP says fr-CA") must not be
+                // silently overwritten on the next sign-in. We validate
+                // the claim against the registry so an obscure or
+                // malformed code (e.g. `klingon`, `fr-FR-x-private`)
+                // doesn't end up stored only to fail at render time;
+                // unresolvable claims fall through to NULL → server
+                // default.
+                if let Some(claim) = claims.locale.as_deref()
+                    && let Some(canonical) = locale_registry.parse(claim)
+                {
+                    new_user.set_preferred_locale(Some(canonical.as_str().to_string()));
+                }
+                // PR 23: the OIDC callback rejected any caller upstream
+                // whose `email_verified` claim wasn't true, so users
+                // reaching this branch have an IdP-vetted email. Stamp
+                // the verification at JIT-create time.
+                new_user.mark_email_verified();
 
                 let created_user = self.user_storage.create_user(new_user).await?;
 
-                // Create personal folder
-                self.create_personal_folder(&username, created_user.id())
-                    .await;
+                // Lifecycle: created (audit + home-folder provisioning) +
+                // login (no register_login() for a fresh OIDC user means
+                // `last_login_at` is naturally None → first-login detection
+                // works). HomeFolderLifecycleHook creates the home folder.
+                if let Some(lc) = &self.user_lifecycle {
+                    lc.dispatch_created(&created_user).await;
+                    lc.dispatch_login(&created_user).await;
+                }
 
                 tracing::info!(
                     "OIDC user provisioned: {} (provider: {}, sub: {})",
@@ -1244,13 +2220,13 @@ impl AuthApplicationService {
             // Nextcloud path: return user info so the handler can mint an
             // app-password and complete the NC login flow.
             tracing::info!(
-                user = %user.username(),
+                user = %user.display_for_audit(),
                 "OIDC login successful for Nextcloud Login Flow v2"
             );
             return Ok(OidcCallbackResult::NextcloudLogin {
                 nc_flow_token: nc_token,
                 user_id: user.id(),
-                username: user.username().to_string(),
+                username: user.username().unwrap_or("").to_string(),
             });
         }
 
@@ -1322,32 +2298,10 @@ impl AuthApplicationService {
         UserRole::User
     }
 
-    /// Helper to create a personal folder for a new user
-    async fn create_personal_folder(&self, username: &str, user_id: Uuid) {
-        if let Some(folder_service) = &self.folder_service {
-            let folder_name = format!("My Folder - {}", username);
-            match folder_service
-                .create_home_folder(user_id, folder_name.clone())
-                .await
-            {
-                Ok(folder) => {
-                    tracing::info!(
-                        "Personal folder created for user {}: {} (ID: {})",
-                        user_id,
-                        folder.name,
-                        folder.id
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to create personal folder for user {}: {}",
-                        user_id,
-                        e
-                    );
-                }
-            }
-        }
-    }
+    // `create_personal_folder` was removed in PR 3 of the
+    // UserLifecycleHook migration — home-folder provisioning is now
+    // owned by `HomeFolderLifecycleHook` in folder_service.rs and runs
+    // via `dispatch_created` / `dispatch_login`.
 }
 
 /// URL-safe base64 encoding without padding (RFC 4648 §5)

@@ -3,6 +3,10 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <!-- Declares the page supports both modes. Switching between them is
+             driven by the CSS `color-scheme` property (via the `data-color-scheme`
+             attribute on <html> set by theme-init.js), not by mutating this tag. -->
+        <meta name="color-scheme" content="light dark" />
         <title>OxiCloud — Admin Panel</title>
         <link rel="icon" type="image/svg+xml" href="/logo/logo-plain.svg">
         <script src="/js/core/theme-init.js"></script>
@@ -56,6 +60,9 @@
                     </button>
                     <button class="admin-tab" id="tab-btn-storage">
                         <i class="fas fa-database"></i> <span data-i18n="admin.tab_storage">Storage</span>
+                    </button>
+                    <button class="admin-tab" id="tab-btn-smtp">
+                        <i class="fas fa-envelope"></i> <span data-i18n="admin.tab_smtp">SMTP</span>
                     </button>
                 </div>
 
@@ -603,6 +610,70 @@
                             <div id="migration-verify-result" style="display:none"></div>
                             <div id="migration-status-msg" class="alert" style="display:none"></div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ════════ SMTP tab ════════ -->
+                <div id="tab-smtp" class="tab-content">
+                    <div class="admin-card">
+                        <h2>
+                            <i class="fas fa-envelope"></i> <span data-i18n="admin.smtp_title">Outbound Email (SMTP)</span>
+                        </h2>
+                        <p class="muted" data-i18n="admin.smtp_intro">
+                            SMTP is configured exclusively via environment variables (OXICLOUD_SMTP_*). The values below are read from the running server — to change them, edit the environment and restart OxiCloud.
+                        </p>
+
+                        <table class="smtp-info-table">
+                            <tbody>
+                                <tr>
+                                    <th data-i18n="admin.smtp_enabled_label">Status</th>
+                                    <td id="smtp-enabled">—</td>
+                                </tr>
+                                <tr>
+                                    <th>OXICLOUD_SMTP_HOST</th>
+                                    <td id="smtp-host">—</td>
+                                </tr>
+                                <tr>
+                                    <th>OXICLOUD_SMTP_PORT</th>
+                                    <td id="smtp-port">—</td>
+                                </tr>
+                                <tr>
+                                    <th>OXICLOUD_SMTP_TLS</th>
+                                    <td id="smtp-tls">—</td>
+                                </tr>
+                                <tr>
+                                    <th>OXICLOUD_SMTP_FROM</th>
+                                    <td id="smtp-from">—</td>
+                                </tr>
+                                <tr>
+                                    <th>OXICLOUD_SMTP_USER</th>
+                                    <td id="smtp-user-state">—</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h3 class="mt-14">
+                            <i class="fas fa-paper-plane"></i> <span data-i18n="admin.smtp_test_title">Send a test email</span>
+                        </h3>
+                        <p class="muted" data-i18n="admin.smtp_test_intro">
+                            Sends a hardcoded diagnostic message to the recipient below and reports the SMTP server's response so you can correlate it with your relay logs.
+                        </p>
+
+                        <div class="form-group">
+                            <label for="smtp-test-to" data-i18n="admin.smtp_test_to">Recipient address</label>
+                            <input
+                                id="smtp-test-to"
+                                type="email"
+                                placeholder="alice@example.com"
+                                autocomplete="off"
+                            />
+                        </div>
+
+                        <button id="btn-smtp-test" class="btn btn-primary">
+                            <i class="fas fa-paper-plane"></i> <span data-i18n="admin.smtp_send_test">Send test email</span>
+                        </button>
+
+                        <div id="smtp-test-result" class="alert" style="display:none; margin-top:14px;"></div>
                     </div>
                 </div>
             </div>

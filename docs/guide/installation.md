@@ -70,6 +70,8 @@ cargo run --release
 `OXICLOUD_DB_CONNECTION_STRING` is the runtime setting read by OxiCloud. `DATABASE_URL` is only needed for SQLx build-time checks.
 
 ## Kubernetes (Helm)
+* Please note the and external postgresql is required (for instance, create it with cncf postgreqsl operator), More information [HERE](https://cloudnative-pg.io/)
+* Please pay attention to pvc name change if you are using this charte with an already existing installation, you'll have to migrate the data.
 
 ```bash
 helm upgrade --install oxicloud charts/oxicloud \

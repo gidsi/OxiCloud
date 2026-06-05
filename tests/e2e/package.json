@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "pretest": "bash ../common/spawn-db.sh",
-    "test": "npx playwright test --reporter=line,github --trace=on-first-retry scenarios/01-home-and-login.spec.ts scenarios/02-folder-management.spec.ts",
+    "test": "FORCE_COLOR=true npx playwright test scenarios/01-home-and-login.spec.ts scenarios/02-folder-management.spec.ts",
     "posttest": "bash ../common/stop-db.sh"
   },
   "keywords": [],
@@ -13,7 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.60.0",
     "@types/node": "^25.6.0"
   }
 }

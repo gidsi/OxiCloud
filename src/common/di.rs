@@ -1,5 +1,5 @@
 use sqlx::PgPool;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::application::ports::blob_storage_ports::BlobStorageBackend;
@@ -27,6 +27,7 @@ use crate::application::services::{
 };
 use crate::common::config::AppConfig;
 use crate::common::errors::DomainError;
+use crate::common::locale::LocaleRegistry;
 use crate::infrastructure::repositories::pg::SharePgRepository;
 use crate::infrastructure::repositories::pg::{
     FileBlobReadRepository, FileBlobWriteRepository, FileMetadataRepository, FolderDbRepository,
@@ -78,25 +79,53 @@ pub struct AppServiceFactory {
     storage_path: PathBuf,
     locales_path: PathBuf,
     config: AppConfig,
+    /// Validated set of locales discovered under `locales_path`. Built
+    /// once at factory construction time; consumed by the I18n service
+    /// and the `Accept-Language` extractor. See
+    /// [`crate::common::locale::LocaleRegistry`] for the discovery rules.
+    locale_registry: Arc<LocaleRegistry>,
 }
 
 impl AppServiceFactory {
     /// Creates a new service factory
     pub fn new(storage_path: PathBuf, locales_path: PathBuf) -> Self {
+        let config = AppConfig::default();
+        let locale_registry = Self::build_registry(&locales_path, &config);
         Self {
             storage_path,
             locales_path,
-            config: AppConfig::default(),
+            config,
+            locale_registry,
         }
     }
 
     /// Creates a new service factory with custom configuration
     pub fn with_config(storage_path: PathBuf, locales_path: PathBuf, config: AppConfig) -> Self {
+        let locale_registry = Self::build_registry(&locales_path, &config);
         Self {
             storage_path,
             locales_path,
             config,
+            locale_registry,
         }
+    }
+
+    /// Discover locales from disk at boot. A misconfigured default or
+    /// an empty locale directory is treated as a fatal config error —
+    /// fail fast so the operator notices at startup rather than when
+    /// the first magic-link mail is queued.
+    fn build_registry(locales_path: &Path, config: &AppConfig) -> Arc<LocaleRegistry> {
+        let registry = LocaleRegistry::discover(locales_path, &config.i18n.default_locale)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to build locale registry from {}: {}. \
+                     Check OXICLOUD_DEFAULT_LOCALE and that static/locales/ \
+                     contains valid *.json files.",
+                    locales_path.display(),
+                    e
+                )
+            });
+        Arc::new(registry)
     }
 
     /// Gets the configuration
@@ -342,8 +371,12 @@ impl AppServiceFactory {
                 folder_repo_concrete.clone(),
             ));
 
-        // I18n repository
-        let i18n_repository = Arc::new(FileSystemI18nService::new(self.locales_path.clone()));
+        // I18n repository — file-system backed, gated by the locale
+        // registry built at factory construction.
+        let i18n_repository = Arc::new(FileSystemI18nService::new(
+            self.locales_path.clone(),
+            self.locale_registry.clone(),
+        ));
 
         // Trash repository — reads soft-delete flags from storage.files/folders
         let trash_repository = if core.config.features.enable_trash {
@@ -515,6 +548,7 @@ impl AppServiceFactory {
         &self,
         repos: &RepositoryServices,
         db_pool: &Arc<PgPool>,
+        authorization: &Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine>,
     ) -> Option<Arc<ShareService>> {
         if !self.config.features.enable_file_sharing {
             tracing::info!("File sharing service is disabled in configuration");
@@ -538,6 +572,7 @@ impl AppServiceFactory {
             repos.file_read_repository.clone(),
             repos.folder_repository.clone(),
             password_hasher,
+            authorization.clone(),
         ));
 
         tracing::info!("File sharing service initialized");
@@ -566,24 +601,16 @@ impl AppServiceFactory {
         service
     }
 
-    /// Preloads translations
+    /// Preloads translations for every locale in the registry. Build
+    /// the registry at startup via `LocaleRegistry::discover` and pass
+    /// the resulting list here.
     pub async fn preload_translations(&self, i18n_service: &I18nApplicationService) {
-        use crate::domain::services::i18n_service::Locale;
-
-        if let Err(e) = i18n_service.load_translations(Locale::English).await {
-            tracing::warn!("Failed to load English translations: {}", e);
-        }
-        if let Err(e) = i18n_service.load_translations(Locale::Spanish).await {
-            tracing::warn!("Failed to load Spanish translations: {}", e);
-        }
-        if let Err(e) = i18n_service.load_translations(Locale::French).await {
-            tracing::warn!("Failed to load French translations: {}", e);
-        }
-        if let Err(e) = i18n_service.load_translations(Locale::German).await {
-            tracing::warn!("Failed to load German translations: {}", e);
-        }
-        if let Err(e) = i18n_service.load_translations(Locale::Portuguese).await {
-            tracing::warn!("Failed to load Portuguese translations: {}", e);
+        let locales = i18n_service.available_locales().await;
+        for locale in locales {
+            let code = locale.as_str().to_string();
+            if let Err(e) = i18n_service.load_translations(locale).await {
+                tracing::warn!("Failed to load translations for {}: {}", code, e);
+            }
         }
         tracing::info!("Translations preloaded");
     }
@@ -653,10 +680,16 @@ impl AppServiceFactory {
 
         // 3a. Authorization engine — must exist before application services
         // because services hold an Arc<PgAclEngine> for ReBAC checks.
+        // SubjectGroupPgRepository is constructed here too so the engine can
+        // expand a user's transitive group set on cache misses.
+        let subject_group_repo = Arc::new(
+            crate::infrastructure::repositories::pg::SubjectGroupPgRepository::new(pool.clone()),
+        );
         let authorization = build_authorization_engine(
             pool.clone(),
             repos.folder_repository.clone(),
             repos.file_read_repository.clone(),
+            subject_group_repo.clone(),
         );
 
         // 3b. Trash service (needed before application services)
@@ -669,7 +702,7 @@ impl AppServiceFactory {
             self.create_application_services(&core, &repos, trash_service.clone(), &authorization);
 
         // 5. Share service
-        let share_service = self.create_share_service(&repos, &pool);
+        let share_service = self.create_share_service(&repos, &pool, &authorization);
         apps.share_service = share_service.clone();
 
         let share_browse_service = share_service.as_ref().map(|s| {
@@ -687,6 +720,15 @@ impl AppServiceFactory {
         let storage_usage_service: Option<Arc<StorageUsageService>>;
         let mut auth_services: Option<crate::common::di::AuthServices> = None;
         let mut nextcloud_services: Option<NextcloudServices> = None;
+        // Lifted out of the database-services block so PR 9's invite
+        // orchestrator (built at AppState-assembly time below) can share
+        // the same lifecycle dispatcher. The inner block at line ~682
+        // is unconditional and always assigns; the `#[allow]` silences
+        // the rustc warning that the `None` initialiser is never read.
+        #[allow(unused_assignments)]
+        let mut user_lifecycle_handle: Option<
+            Arc<crate::application::services::user_lifecycle_service::UserLifecycleService>,
+        > = None;
 
         {
             let favs = self.create_favorites_service(&pool);
@@ -700,12 +742,84 @@ impl AppServiceFactory {
             storage_usage_service =
                 Some(self.create_storage_usage_service(&repos, &pool, &maintenance_pool));
 
-            // Auth services
+            // User-lifecycle dispatcher. Hook order is registration order;
+            // document dependencies inline if/when any arise. Today:
+            //   1. AuditLifecycleHook             — fires first so the
+            //                                       audit event is recorded
+            //                                       even if a later hook
+            //                                       errors out.
+            //   2. HomeFolderLifecycleHook        — provisions the user's
+            //                                       home folder on
+            //                                       created/login (no-op
+            //                                       for external users).
+            //   3. AuthzCacheLifecycleHook        — invalidates the
+            //                                       Moka group-expansion
+            //                                       cache on logout/delete
+            //                                       so a re-login sees fresh
+            //                                       membership immediately.
+            //   4. SessionRevocationLifecycleHook — explicit per-user
+            //                                       session revocation on
+            //                                       delete (with audit) —
+            //                                       replaces the silent FK
+            //                                       CASCADE.
+            //   5. ExternalIdentityLifecycleHook  — audit + magic-link
+            //                                       token cleanup. Logs an
+            //                                       audit event for any
+            //                                       external user that gets
+            //                                       created or logs in;
+            //                                       transactionally clears
+            //                                       outstanding magic-link
+            //                                       tokens on delete (so a
+            //                                       new user reusing the
+            //                                       same id can never
+            //                                       inherit an old token).
+            //                                       Last in the chain so it
+            //                                       observes the latest
+            //                                       user state before the
+            //                                       chain commits.
+            let session_repo_for_hook = Arc::new(SessionPgRepository::new(pool.clone()));
+            let magic_link_repo: Arc<
+                dyn crate::domain::repositories::magic_link_token_repository::MagicLinkTokenRepository,
+            > = Arc::new(
+                crate::infrastructure::repositories::pg::MagicLinkTokenPgRepository::new(
+                    pool.clone(),
+                ),
+            );
+            let user_lifecycle = Arc::new(
+                crate::application::services::user_lifecycle_service::UserLifecycleService::new()
+                    .with_hook(Arc::new(
+                        crate::application::services::user_lifecycle_service::AuditLifecycleHook,
+                    ))
+                    .with_hook(Arc::new(
+                        crate::application::services::folder_service::HomeFolderLifecycleHook::new(
+                            apps.folder_service_concrete.clone(),
+                        ),
+                    ))
+                    .with_hook(Arc::new(
+                        crate::infrastructure::services::pg_acl_engine::AuthzCacheLifecycleHook::new(
+                            authorization.clone(),
+                        ),
+                    ))
+                    .with_hook(Arc::new(
+                        crate::application::services::user_lifecycle_service::SessionRevocationLifecycleHook::new(
+                            session_repo_for_hook,
+                        ),
+                    ))
+                    .with_hook(Arc::new(
+                        crate::application::services::external_identity_service::ExternalIdentityLifecycleHook::new()
+                            .with_magic_link_repo(magic_link_repo.clone()),
+                    )),
+            );
+
+            // Auth services. Folder service no longer threaded here —
+            // PR 3 moved home-folder provisioning into
+            // HomeFolderLifecycleHook, which already holds an Arc to the
+            // folder service via the user_lifecycle dispatcher.
             if self.config.features.enable_auth {
                 let services = crate::infrastructure::auth_factory::create_auth_services(
                     &self.config,
                     pool.clone(),
-                    Some(apps.folder_service_concrete.clone()),
+                    user_lifecycle.clone(),
                 )
                 .await
                 .map_err(|e| {
@@ -729,6 +843,8 @@ impl AppServiceFactory {
                 tracing::info!("Authentication services initialized successfully");
                 auth_services = Some(services);
             }
+
+            user_lifecycle_handle = Some(user_lifecycle);
         }
 
         // Shared App Password service — created once, used by both NC routes and native API
@@ -809,6 +925,7 @@ impl AppServiceFactory {
             core,
             repositories: repos,
             applications: apps,
+            locale_registry: self.locale_registry.clone(),
             db_pool: Some(pool.clone()),
             maintenance_pool: Some(maintenance_pool),
             auth_service: auth_services,
@@ -839,7 +956,93 @@ impl AppServiceFactory {
             webdav_lock_store:
                 crate::infrastructure::services::webdav_lock_service::create_webdav_lock_store(),
             authorization,
+            subject_group_service: Some(Arc::new(
+                crate::application::services::subject_group_service::SubjectGroupService::new(
+                    subject_group_repo.clone(),
+                    pool.clone(),
+                    Arc::new(
+                        crate::infrastructure::repositories::pg::UserPgRepository::new(
+                            pool.clone(),
+                        ),
+                    ),
+                ),
+            )),
+            email_sender: None,              // populated below
+            mock_email_sender: None,         // populated below
+            magic_link_invite_service: None, // populated below
+            // 60 lookups / minute / caller; cap at 50 000 tracked
+            // callers to bound memory. The same limiter instance is
+            // shared by every clone of AppState since it lives in an
+            // Arc.
+            user_profile_rate_limiter: Arc::new(
+                crate::interfaces::middleware::rate_limit::RateLimiter::new(60, 60, 50_000),
+            ),
+            // PR 12 — per-sharer email-invite ceiling: caller_id-keyed.
+            // Defends against a compromised account spamming external
+            // invites (each invite mints a new external user + email).
+            // Limits come from MagicLinkConfig so tests / operators can
+            // tune them via OXICLOUD_MAGIC_LINK_INVITE_PER_CALLER_PER_HOUR.
+            email_invite_rate_limiter: Arc::new(
+                crate::interfaces::middleware::rate_limit::RateLimiter::new(
+                    self.config.magic_link.invite_per_caller_per_hour,
+                    3_600,
+                    50_000,
+                ),
+            ),
+            // PR 12 — per-target-email send ceiling on
+            // /api/auth/magic-link/send. Stops the endpoint from being
+            // an email-bombing primitive against a known address.
+            magic_link_send_per_email_rate_limiter: Arc::new(
+                crate::interfaces::middleware::rate_limit::RateLimiter::new(
+                    self.config.magic_link.send_per_email_per_hour,
+                    3_600,
+                    50_000,
+                ),
+            ),
+            // PR 12 — per-IP backstop on /api/auth/magic-link/send.
+            // Bounds the damage if an attacker spreads a low per-email
+            // rate across many target addresses.
+            magic_link_send_per_ip_rate_limiter: Arc::new(
+                crate::interfaces::middleware::rate_limit::RateLimiter::new(
+                    self.config.magic_link.send_per_ip_per_hour,
+                    3_600,
+                    50_000,
+                ),
+            ),
         };
+        let email_bundle = build_email_sender(&self.config.smtp);
+        app_state.email_sender = email_bundle.sender;
+        app_state.mock_email_sender = email_bundle.mock;
+
+        // Magic-link invite orchestrator: only when SMTP wired AND the
+        // user-lifecycle dispatcher exists (i.e. auth is enabled).
+        if let (Some(email_sender), Some(lifecycle)) = (
+            app_state.email_sender.clone(),
+            user_lifecycle_handle.clone(),
+        ) {
+            let invite_user_storage = Arc::new(
+                crate::infrastructure::repositories::pg::UserPgRepository::new(pool.clone()),
+            );
+            let invite_magic_link_repo: Arc<
+                dyn crate::domain::repositories::magic_link_token_repository::MagicLinkTokenRepository,
+            > = Arc::new(
+                crate::infrastructure::repositories::pg::MagicLinkTokenPgRepository::new(
+                    pool.clone(),
+                ),
+            );
+            app_state.magic_link_invite_service = Some(Arc::new(
+                crate::application::services::magic_link_invite_service::MagicLinkInviteService::new(
+                    invite_user_storage,
+                    invite_magic_link_repo,
+                    email_sender,
+                    lifecycle,
+                    app_state.applications.i18n_service.clone(),
+                    app_state.locale_registry.clone(),
+                    self.config.magic_link.clone(),
+                    self.config.base_url(),
+                ),
+            ));
+        }
 
         app_state.dav_auth_failure_repository = Some(Arc::new(
             crate::infrastructure::repositories::pg::DavAuthFailurePgRepository::new(pool.clone()),
@@ -1134,6 +1337,11 @@ pub struct AppState {
     pub core: CoreServices,
     pub repositories: RepositoryServices,
     pub applications: ApplicationServices,
+    /// Validated set of locales the server knows about. Surfaced to
+    /// handlers so the `Accept-Language` extractor and any
+    /// locale-validation code (OIDC JIT, profile-edit) can consult one
+    /// canonical list.
+    pub locale_registry: Arc<LocaleRegistry>,
     pub db_pool: Option<Arc<PgPool>>,
     /// Isolated pool for background / batch operations.
     pub maintenance_pool: Option<Arc<PgPool>>,
@@ -1178,6 +1386,54 @@ pub struct AppState {
     /// an enum dispatcher or `Arc<dyn AuthorizationEngine>` (with
     /// `async_trait` boxing).
     pub authorization: Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine>,
+    /// ReBAC subject-group management (CRUD + membership). `None` when the
+    /// auth subsystem is not configured.
+    pub subject_group_service:
+        Option<Arc<crate::application::services::subject_group_service::SubjectGroupService>>,
+    /// Outbound transactional email — `None` when `OXICLOUD_SMTP_HOST` is
+    /// empty. Endpoints that need email (magic-link invite, login-via-email)
+    /// must return 503 when this is `None` rather than silently dropping
+    /// the message.
+    pub email_sender: Option<Arc<dyn crate::application::ports::email_sender::EmailSender>>,
+    /// Set alongside `email_sender` when the test harness flag
+    /// `OXICLOUD_SMTP_MOCK=true` is on. Used by the
+    /// `GET /api/admin/smtp/test/captured` test-only endpoint to look up
+    /// recently captured messages. Always `None` in production.
+    pub mock_email_sender:
+        Option<Arc<crate::infrastructure::services::mock_email_sender::MockEmailSender>>,
+    /// Invite-by-email orchestrator — `None` when SMTP isn't configured
+    /// (no `email_sender`). `POST /api/grants` with `subject.type=email`
+    /// returns 503 when this is `None`.
+    pub magic_link_invite_service: Option<
+        Arc<crate::application::services::magic_link_invite_service::MagicLinkInviteService>,
+    >,
+    /// Per-caller sliding-window limiter for `GET /api/users/{id}`. The
+    /// endpoint's primary defense is the visibility check, but a stale
+    /// JWT could in theory iterate UUIDs against the related-by-grant
+    /// branch of that check. 60 lookups per minute keyed on the
+    /// authenticated caller covers any legitimate UI rendering while
+    /// throttling enumeration.
+    pub user_profile_rate_limiter: Arc<crate::interfaces::middleware::rate_limit::RateLimiter>,
+    /// Per-sharer ceiling on `POST /api/grants` invitations whose
+    /// subject is `{ type: "email" }`. 50 per hour keyed on
+    /// `caller_id`. Anonymous attackers can't reach this code path
+    /// (the route is auth-protected); this defends against a
+    /// compromised internal account or a malicious admin.
+    pub email_invite_rate_limiter: Arc<crate::interfaces::middleware::rate_limit::RateLimiter>,
+    /// Per-target-email ceiling on `POST /api/auth/magic-link/send`. 5
+    /// per hour keyed on the **normalised** target email. Exceeding
+    /// the cap is silently absorbed: the handler still returns the
+    /// uniform 200 anti-enumeration response, but no new mail is
+    /// dispatched. Authenticated callers bypass this limit.
+    pub magic_link_send_per_email_rate_limiter:
+        Arc<crate::interfaces::middleware::rate_limit::RateLimiter>,
+    /// Per-source-IP backstop on `POST /api/auth/magic-link/send`. 200
+    /// per hour keyed on the trusted client IP (respects
+    /// `OXICLOUD_TRUST_PROXY_CIDR`). Bounds the cost of a single
+    /// attacker spreading 5/hr requests over a wide email list.
+    /// Authenticated callers bypass this limit.
+    pub magic_link_send_per_ip_rate_limiter:
+        Arc<crate::interfaces::middleware::rate_limit::RateLimiter>,
 }
 
 impl AppState {
@@ -1226,6 +1482,7 @@ fn build_authorization_engine(
     file_repo: Arc<
         crate::infrastructure::repositories::pg::file_blob_read_repository::FileBlobReadRepository,
     >,
+    group_repo: Arc<crate::infrastructure::repositories::pg::SubjectGroupPgRepository>,
 ) -> Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine> {
     use crate::infrastructure::services::pg_acl_engine::PgAclEngine;
 
@@ -1237,5 +1494,84 @@ fn build_authorization_engine(
             "OXICLOUD_AUTHZ_ENGINE={other:?} is not yet supported. Only 'postgres' is implemented; leave the variable unset to use the default."
         );
     }
-    Arc::new(PgAclEngine::new(pool, folder_repo, file_repo))
+    Arc::new(PgAclEngine::new(pool, folder_repo, file_repo, group_repo))
+}
+
+/// Pair returned by [`build_email_sender`] when wiring DI: the
+/// `EmailSender` trait object used by the rest of the application, plus
+/// (in mock mode only) a typed handle to the same `MockEmailSender` so
+/// the test-only capture endpoint can introspect it without downcasting.
+struct EmailSenderBundle {
+    sender: Option<Arc<dyn crate::application::ports::email_sender::EmailSender>>,
+    mock: Option<Arc<crate::infrastructure::services::mock_email_sender::MockEmailSender>>,
+}
+
+/// Construct the SMTP email sender from config, or return `None` when
+/// SMTP is disabled (`OXICLOUD_SMTP_HOST` empty). Construction errors
+/// (unparseable `From:` mailbox, bad TLS settings) downgrade to `None`
+/// with a `WARN` log — the server still starts, but every magic-link
+/// endpoint will return 503 until the operator fixes the config.
+///
+/// When `OXICLOUD_SMTP_MOCK=true` (test harness only — never in
+/// production), construction returns an in-process `MockEmailSender`
+/// that captures every message instead of sending it. The harness
+/// retrieves captured messages via `GET /api/admin/smtp/test/captured`.
+fn build_email_sender(cfg: &crate::common::config::SmtpConfig) -> EmailSenderBundle {
+    if std::env::var("OXICLOUD_SMTP_MOCK")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false)
+    {
+        tracing::warn!(
+            target: "oxicloud",
+            event = "smtp.mock_enabled",
+            "OXICLOUD_SMTP_MOCK=true — outbound mail is being captured in-process. \
+             Test harness only; never set this in production.",
+        );
+        let mock =
+            Arc::new(crate::infrastructure::services::mock_email_sender::MockEmailSender::new());
+        return EmailSenderBundle {
+            sender: Some(mock.clone()),
+            mock: Some(mock),
+        };
+    }
+
+    if !cfg.is_enabled() {
+        tracing::info!(
+            "SMTP disabled (OXICLOUD_SMTP_HOST empty); magic-link endpoints will return 503"
+        );
+        return EmailSenderBundle {
+            sender: None,
+            mock: None,
+        };
+    }
+    match crate::infrastructure::services::smtp_email_sender::SmtpEmailSender::new(cfg) {
+        Ok(sender) => {
+            tracing::info!(
+                target: "oxicloud",
+                event = "smtp.configured",
+                host = %cfg.host,
+                port = cfg.port,
+                tls = ?cfg.tls,
+                from = %cfg.from,
+                user = if cfg.user.is_empty() { "<anon>" } else { "<set>" },
+                "SMTP sender configured",
+            );
+            EmailSenderBundle {
+                sender: Some(Arc::new(sender)),
+                mock: None,
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "oxicloud",
+                event = "smtp.config_invalid",
+                error = %e,
+                "SMTP configuration is invalid; magic-link endpoints will return 503",
+            );
+            EmailSenderBundle {
+                sender: None,
+                mock: None,
+            }
+        }
+    }
 }

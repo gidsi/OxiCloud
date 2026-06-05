@@ -1,0 +1,101 @@
+/* Multi-Select – batch action toolbar
+ * Per-item checkbox styles (.file-item .checkbox-cell, .list-header.selection-mode)
+ * live in resourceList.css alongside the item renderer. */
+
+.batch-selection-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+}
+
+.batch-selection-bar {
+    display: flex;
+    align-items: center;
+    background: var(--color-multiselect-bg);
+    color: var(--color-multiselect-text);
+    padding: 10px 20px;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-right: 12px;
+    height: 60px;
+    transform: translateY(-8px);
+    transition:
+        opacity 0.2s,
+        max-height 0.25s,
+        transform 0.2s,
+        margin 0.2s,
+        padding 0.2s;
+    pointer-events: auto;
+}
+
+.batch-bar-close {
+    background: none;
+    border: none;
+    color: var(--color-multiselect-text-faint);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.batch-bar-close:hover {
+    background: var(--color-multiselect-hover-bg);
+    color: var(--color-multiselect-text);
+}
+
+.batch-bar-count {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.batch-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.batch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: none;
+    border-radius: 8px;
+    background: var(--color-multiselect-hover-bg);
+    color: var(--color-multiselect-action-text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+
+.batch-btn:hover {
+    background: var(--color-multiselect-action-hover);
+}
+
+.batch-btn-danger {
+    background: var(--color-multiselect-danger-bg);
+    color: var(--color-multiselect-danger-text);
+}
+
+.batch-btn-danger:hover {
+    background: var(--color-multiselect-danger-active);
+    color: var(--color-multiselect-danger-text-active);
+}
+
+@media (max-width: 640px) {
+    .batch-btn span {
+        display: none;
+    }
+
+    .batch-btn {
+        padding: 7px 10px;
+    }
+}

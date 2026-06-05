@@ -6,11 +6,22 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
+use crate::application::dtos::display_helpers::{
+    category_for, format_file_size, icon_class_for, icon_special_class_for,
+};
+use crate::application::dtos::file_dto::FileDto;
+use crate::application::dtos::folder_dto::FolderDto;
+use crate::application::dtos::grant_dto::{ResourceContentDto, ResourceTypeDto};
+use crate::application::dtos::recent_dto::{
+    RecentResourceItemDto, RecentResourcesDto, RecentResourcesQuery,
+};
 use crate::application::ports::recent_ports::RecentItemsUseCase;
 use crate::application::services::recent_service::RecentService;
+use crate::interfaces::errors::AppError;
 use crate::interfaces::middleware::auth::AuthUser;
+use uuid::Uuid;
 
 /// Query parameters for getting recent items
 #[derive(Deserialize)]
@@ -19,13 +30,15 @@ pub struct GetRecentParams {
     limit: Option<i32>,
 }
 
-/// Get user's recent items
+/// Get user's recent items (deprecated — use `GET /api/recent/resources` instead)
+#[deprecated = "Use GET /api/recent/resources instead"]
 #[utoipa::path(
     get,
     path = "/api/recent",
     responses(
         (status = 200, description = "List of recent items", body = Vec<crate::application::dtos::recent_dto::RecentItemDto>)
     ),
+    security(("bearerAuth" = [])),
     tag = "recent"
 )]
 pub async fn get_recent_items(
@@ -34,6 +47,7 @@ pub async fn get_recent_items(
     Query(params): Query<GetRecentParams>,
 ) -> impl IntoResponse {
     let user_id = auth_user.id;
+    warn!("Deprecated endpoint called: GET /api/recent — use GET /api/recent/resources instead");
 
     match recent_service.get_recent_items(user_id, params.limit).await {
         Ok(items) => {
@@ -65,12 +79,13 @@ pub async fn get_recent_items(
         (status = 200, description = "Access recorded"),
         (status = 400, description = "Invalid item type")
     ),
+    security(("bearerAuth" = [])),
     tag = "recent"
 )]
 pub async fn record_item_access(
     State(recent_service): State<Arc<RecentService>>,
     auth_user: AuthUser,
-    Path((item_type, item_id)): Path<(String, String)>,
+    Path((item_type, item_id)): Path<(String, Uuid)>,
 ) -> impl IntoResponse {
     let user_id = auth_user.id;
 
@@ -86,7 +101,7 @@ pub async fn record_item_access(
     }
 
     match recent_service
-        .record_item_access(user_id, &item_id, &item_type)
+        .record_item_access(user_id, &item_id.to_string(), &item_type)
         .await
     {
         Ok(_) => {
@@ -124,17 +139,18 @@ pub async fn record_item_access(
         (status = 200, description = "Item removed from recents"),
         (status = 404, description = "Item not in recents")
     ),
+    security(("bearerAuth" = [])),
     tag = "recent"
 )]
 pub async fn remove_from_recent(
     State(recent_service): State<Arc<RecentService>>,
     auth_user: AuthUser,
-    Path((item_type, item_id)): Path<(String, String)>,
+    Path((item_type, item_id)): Path<(String, Uuid)>,
 ) -> impl IntoResponse {
     let user_id = auth_user.id;
 
     match recent_service
-        .remove_from_recent(user_id, &item_id, &item_type)
+        .remove_from_recent(user_id, &item_id.to_string(), &item_type)
         .await
     {
         Ok(removed) => {
@@ -178,6 +194,7 @@ pub async fn remove_from_recent(
     responses(
         (status = 200, description = "Recent items cleared")
     ),
+    security(("bearerAuth" = [])),
     tag = "recent"
 )]
 pub async fn clear_recent_items(
@@ -207,5 +224,123 @@ pub async fn clear_recent_items(
             )
                 .into_response()
         }
+    }
+}
+
+/// List recently accessed resources with cursor pagination.
+///
+/// Sorted by `accessed_at` DESC by default (most recently accessed first).
+/// `path` is cleared when the resource is not owned by the requesting user.
+#[utoipa::path(
+    get,
+    path = "/api/recent/resources",
+    params(RecentResourcesQuery),
+    responses(
+        (status = 200, description = "Paginated list of recently accessed resources",
+         body = RecentResourcesDto),
+        (status = 400, description = "Invalid cursor or query parameters"),
+    ),
+    security(("bearerAuth" = [])),
+    tag = "recent"
+)]
+pub async fn list_recent_resources(
+    State(recent_service): State<Arc<RecentService>>,
+    auth_user: AuthUser,
+    Query(q): Query<RecentResourcesQuery>,
+) -> impl IntoResponse {
+    let user_id = auth_user.id;
+
+    let order_by = q.order_by.as_deref().unwrap_or("accessed_at").to_owned();
+
+    // If a cursor exists, validate that it matches the requested sort/direction.
+    let cursor = q
+        .decode_cursor()
+        .filter(|c| c.order_by == order_by && c.reverse == q.reverse);
+
+    let kinds = q.resource_kinds();
+
+    match recent_service
+        .list_resources_paged(
+            user_id,
+            q.limit_clamped(),
+            cursor,
+            &order_by,
+            kinds.as_deref(),
+            q.reverse,
+        )
+        .await
+    {
+        Ok((rows, next_cursor)) => {
+            let items: Vec<RecentResourceItemDto> = rows
+                .into_iter()
+                .map(|row| {
+                    // Path is only shown to the owner; non-owners see ""
+                    // to avoid leaking another user's folder hierarchy.
+                    let path = if row.is_owner {
+                        row.path.clone().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+
+                    if row.resource_type == "folder" {
+                        let dto = FolderDto {
+                            id: row.resource_id.to_string(),
+                            name: row.name.clone(),
+                            path,
+                            parent_id: row.parent_id.map(|u| u.to_string()),
+                            owner_id: Some(row.owner_id.to_string()),
+                            created_at: row.resource_created_at.timestamp() as u64,
+                            modified_at: row.modified_at.timestamp() as u64,
+                            is_root: false,
+                            icon_class: std::sync::Arc::from("fas fa-folder"),
+                            icon_special_class: std::sync::Arc::from("folder-icon"),
+                            category: std::sync::Arc::from("Folder"),
+                        };
+                        RecentResourceItemDto {
+                            resource_type: ResourceTypeDto::Folder,
+                            accessed_at: row.accessed_at,
+                            resource: ResourceContentDto::Folder(dto),
+                        }
+                    } else {
+                        let mime = row
+                            .mime_type
+                            .as_deref()
+                            .unwrap_or("application/octet-stream");
+                        let size_bytes = row.size.max(0) as u64;
+                        let dto = FileDto {
+                            id: row.resource_id.to_string(),
+                            name: row.name.clone(),
+                            path,
+                            size: size_bytes,
+                            mime_type: std::sync::Arc::from(mime),
+                            folder_id: row.parent_id.map(|u| u.to_string()),
+                            created_at: row.resource_created_at.timestamp() as u64,
+                            modified_at: row.modified_at.timestamp() as u64,
+                            icon_class: std::sync::Arc::from(icon_class_for(&row.name, mime)),
+                            icon_special_class: std::sync::Arc::from(icon_special_class_for(
+                                &row.name, mime,
+                            )),
+                            category: std::sync::Arc::from(category_for(&row.name, mime)),
+                            size_formatted: format_file_size(size_bytes),
+                            owner_id: Some(row.owner_id.to_string()),
+                            sort_date: None,
+                            etag: String::new(),
+                        };
+                        RecentResourceItemDto {
+                            resource_type: ResourceTypeDto::File,
+                            accessed_at: row.accessed_at,
+                            resource: ResourceContentDto::File(dto),
+                        }
+                    }
+                })
+                .collect();
+
+            (
+                StatusCode::OK,
+                Json(RecentResourcesDto::with_cursor(items, next_cursor)),
+            )
+                .into_response()
+        }
+        Err(e) => AppError::from(e).into_response(),
     }
 }

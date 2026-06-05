@@ -1072,6 +1072,54 @@ if (isLoginPage && registerForm) {
 }
 
 // Admin setup form submission
+// Magic-link form: anti-enumeration sign-in by email.
+// The server always responds 200 with a uniform message when SMTP is
+// configured, regardless of whether the email maps to an account or
+// whether that account is eligible for magic-link sign-in. The UI
+// mirrors that — same success state for every successful 2xx — so
+// the page can't be used as an oracle. 503 is the one exception
+// (SMTP not configured); operators need to see it.
+const magicLinkForm = /** @type {HTMLFormElement | null} */ (document.getElementById('magic-link-form'));
+const magicLinkStatus = document.getElementById('magic-link-status');
+const magicLinkSubmit = /** @type {HTMLButtonElement | null} */ (document.getElementById('magic-link-submit'));
+if (isLoginPage && magicLinkForm && magicLinkStatus) {
+    magicLinkForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = inputVal('magic-link-email');
+        if (!email) return;
+
+        magicLinkStatus.className = 'auth-status hidden';
+        magicLinkStatus.textContent = '';
+        if (magicLinkSubmit) magicLinkSubmit.disabled = true;
+
+        try {
+            const resp = await fetch('/api/auth/magic-link/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
+                body: JSON.stringify({ email })
+            });
+            if (resp.status === 503) {
+                magicLinkStatus.className = 'auth-status auth-status-error';
+                magicLinkStatus.textContent = i18n.t('auth.magicLinkUnavailable', 'Sign-in by email is not available on this server.');
+                return;
+            }
+            // Any 2xx → uniform success message regardless of whether
+            // the server actually queued a mail. Anti-enumeration.
+            magicLinkStatus.className = 'auth-status auth-status-success';
+            magicLinkStatus.textContent = i18n.t('auth.magicLinkSent', 'If an account exists for that email, a sign-in link has been sent. Check your inbox.');
+            magicLinkForm.reset();
+        } catch (err) {
+            magicLinkStatus.className = 'auth-status auth-status-error';
+            magicLinkStatus.textContent = i18n.t('auth.magicLinkNetworkError', {
+                message: /** @type {Error} */ (err).message
+            });
+        } finally {
+            if (magicLinkSubmit) magicLinkSubmit.disabled = false;
+            magicLinkStatus.classList.remove('hidden');
+        }
+    });
+}
+
 if (isLoginPage && adminSetupForm) {
     adminSetupForm.addEventListener('submit', async (e) => {
         e.preventDefault();

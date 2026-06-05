@@ -27,9 +27,9 @@ export default defineConfig({
   testDir: './scenarios',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   workers: 1,
-  reporter: process.env.CI ? [['github'], ['html']] : 'html',
+  reporter: process.env.CI ? [['line'], ['github'], ['html']] : [ ['list'], ['html']],
 
   globalSetup: require.resolve('./global-setup'),
   globalTeardown: require.resolve('./global-teardown'),
@@ -37,10 +37,13 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:8087',
     trace: 'on-first-retry',
+    headless: true,
+    // take a screenshot on failure
+    screenshot: 'only-on-failure',
   },
 
   expect: {
-    toHaveScreenshot: { maxDiffPixelRatio: 0.02 },
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01 },
   },
 
   projects: [

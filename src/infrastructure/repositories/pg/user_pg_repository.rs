@@ -27,6 +27,14 @@ impl UserPgRepository {
         Self { pool }
     }
 
+    /// Borrowed access to the connection pool. Exposed so callers can
+    /// open transactions that span this repo and other repos / hooks
+    /// (e.g. `AuthApplicationService::delete_user_admin` opening a tx
+    /// that wraps the lifecycle dispatcher + the DELETE).
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     // Helper method to map SQL errors to domain errors
     pub fn map_sqlx_error(err: sqlx::Error) -> UserRepositoryError {
         match err {
@@ -41,6 +49,28 @@ impl UserPgRepository {
             }
             _ => UserRepositoryError::DatabaseError(format!("Database error: {}", err)),
         }
+    }
+
+    /// Updates a user's profile image (URL or data URI). Not part of the
+    /// `UserRepository` trait — called directly from `AuthApplicationService`.
+    pub async fn update_image(
+        &self,
+        user_id: Uuid,
+        image: Option<String>,
+    ) -> UserRepositoryResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE auth.users
+            SET image = $2, updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(user_id)
+        .bind(&image)
+        .execute(&*self.pool)
+        .await
+        .map_err(Self::map_sqlx_error)?;
+        Ok(())
     }
 }
 
@@ -62,13 +92,15 @@ impl UserRepository for UserPgRepository {
                 let _result = sqlx::query(
                     r#"
                         INSERT INTO auth.users (
-                            id, username, email, password_hash, role, 
-                            storage_quota_bytes, storage_used_bytes, 
+                            id, username, email, password_hash, role,
+                            storage_quota_bytes, storage_used_bytes,
                             created_at, updated_at, last_login_at, active,
-                            oidc_provider, oidc_subject
+                            oidc_provider, oidc_subject, is_external,
+                            given_name, family_name, email_verified_at,
+                            preferred_locale
                         ) VALUES (
                             $1, $2, $3, $4, $5::auth.userrole, $6, $7, $8, $9, $10, $11,
-                            $12, $13
+                            $12, $13, $14, $15, $16, $17, $18
                         )
                         RETURNING *
                         "#,
@@ -86,6 +118,11 @@ impl UserRepository for UserPgRepository {
                 .bind(user_clone.is_active())
                 .bind(user_clone.oidc_provider())
                 .bind(user_clone.oidc_subject())
+                .bind(user_clone.is_external())
+                .bind(user_clone.given_name())
+                .bind(user_clone.family_name())
+                .bind(user_clone.email_verified_at())
+                .bind(user_clone.preferred_locale())
                 .execute(&mut **tx)
                 .await
                 .map_err(Self::map_sqlx_error)?;
@@ -105,11 +142,12 @@ impl UserRepository for UserPgRepository {
     async fn get_user_by_id(&self, id: Uuid) -> UserRepositoryResult<User> {
         let row = sqlx::query(
             r#"
-            SELECT 
-                id, username, email, password_hash, role::text as role_text, 
-                storage_quota_bytes, storage_used_bytes, 
+            SELECT
+                id, username, email, password_hash, role::text as role_text,
+                storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
             WHERE id = $1
             "#,
@@ -140,6 +178,12 @@ impl UserRepository for UserPgRepository {
             row.get("active"),
             row.get("oidc_provider"),
             row.get("oidc_subject"),
+            row.get("image"),
+            row.get("is_external"),
+            row.get("given_name"),
+            row.get("family_name"),
+            row.get("email_verified_at"),
+            row.get("preferred_locale"),
         ))
     }
 
@@ -147,11 +191,12 @@ impl UserRepository for UserPgRepository {
     async fn get_user_by_username(&self, username: &str) -> UserRepositoryResult<User> {
         let row = sqlx::query(
             r#"
-            SELECT 
-                id, username, email, password_hash, role::text as role_text, 
-                storage_quota_bytes, storage_used_bytes, 
+            SELECT
+                id, username, email, password_hash, role::text as role_text,
+                storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
             WHERE username = $1
             "#,
@@ -182,6 +227,12 @@ impl UserRepository for UserPgRepository {
             row.get("active"),
             row.get("oidc_provider"),
             row.get("oidc_subject"),
+            row.get("image"),
+            row.get("is_external"),
+            row.get("given_name"),
+            row.get("family_name"),
+            row.get("email_verified_at"),
+            row.get("preferred_locale"),
         ))
     }
 
@@ -189,11 +240,12 @@ impl UserRepository for UserPgRepository {
     async fn get_user_by_email(&self, email: &str) -> UserRepositoryResult<User> {
         let row = sqlx::query(
             r#"
-            SELECT 
-                id, username, email, password_hash, role::text as role_text, 
-                storage_quota_bytes, storage_used_bytes, 
+            SELECT
+                id, username, email, password_hash, role::text as role_text,
+                storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
             WHERE email = $1
             "#,
@@ -224,6 +276,12 @@ impl UserRepository for UserPgRepository {
             row.get("active"),
             row.get("oidc_provider"),
             row.get("oidc_subject"),
+            row.get("image"),
+            row.get("is_external"),
+            row.get("given_name"),
+            row.get("family_name"),
+            row.get("email_verified_at"),
+            row.get("preferred_locale"),
         ))
     }
 
@@ -238,7 +296,7 @@ impl UserRepository for UserPgRepository {
                 sqlx::query(
                     r#"
                         UPDATE auth.users
-                        SET 
+                        SET
                             username = $2,
                             email = $3,
                             password_hash = $4,
@@ -247,7 +305,12 @@ impl UserRepository for UserPgRepository {
                             storage_used_bytes = $7,
                             updated_at = $8,
                             last_login_at = $9,
-                            active = $10
+                            active = $10,
+                            image = $11,
+                            given_name = $12,
+                            family_name = $13,
+                            email_verified_at = $14,
+                            preferred_locale = $15
                         WHERE id = $1
                         "#,
                 )
@@ -261,6 +324,11 @@ impl UserRepository for UserPgRepository {
                 .bind(user_clone.updated_at())
                 .bind(user_clone.last_login_at())
                 .bind(user_clone.is_active())
+                .bind(user_clone.image())
+                .bind(user_clone.given_name())
+                .bind(user_clone.family_name())
+                .bind(user_clone.email_verified_at())
+                .bind(user_clone.preferred_locale())
                 .execute(&mut **tx)
                 .await
                 .map_err(Self::map_sqlx_error)?;
@@ -320,21 +388,29 @@ impl UserRepository for UserPgRepository {
     }
 
     /// Lists users with pagination
-    async fn list_users(&self, limit: i64, offset: i64) -> UserRepositoryResult<Vec<User>> {
+    async fn list_users(
+        &self,
+        limit: i64,
+        offset: i64,
+        include_external: bool,
+    ) -> UserRepositoryResult<Vec<User>> {
         let rows = sqlx::query(
             r#"
-            SELECT 
-                id, username, email, password_hash, role::text as role_text, 
-                storage_quota_bytes, storage_used_bytes, 
+            SELECT
+                id, username, email, password_hash, role::text as role_text,
+                storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
+            WHERE ($3 OR is_external = FALSE)
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
             "#,
         )
         .bind(limit)
         .bind(offset)
+        .bind(include_external)
         .fetch_all(&*self.pool)
         .await
         .map_err(Self::map_sqlx_error)?;
@@ -363,6 +439,12 @@ impl UserRepository for UserPgRepository {
                     row.get("active"),
                     row.get("oidc_provider"),
                     row.get("oidc_subject"),
+                    row.get("image"),
+                    row.get("is_external"),
+                    row.get("given_name"),
+                    row.get("family_name"),
+                    row.get("email_verified_at"),
+                    row.get("preferred_locale"),
                 )
             })
             .collect();
@@ -370,7 +452,12 @@ impl UserRepository for UserPgRepository {
         Ok(users)
     }
 
-    async fn search_users(&self, query: &str, limit: i64) -> UserRepositoryResult<Vec<User>> {
+    async fn search_users(
+        &self,
+        query: &str,
+        limit: i64,
+        include_external: bool,
+    ) -> UserRepositoryResult<Vec<User>> {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query(
             r#"
@@ -378,15 +465,18 @@ impl UserRepository for UserPgRepository {
                 id, username, email, password_hash, role::text as role_text,
                 storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
-            WHERE username ILIKE $1 OR email ILIKE $1
+            WHERE (username ILIKE $1 OR email ILIKE $1)
+              AND ($3 OR is_external = FALSE)
             ORDER BY username
             LIMIT $2
             "#,
         )
         .bind(&pattern)
         .bind(limit)
+        .bind(include_external)
         .fetch_all(&*self.pool)
         .await
         .map_err(Self::map_sqlx_error)?;
@@ -414,6 +504,12 @@ impl UserRepository for UserPgRepository {
                     row.get("active"),
                     row.get("oidc_provider"),
                     row.get("oidc_subject"),
+                    row.get("image"),
+                    row.get("is_external"),
+                    row.get("given_name"),
+                    row.get("family_name"),
+                    row.get("email_verified_at"),
+                    row.get("preferred_locale"),
                 )
             })
             .collect();
@@ -496,11 +592,12 @@ impl UserRepository for UserPgRepository {
     async fn list_users_by_role(&self, role: &str) -> UserRepositoryResult<Vec<User>> {
         let rows = sqlx::query(
             r#"
-            SELECT 
-                id, username, email, password_hash, role::text as role_text, 
-                storage_quota_bytes, storage_used_bytes, 
+            SELECT
+                id, username, email, password_hash, role::text as role_text,
+                storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
             WHERE role::text = $1
             ORDER BY created_at DESC
@@ -535,6 +632,12 @@ impl UserRepository for UserPgRepository {
                     row.get("active"),
                     row.get("oidc_provider"),
                     row.get("oidc_subject"),
+                    row.get("image"),
+                    row.get("is_external"),
+                    row.get("given_name"),
+                    row.get("family_name"),
+                    row.get("email_verified_at"),
+                    row.get("preferred_locale"),
                 )
             })
             .collect();
@@ -566,11 +669,12 @@ impl UserRepository for UserPgRepository {
     ) -> UserRepositoryResult<User> {
         let row = sqlx::query(
             r#"
-            SELECT 
-                id, username, email, password_hash, role::text as role_text, 
-                storage_quota_bytes, storage_used_bytes, 
+            SELECT
+                id, username, email, password_hash, role::text as role_text,
+                storage_quota_bytes, storage_used_bytes,
                 created_at, updated_at, last_login_at, active,
-                oidc_provider, oidc_subject
+                oidc_provider, oidc_subject, image, is_external,
+                given_name, family_name, email_verified_at, preferred_locale
             FROM auth.users
             WHERE oidc_provider = $1 AND oidc_subject = $2
             "#,
@@ -601,6 +705,12 @@ impl UserRepository for UserPgRepository {
             row.get("active"),
             row.get("oidc_provider"),
             row.get("oidc_subject"),
+            row.get("image"),
+            row.get("is_external"),
+            row.get("given_name"),
+            row.get("family_name"),
+            row.get("email_verified_at"),
+            row.get("preferred_locale"),
         ))
     }
 
@@ -710,14 +820,24 @@ impl UserStoragePort for UserPgRepository {
             .map_err(DomainError::from)
     }
 
-    async fn list_users(&self, limit: i64, offset: i64) -> Result<Vec<User>, DomainError> {
-        UserRepository::list_users(self, limit, offset)
+    async fn list_users(
+        &self,
+        limit: i64,
+        offset: i64,
+        include_external: bool,
+    ) -> Result<Vec<User>, DomainError> {
+        UserRepository::list_users(self, limit, offset, include_external)
             .await
             .map_err(DomainError::from)
     }
 
-    async fn search_users(&self, query: &str, limit: i64) -> Result<Vec<User>, DomainError> {
-        UserRepository::search_users(self, query, limit)
+    async fn search_users(
+        &self,
+        query: &str,
+        limit: i64,
+        include_external: bool,
+    ) -> Result<Vec<User>, DomainError> {
+        UserRepository::search_users(self, query, limit, include_external)
             .await
             .map_err(DomainError::from)
     }

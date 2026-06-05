@@ -1,16 +1,50 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "این پیوند ورود دیگر معتبر نیست",
+                "expired_body": "ممکن است پیوند منقضی شده یا قبلاً استفاده شده باشد. می‌توانیم پیوند جدیدی برایتان ارسال کنیم — ظرف چند ثانیه به صندوق ورودی شما می‌رسد.",
+                "resend_to": "ارسال پیوند جدید به {{email}}",
+                "generic_unavailable": "این پیوند ورود دیگر معتبر نیست. ممکن است قبلاً استفاده شده باشد یا منقضی شده باشد. پیوند جدیدی را از صفحهٔ ورود درخواست کنید.",
+                "service_unavailable": "ورود از طریق پیوند جادویی روی این سرور فعال نیست.",
+                "internal_error": "هنگام ورود خطایی رخ داد. لطفاً دوباره تلاش کنید.",
+                "resend_failure": "هنگام ارسال پیوند خطایی رخ داد. لطفاً دوباره تلاش کنید.",
+                "cross_browser_title": "آیا می‌خواهید ورود در این دستگاه ادامه یابد؟",
+                "cross_browser_body": "این پیوند ورود را در مرورگر یا دستگاهی متفاوت از جایی که درخواست کرده‌اید باز کرده‌اید.",
+                "cross_browser_warning": "اگر این پیوند را خودتان درخواست کرده‌اید، ادامه دادن ایمن است. در غیر این صورت این صفحه را ببندید — کلیک روی ادامه باعث ورود شخص دیگری به حساب شما خواهد شد.",
+                "cross_browser_continue": "ادامه و ورود",
+                "resend_confirmation_title": "صندوق ورودی خود را بررسی کنید",
+                "resend_confirmation_body": "اگر پیوند ورود متعلق به یک حساب فعال بوده، پیوند جدیدی هم اکنون ارسال شد. لطفاً صندوق ورودی خود را بررسی کنید.",
+                "return_link": "بازگشت به OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} یک {{kind}} را با شما در OxiCloud به اشتراک گذاشت",
+                    "body": "{{inviter}} یک {{kind}} را با شما در OxiCloud به اشتراک گذاشت.\n\nبا کلیک روی پیوند زیر آن را باز کنید:\n{{link}}\n\nپیوند یک‌بار مصرف است و در {{ttl_hours}} ساعت منقضی می‌شود.\nاگر منتظر این دعوت نبودید، می‌توانید این پیام را نادیده بگیرید.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "ورود به OxiCloud",
+                    "body": "سلام،\n\nبرای ورود به OxiCloud از پیوند زیر استفاده کنید. پیوند یک‌بار مصرف است و در {{ttl_minutes}} دقیقه منقضی می‌شود. آن را در همان دستگاهی که درخواست کرده‌اید باز کنید.\n\n{{link}}\n\nاگر این پیوند ورود را درخواست نکرده‌اید، می‌توانید این پیام را نادیده بگیرید — اقدام دیگری لازم نیست.\n\n— OxiCloud"
+                },
+                "kind_file": "فایل",
+                "kind_folder": "پوشه",
+                "english_fallback_divider": "--- نسخهٔ انگلیسی در پایین ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "سیستم ذخیره‌سازی ابری ساده‌گرا"
     },
     "nav": {
         "files": "پرونده‌ها",
-        "shared": "هم‌رسانی شده",
+        "shared": "هم‌رسانی‌های من",
         "recent": "اخیر",
         "favorites": "موردعلاقه‌ها",
         "photos": "عکس‌ها",
         "music": "موسیقی",
-        "trash": "سطل زباله"
+        "trash": "سطل زباله",
+        "sharedwithme": "به اشتراک‌گذاشته شده با من"
     },
     "photos": {
         "empty_state": "هنوز عکسی نیست",
@@ -125,7 +159,13 @@
         "about_description": "پلتفرم ذخیره‌سازی ابری ساخته شده با Rust و معماری تمیز. سریع، امن و خصوصی.",
         "admin_panel": "پنل مدیریت",
         "profile": "نمایه من",
-        "role_user": "کاربر"
+        "role_user": "کاربر",
+        "theme": {
+            "light": "روشن",
+            "dark": "تاریک",
+            "auto": "مانند سیستم"
+        },
+        "manage_groups": "مدیریت گروه‌ها"
     },
     "share": {
         "dialogTitle": "پیوند هم‌رسانی",
@@ -269,7 +309,8 @@
             "archive": "بایگانی",
             "installer": "نصب‌کننده",
             "code": "کد"
-        }
+        },
+        "owner": "مالک"
     },
     "dialogs": {
         "rename_folder": "تغییر نام پوشه",
@@ -329,7 +370,13 @@
         "move_error": "خطا در انتقال",
         "empty_name": "نام نمی‌تواند خالی باشد",
         "name_exists": "پرونده یا پوشه‌ای با این نام قبلا وجود دارد",
-        "generic_error": "خطایی رخ داده است"
+        "generic_error": "خطایی رخ داده است",
+        "group_name_invalid": "نام گروه باید با قالب پیشوند ایمیل مطابقت داشته باشد (حروف، ارقام، نقطه، خط تیره، زیرخط؛ 1–64 نویسه).",
+        "group_cycle": "این عضو باعث ایجاد ارجاع چرخه‌ای بین گروه‌ها می‌شود.",
+        "group_depth_exceeded": "عمق تودرتو بیش از حداکثر مجاز (8) است.",
+        "group_virtual_immutable": "گروه «Internal» توسط سامانه مدیریت می‌شود و قابل تغییر نیست.",
+        "group_not_found": "گروه پیدا نشد.",
+        "group_name_taken": "گروهی با این نام پیش‌از این وجود دارد."
     },
     "breadcrumb": {
         "home": "صفحه اصلی"
@@ -339,15 +386,36 @@
         "empty_state": "سطل زباله خالی است",
         "original_location": "محل اصلی",
         "deleted_date": "تاریخ حذف",
+        "remaining": "باقی‌مانده",
         "actions": "عملیات",
         "restore": "بازیابی",
         "delete_permanently": "حذف دائمی",
-        "empty_confirm": "آیا مطمئن هستید که می‌خواهید سطل زباله را خالی کنید؟ این کار همهٔ موارد را به‌طور دائمی حذف خواهد کرد."
+        "empty_confirm": "آیا مطمئن هستید که می‌خواهید سطل زباله را خالی کنید؟ این کار همهٔ موارد را به‌طور دائمی حذف خواهد کرد.",
+        "groupby": {
+            "remaining_days": "روزهای باقی‌مانده",
+            "trashed_time": "زمان حذف"
+        }
+    },
+    "daysRemaining": {
+        "expired": "منقضی شده",
+        "today": "امروز",
+        "tomorrow": "فردا",
+        "inDays": "{{count}} روز"
+    },
+    "expiryChip": {
+        "never": "هرگز منقضی نمی‌شود",
+        "expired": "منقضی شده",
+        "today": "امروز منقضی می‌شود",
+        "tomorrow": "فردا منقضی می‌شود",
+        "inDays": "در {{count}} روز منقضی می‌شود",
+        "onDate": "در {{date}} منقضی می‌شود"
     },
     "auth": {
         "login_title": "ورود",
         "username": "نام‌کاربری",
         "username_placeholder": "نام‌کاربری خود را وارد کنید",
+        "login_identifier": "نام کاربری یا ایمیل",
+        "login_identifier_placeholder": "نام کاربری یا ایمیل خود را وارد کنید",
         "password": "گذرواژه",
         "password_placeholder": "گذرواژه خود را وارد کنید",
         "login_button": "ورود",
@@ -378,7 +446,14 @@
         "admin_create_error": "خطا در ایجاد حساب کاربری مدیر",
         "or": "یا",
         "sso_login": "ورود با SSO",
-        "sso_login_provider": "ورود با {{provider}}"
+        "sso_login_provider": "ورود با {{provider}}",
+        "magicLinkHint": "رمز عبور ندارید؟ ایمیل خود را وارد کنید تا یک پیوند ورود یک‌بار‌مصرف برایتان ارسال شود.",
+        "magicLinkEmailLabel": "آدرس ایمیل",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "ارسال پیوند ورود",
+        "magicLinkSent": "اگر برای این ایمیل حسابی وجود داشته باشد، پیوند ورود ارسال شده است. صندوق ورودی خود را بررسی کنید.",
+        "magicLinkUnavailable": "ورود با ایمیل در این سرور در دسترس نیست.",
+        "magicLinkNetworkError": "ارتباط با سرور برقرار نشد: {{message}}"
     },
     "storage": {
         "title": "فضای ذخیره‌سازی",
@@ -428,7 +503,8 @@
         "clear": "پاک کردن اخیر",
         "accessed": "دسترسی یافته",
         "empty_state": "هنوز هیچ پروندهٔ اخیر وجود ندارد",
-        "empty_hint": "پرونده‌هایی که باز می‌کنید اینجا ظاهر می‌شوند"
+        "empty_hint": "پرونده‌هایی که باز می‌کنید اینجا ظاهر می‌شوند",
+        "loadMore": "بارگذاری بیشتر"
     },
     "batch": {
         "one_selected": "۱ مورد انتخاب شده",
@@ -643,6 +719,18 @@
         "minutes_ago": "{{n}} دقیقه پیش",
         "hours_ago": "{{n}} ساعت پیش",
         "days_ago": "{{n}} روز پیش",
+        "edit_profile": "ویرایش نمایه",
+        "edit_oidc_managed": "برای تغییر اطلاعات خود (نام، نام خانوادگی، عکس نمایه، …)، لطفاً آن‌ها را در ارائه‌دهنده هویت خود به‌روز کنید. تغییرات شما در ورود بعدی ظاهر خواهد شد.",
+        "username_claim_hint": "۲ تا ۶۴ کاراکتر، حروف / ارقام / نقطه / خط تیره / زیرخط. پس از انتخاب، نام کاربری قابل تغییر نیست (کلاینت‌های DAV/NextCloud به آن وابسته‌اند).",
+        "username_already_claimed": "نام کاربری تنظیم شده و قابل تغییر نیست (کلاینت‌های DAV/NextCloud به آن وابسته‌اند).",
+        "given_name": "نام",
+        "family_name": "نام خانوادگی",
+        "save_profile": "ذخیره تغییرات",
+        "profile_saved": "نمایه به‌روز شد",
+        "profile_no_changes": "تغییری برای ذخیره وجود ندارد.",
+        "profile_save_failed": "ذخیره ناموفق بود",
+        "username_taken_error": "این نام کاربری قبلاً گرفته شده است.",
+        "username_immutable_error": "نام کاربری شما قبلاً تنظیم شده و در اینجا قابل تغییر نیست. در صورت نیاز به تغییر نام، با مدیر تماس بگیرید.",
         "change_password": "تغییر رمز عبور",
         "current_password": "رمز فعلی",
         "new_password": "رمز جدید",
@@ -658,7 +746,20 @@
         "error_label_required": "لطفاً برچسب وارد کنید",
         "error_create_pw": "ایجاد رمز ناموفق بود",
         "confirm_revoke": "رمز «{{label}}» ابطال شود؟ کلاینت‌ها از کار می‌افتند.",
-        "error_revoke": "ابطال ناموفق بود"
+        "error_revoke": "ابطال ناموفق بود",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "notifications": {
         "file_renamed": "فایل تغییر نام داد",
@@ -682,5 +783,64 @@
         "files": "فایل‌ها",
         "complete": "{{count}} / {{total}} آپلود شد"
     },
-    "storage_quota_exceeded": "سهمیه فضای ذخیره‌سازی تجاوز کرده است"
+    "storage_quota_exceeded": "سهمیه فضای ذخیره‌سازی تجاوز کرده است",
+    "sharedwithme": {
+        "pageTitle": "به اشتراک‌گذاشته شده با من",
+        "pageDescription": "فایل‌ها و پوشه‌هایی که کاربران دیگر با شما به اشتراک گذاشته‌اند",
+        "emptyStateTitle": "هنوز چیزی با شما به اشتراک گذاشته نشده",
+        "emptyStateDesc": "مواردی که کاربران دیگر با شما به اشتراک می‌گذارند اینجا نمایش داده می‌شوند",
+        "loadMore": "بارگذاری بیشتر",
+        "sharedBy": "به اشتراک‌گذاشته توسط",
+        "colName": "نام",
+        "colType": "نوع",
+        "colSharedBy": "به اشتراک‌گذاشته توسط",
+        "colDate": "تاریخ اشتراک‌گذاری",
+        "colPermissions": "مجوزها"
+    },
+    "groupby": {
+        "none": "هیچ",
+        "title": "گروه‌بندی بر اساس",
+        "owner": "مالک",
+        "shareDate": "تاریخ اشتراک",
+        "type": "نوع",
+        "type.folders": "پوشه‌ها",
+        "accessedAt": "تاریخ دسترسی",
+        "modifiedAt": "تاریخ تغییر",
+        "createdAt": "تاریخ ایجاد",
+        "size": "اندازه",
+        "favoriteDate": "تاریخ مورد علاقه",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "امروز",
+        "last7days": "۷ روز گذشته",
+        "last30days": "۳۰ روز گذشته"
+    },
+    "groups": {
+        "title": "مدیریت گروه‌ها",
+        "create_button": "ایجاد گروه",
+        "create_dialog_title": "گروه جدید",
+        "edit_dialog_title": "تغییر نام گروه",
+        "name_label": "نام",
+        "name_placeholder": "engineering",
+        "description_label": "توضیحات (اختیاری)",
+        "members_section": "اعضا",
+        "add_member_placeholder": "افزودن کاربر یا گروه…",
+        "no_members": "هنوز عضوی وجود ندارد.",
+        "remove_member": "حذف",
+        "delete_group": "حذف گروه",
+        "delete_confirm": "گروه «{name}» حذف شود؟ مجوزهای مرتبط با این گروه باطل خواهند شد.",
+        "empty_state": "هنوز گروهی وجود ندارد.",
+        "load_more": "بارگیری بیشتر",
+        "back_to_list": "بازگشت",
+        "loading": "در حال بارگذاری…",
+        "virtual_badge": "سامانه",
+        "member_count_zero": "بدون عضو",
+        "member_count_one": "۱ عضو",
+        "member_count_other": "{count} عضو",
+        "delete_confirm_label": "نام گروه را برای تأیید وارد کنید:",
+        "delete_confirm_mismatch": "نام گروه را دقیقاً برای تأیید وارد کنید.",
+        "virtual_internal_name": "داخلی"
+    }
 }

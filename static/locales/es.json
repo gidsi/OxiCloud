@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "Este enlace de inicio de sesión ya no es válido",
+                "expired_body": "Es posible que el enlace haya expirado o ya se haya utilizado. Podemos enviarte uno nuevo — llegará a tu bandeja de entrada en unos segundos.",
+                "resend_to": "Enviar un nuevo enlace a {{email}}",
+                "generic_unavailable": "Este enlace de inicio de sesión ya no es válido. Es posible que ya se haya usado o que haya expirado. Solicita uno nuevo desde la página de inicio de sesión.",
+                "service_unavailable": "El inicio de sesión por enlace mágico no está habilitado en este servidor.",
+                "internal_error": "Algo salió mal al iniciar sesión. Por favor, inténtalo de nuevo.",
+                "resend_failure": "Algo salió mal al enviar el enlace. Por favor, inténtalo de nuevo.",
+                "cross_browser_title": "¿Continuar el inicio de sesión en este dispositivo?",
+                "cross_browser_body": "Has abierto este enlace de inicio de sesión en un navegador o dispositivo diferente del que lo solicitó.",
+                "cross_browser_warning": "Si solicitaste este enlace, es seguro continuar. Si no, cierra esta página — hacer clic en Continuar iniciaría sesión a otra persona en tu cuenta.",
+                "cross_browser_continue": "Continuar e iniciar sesión",
+                "resend_confirmation_title": "Revisa tu bandeja de entrada",
+                "resend_confirmation_body": "Si el enlace de inicio de sesión pertenecía a una cuenta activa, se acaba de enviar uno nuevo. Por favor, revisa tu bandeja de entrada.",
+                "return_link": "Volver a OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} ha compartido un {{kind}} contigo en OxiCloud",
+                    "body": "{{inviter}} ha compartido un {{kind}} contigo en OxiCloud.\n\nÁbrelo haciendo clic en el enlace de abajo:\n{{link}}\n\nEl enlace es de un solo uso y expira en {{ttl_hours}} horas.\nSi no esperabas esta invitación, puedes ignorar este mensaje.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "Inicia sesión en OxiCloud",
+                    "body": "Hola,\n\nUsa el enlace de abajo para iniciar sesión en OxiCloud. El enlace es de un solo uso y expira en {{ttl_minutes}} minutos. Ábrelo en el mismo dispositivo donde lo solicitaste.\n\n{{link}}\n\nSi no solicitaste este enlace de inicio de sesión, puedes ignorar este mensaje — no se necesita ninguna acción adicional.\n\n— OxiCloud"
+                },
+                "kind_file": "archivo",
+                "kind_folder": "carpeta",
+                "english_fallback_divider": "--- Versión en inglés a continuación ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "Sistema de almacenamiento en la nube minimalista"
@@ -10,7 +43,8 @@
         "favorites": "Favoritos",
         "photos": "Fotos",
         "music": "Música",
-        "trash": "Papelera"
+        "trash": "Papelera",
+        "sharedwithme": "Compartidos conmigo"
     },
     "photos": {
         "empty_state": "Aún no hay fotos",
@@ -244,7 +278,13 @@
         "about_description": "Plataforma de almacenamiento en la nube creada con Rust y Arquitectura Limpia. Rápida, segura y privada.",
         "admin_panel": "Panel de administración",
         "profile": "Mi perfil",
-        "role_user": "Usuario"
+        "role_user": "Usuario",
+        "theme": {
+            "light": "Claro",
+            "dark": "Oscuro",
+            "auto": "Como el sistema"
+        },
+        "manage_groups": "Gestionar grupos"
     },
     "files": {
         "name": "Nombre",
@@ -269,7 +309,8 @@
             "archive": "Archivo comprimido",
             "installer": "Instalador",
             "code": "Código"
-        }
+        },
+        "owner": "Propietario"
     },
     "dialogs": {
         "rename_folder": "Renombrar carpeta",
@@ -329,7 +370,13 @@
         "move_error": "Error al mover",
         "empty_name": "El nombre no puede estar vacío",
         "name_exists": "Ya existe un archivo o carpeta con ese nombre",
-        "generic_error": "Ha ocurrido un error"
+        "generic_error": "Ha ocurrido un error",
+        "group_name_invalid": "El nombre del grupo debe seguir el formato de prefijo de correo (letras, dígitos, punto, guión, guion bajo; 1–64 caracteres).",
+        "group_cycle": "Este miembro creaería una referencia circular entre grupos.",
+        "group_depth_exceeded": "Esta profundidad de anidamiento excede el máximo permitido (8).",
+        "group_virtual_immutable": "El grupo «Internal» es gestionado por el sistema y no se puede modificar.",
+        "group_not_found": "Grupo no encontrado.",
+        "group_name_taken": "Ya existe un grupo con este nombre."
     },
     "breadcrumb": {
         "home": "Inicio"
@@ -339,15 +386,36 @@
         "empty_state": "La papelera está vacía",
         "original_location": "Ubicación original",
         "deleted_date": "Fecha de eliminación",
+        "remaining": "Restante",
         "actions": "Acciones",
         "restore": "Restaurar",
         "delete_permanently": "Eliminar permanentemente",
-        "empty_confirm": "¿Estás seguro de que quieres vaciar la papelera? Esta acción eliminará permanentemente todos los elementos."
+        "empty_confirm": "¿Estás seguro de que quieres vaciar la papelera? Esta acción eliminará permanentemente todos los elementos.",
+        "groupby": {
+            "remaining_days": "Días restantes",
+            "trashed_time": "Fecha de eliminación"
+        }
+    },
+    "daysRemaining": {
+        "expired": "Caducado",
+        "today": "Hoy",
+        "tomorrow": "Mañana",
+        "inDays": "{{count}} días"
+    },
+    "expiryChip": {
+        "never": "Nunca caduca",
+        "expired": "Caducado",
+        "today": "Caduca hoy",
+        "tomorrow": "Caduca mañana",
+        "inDays": "Caduca en {{count}} días",
+        "onDate": "Caduca el {{date}}"
     },
     "auth": {
         "login_title": "Iniciar sesión",
         "username": "Usuario",
         "username_placeholder": "Ingresa tu nombre de usuario",
+        "login_identifier": "Usuario o correo electrónico",
+        "login_identifier_placeholder": "Ingresa tu usuario o correo electrónico",
         "password": "Contraseña",
         "password_placeholder": "Ingresa tu contraseña",
         "login_button": "Iniciar sesión",
@@ -378,7 +446,14 @@
         "admin_create_error": "Error al crear cuenta de administrador",
         "or": "o",
         "sso_login": "Iniciar sesión con SSO",
-        "sso_login_provider": "Iniciar sesión con {{provider}}"
+        "sso_login_provider": "Iniciar sesión con {{provider}}",
+        "magicLinkHint": "¿Sin contraseña? Introduce tu correo electrónico y te enviaremos un enlace de inicio de sesión único.",
+        "magicLinkEmailLabel": "Correo electrónico",
+        "magicLinkEmailPlaceholder": "tu@ejemplo.com",
+        "magicLinkSubmit": "Enviar enlace de inicio de sesión",
+        "magicLinkSent": "Si existe una cuenta para ese correo, se ha enviado un enlace de inicio de sesión. Revisa tu bandeja de entrada.",
+        "magicLinkUnavailable": "El inicio de sesión por correo electrónico no está disponible en este servidor.",
+        "magicLinkNetworkError": "No se pudo conectar con el servidor: {{message}}"
     },
     "storage": {
         "title": "Almacenamiento",
@@ -428,7 +503,8 @@
         "clear": "Limpiar recientes",
         "accessed": "Accedido",
         "empty_state": "No hay archivos recientes",
-        "empty_hint": "Los archivos que abras aparecerán aquí"
+        "empty_hint": "Los archivos que abras aparecerán aquí",
+        "loadMore": "Cargar más"
     },
     "notifications": {
         "file_renamed": "Archivo renombrado",
@@ -660,6 +736,18 @@
         "minutes_ago": "hace {{n}} min",
         "hours_ago": "hace {{n}}h",
         "days_ago": "hace {{n}} días",
+        "edit_profile": "Editar perfil",
+        "edit_oidc_managed": "Para cambiar tu información (nombre, apellidos, foto de perfil, …), actualízala en tu proveedor de identidad. Los cambios se aplicarán en tu próximo inicio de sesión.",
+        "username_claim_hint": "Entre 2 y 64 caracteres, letras / dígitos / punto / guion / subrayado. Una vez elegido, el nombre de usuario no se puede cambiar (los clientes DAV/NextCloud dependen de él).",
+        "username_already_claimed": "Nombre de usuario fijado y no modificable (los clientes DAV/NextCloud dependen de él).",
+        "given_name": "Nombre",
+        "family_name": "Apellidos",
+        "save_profile": "Guardar cambios",
+        "profile_saved": "Perfil actualizado",
+        "profile_no_changes": "Sin cambios que guardar.",
+        "profile_save_failed": "Error al guardar",
+        "username_taken_error": "Ese nombre de usuario ya está en uso.",
+        "username_immutable_error": "Tu nombre de usuario ya está fijado y no se puede cambiar aquí. Contacta con un administrador si necesitas renombrarlo.",
         "change_password": "Cambiar Contraseña",
         "current_password": "Contraseña Actual",
         "new_password": "Nueva Contraseña",
@@ -675,12 +763,84 @@
         "error_label_required": "Introduce una etiqueta",
         "error_create_pw": "Error al crear contraseña de aplicación",
         "confirm_revoke": "¿Revocar contraseña \"{{label}}\"? Los clientes que la usen dejarán de funcionar.",
-        "error_revoke": "Error al revocar contraseña"
+        "error_revoke": "Error al revocar contraseña",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "Subiendo...",
         "files": "archivos",
         "complete": "{{count}} / {{total}} subidos"
     },
-    "storage_quota_exceeded": "Cuota de almacenamiento superada"
+    "storage_quota_exceeded": "Cuota de almacenamiento superada",
+    "sharedwithme": {
+        "pageTitle": "Compartido conmigo",
+        "pageDescription": "Archivos y carpetas que otros usuarios han compartido contigo",
+        "emptyStateTitle": "Aún no hay nada compartido contigo",
+        "emptyStateDesc": "Los elementos que otros usuarios compartan contigo aparecerán aquí",
+        "loadMore": "Cargar más",
+        "sharedBy": "Compartido por",
+        "colName": "Nombre",
+        "colType": "Tipo",
+        "colSharedBy": "Compartido por",
+        "colDate": "Fecha de compartición",
+        "colPermissions": "Permisos"
+    },
+    "groupby": {
+        "none": "Ninguno",
+        "title": "Agrupar por",
+        "owner": "Propietario",
+        "shareDate": "Fecha de compartición",
+        "type": "Tipo",
+        "type.folders": "Carpetas",
+        "accessedAt": "Fecha de acceso",
+        "modifiedAt": "Fecha de modificación",
+        "createdAt": "Fecha de creación",
+        "size": "Tamaño",
+        "favoriteDate": "Fecha de favorito",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "Hoy",
+        "last7days": "Últimos 7 días",
+        "last30days": "Últimos 30 días"
+    },
+    "groups": {
+        "title": "Gestionar grupos",
+        "create_button": "Crear grupo",
+        "create_dialog_title": "Nuevo grupo",
+        "edit_dialog_title": "Renombrar grupo",
+        "name_label": "Nombre",
+        "name_placeholder": "ingenieria",
+        "description_label": "Descripción (opcional)",
+        "members_section": "Miembros",
+        "add_member_placeholder": "Añadir un usuario o grupo…",
+        "no_members": "Aún no hay miembros.",
+        "remove_member": "Eliminar",
+        "delete_group": "Eliminar grupo",
+        "delete_confirm": "¿Eliminar el grupo «{name}»? Se revocarán las concesiones que hagan referencia a este grupo.",
+        "empty_state": "Aún no hay grupos.",
+        "load_more": "Cargar más",
+        "back_to_list": "Volver",
+        "loading": "Cargando…",
+        "virtual_badge": "Sistema",
+        "member_count_zero": "Sin miembros",
+        "member_count_one": "1 miembro",
+        "member_count_other": "{count} miembros",
+        "delete_confirm_label": "Escribe el nombre del grupo para confirmar:",
+        "delete_confirm_mismatch": "Escribe el nombre del grupo exactamente para confirmar.",
+        "virtual_internal_name": "Interno"
+    }
 }

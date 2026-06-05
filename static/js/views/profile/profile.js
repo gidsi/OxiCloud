@@ -1,6 +1,12 @@
 import { getCsrfHeaders } from '../../core/csrf.js';
+import { installFetchInterceptor } from '../../core/fetchWrapper.js';
 import { i18n } from '../../core/i18n.js';
 import { oxiIconsInit } from '../../core/icons.js';
+import { resizeImageToDataUrl } from '../../utils/imageResize.js';
+
+// Install the fetch interceptor so expired access tokens are refreshed
+// automatically on this standalone page (it is not loaded by main.js here).
+installFetchInterceptor();
 
 const API = '/api';
 
@@ -36,6 +42,240 @@ function timeAgo(dateStr) {
     return d.toLocaleDateString();
 }
 
+// ── Avatar helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Render the large profile avatar (#p-avatar) — photo or initials.
+ * @param {string | null | undefined} photo
+ * @param {string} initials
+ */
+function _renderAvatar(photo, initials) {
+    const avatarEl = document.getElementById('p-avatar');
+    if (!avatarEl) return;
+    if (photo) {
+        const img = document.createElement('img');
+        img.alt = initials;
+        img.src = photo;
+        img.onerror = () => {
+            avatarEl.replaceChildren();
+            avatarEl.textContent = initials;
+        };
+        avatarEl.replaceChildren(img);
+    } else {
+        avatarEl.replaceChildren();
+        avatarEl.textContent = initials;
+    }
+}
+
+/**
+ * Persist user data to localStorage and refresh the top-right avatar.
+ * Calls GET /api/auth/me to get the fresh user object.
+ * @returns {Promise<void>}
+ */
+async function _refreshUserCache() {
+    try {
+        const resp = await fetch(`${API}/auth/me`, {
+            headers: headers(),
+            credentials: 'same-origin'
+        });
+        if (!resp.ok) return;
+        const user = await resp.json();
+        localStorage.setItem('oxicloud_user', JSON.stringify(user));
+
+        // Refresh top-right avatars if userMenu module is loaded on this page
+        // (profile.html is a standalone page, userMenu is only in index.html)
+        // — so we update #user-avatar / #user-menu-avatar directly if present
+        const initials = (user.username || user.email || '?').substring(0, 2).toUpperCase();
+        const topEl = /** @type {HTMLElement|null} */ (document.getElementById('user-avatar'));
+        const dropEl = /** @type {HTMLElement|null} */ (document.getElementById('user-menu-avatar'));
+        if (topEl || dropEl) {
+            /** @param {HTMLElement|null} el */
+            function applyPhoto(el) {
+                if (!el) return;
+                if (user.image) {
+                    const img = document.createElement('img');
+                    img.alt = initials;
+                    img.src = user.image;
+                    img.onerror = () => {
+                        el.replaceChildren();
+                        el.textContent = initials;
+                    };
+                    el.replaceChildren(img);
+                } else {
+                    el.replaceChildren();
+                    el.textContent = initials;
+                }
+            }
+            applyPhoto(topEl);
+            applyPhoto(dropEl);
+        }
+    } catch (_) {
+        // Best-effort
+    }
+}
+
+// ── Photo edit panel ────────────────────────────────────────────────────────────
+
+/** @type {string|null} Pending data URI from file upload (upload mode) */
+let _uploadedDataUri = null;
+
+/**
+ * Switch the visible edit tab.
+ * @param {'url'|'upload'} tab
+ */
+function _switchTab(tab) {
+    const urlPane = document.getElementById('p-pane-url');
+    const uploadPane = document.getElementById('p-pane-upload');
+    const urlBtn = document.getElementById('p-tab-url');
+    const uploadBtn = document.getElementById('p-tab-upload');
+    if (tab === 'url') {
+        urlPane?.classList.remove('hidden');
+        uploadPane?.classList.add('hidden');
+        urlBtn?.classList.add('active');
+        uploadBtn?.classList.remove('active');
+    } else {
+        urlPane?.classList.add('hidden');
+        uploadPane?.classList.remove('hidden');
+        urlBtn?.classList.remove('active');
+        uploadBtn?.classList.add('active');
+    }
+}
+
+function _openEditPanel() {
+    document.getElementById('p-avatar-edit-panel')?.classList.remove('hidden');
+    _switchTab('url');
+    _uploadedDataUri = null;
+    const preview = /** @type {HTMLImageElement|null} */ (document.getElementById('p-image-preview'));
+    if (preview) {
+        preview.src = '';
+        preview.classList.add('hidden');
+    }
+    const urlInput = /** @type {HTMLInputElement|null} */ (document.getElementById('p-image-url'));
+    if (urlInput) urlInput.value = '';
+    const status = document.getElementById('p-avatar-status');
+    if (status) status.innerHTML = '';
+}
+
+function _closeEditPanel() {
+    document.getElementById('p-avatar-edit-panel')?.classList.add('hidden');
+    _uploadedDataUri = null;
+}
+
+/**
+ * Send PUT /api/auth/me/image and update UI on success.
+ * @param {string | null} image
+ */
+async function _saveImage(image) {
+    const statusEl = document.getElementById('p-avatar-status');
+    const saveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('p-avatar-save'));
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i>`;
+    }
+    if (statusEl) statusEl.innerHTML = '';
+
+    try {
+        const resp = await fetch(`${API}/auth/me/image`, {
+            method: 'PUT',
+            headers: headers(),
+            credentials: 'same-origin',
+            body: JSON.stringify({ image })
+        });
+
+        if (resp.ok) {
+            await _refreshUserCache();
+            // Update large avatar immediately
+            const raw = localStorage.getItem('oxicloud_user');
+            const user = raw ? JSON.parse(raw) : null;
+            const initials = (user?.username || user?.email || '?').substring(0, 2).toUpperCase();
+            _renderAvatar(user?.image, initials);
+            _closeEditPanel();
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            if (statusEl) {
+                statusEl.innerHTML =
+                    '<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ' +
+                    escapeHtml(err.message || err.error || i18n.t('profile.photo_save_failed')) +
+                    '</div>';
+            }
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.innerHTML =
+                '<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ' +
+                escapeHtml(i18n.t('profile.error_network', { message: /** @type {Error} */ (err).message })) +
+                '</div>';
+        }
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = `<i class="fas fa-save"></i> ${escapeHtml(i18n.t('profile.photo_save'))}`;
+        }
+    }
+}
+
+function _setupPhotoEdit() {
+    const editBtn = document.getElementById('p-avatar-edit-btn');
+    const cancelBtn = document.getElementById('p-avatar-cancel');
+    const saveBtn = document.getElementById('p-avatar-save');
+    const removeBtn = document.getElementById('p-avatar-remove');
+    const tabUrl = document.getElementById('p-tab-url');
+    const tabUpload = document.getElementById('p-tab-upload');
+    const fileInput = /** @type {HTMLInputElement|null} */ (document.getElementById('p-image-file'));
+
+    editBtn?.addEventListener('click', _openEditPanel);
+    cancelBtn?.addEventListener('click', _closeEditPanel);
+
+    tabUrl?.addEventListener('click', () => {
+        _switchTab('url');
+    });
+    tabUpload?.addEventListener('click', () => {
+        _switchTab('upload');
+    });
+
+    saveBtn?.addEventListener('click', async () => {
+        const activePane = document.getElementById('p-pane-url')?.classList.contains('hidden') ? 'upload' : 'url';
+        if (activePane === 'url') {
+            const urlInput = /** @type {HTMLInputElement|null} */ (document.getElementById('p-image-url'));
+            const val = urlInput?.value.trim() || null;
+            await _saveImage(val || null);
+        } else {
+            if (!_uploadedDataUri) {
+                const status = document.getElementById('p-avatar-status');
+                if (status)
+                    status.innerHTML = `<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(i18n.t('profile.photo_no_file'))}</div>`;
+                return;
+            }
+            await _saveImage(_uploadedDataUri);
+        }
+    });
+
+    removeBtn?.addEventListener('click', async () => {
+        await _saveImage(null);
+    });
+
+    fileInput?.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const status = document.getElementById('p-avatar-status');
+        if (status) status.innerHTML = '';
+        try {
+            const dataUri = await resizeImageToDataUrl(file, 104);
+            _uploadedDataUri = dataUri;
+            const preview = /** @type {HTMLImageElement|null} */ (document.getElementById('p-image-preview'));
+            if (preview) {
+                preview.src = dataUri;
+                preview.classList.remove('hidden');
+            }
+        } catch (err) {
+            _uploadedDataUri = null;
+            if (status) {
+                status.innerHTML = `<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(/** @type {Error} */ (err).message)}</div>`;
+            }
+        }
+    });
+}
+
 async function init() {
     try {
         oxiIconsInit();
@@ -49,9 +289,9 @@ async function init() {
         }
         const user = await resp.json();
 
-        const initials = (user.username || '?').substring(0, 2).toUpperCase();
-        document.getElementById('p-avatar').textContent = initials;
-        document.getElementById('p-username').textContent = user.username;
+        const initials = (user.username || user.email || '?').substring(0, 2).toUpperCase();
+        _renderAvatar(user.image, initials);
+        document.getElementById('p-username').textContent = user.username || user.email || '—';
         document.getElementById('p-email').textContent = user.email || '';
 
         const badge = document.getElementById('p-role-badge');
@@ -63,7 +303,18 @@ async function init() {
             badge.innerHTML = `<i class="fas fa-user"></i> ${i18n.t('profile.role_user')}`;
         }
 
-        document.getElementById('p-detail-username').textContent = user.username;
+        // Photo edit controls
+        const isLocal = !user.auth_provider || user.auth_provider === 'local';
+        const editBtn = document.getElementById('p-avatar-edit-btn');
+        const oidcNote = document.getElementById('p-avatar-oidc-note');
+        if (user.can_edit_image && isLocal) {
+            editBtn?.classList.remove('hidden');
+        } else if (!isLocal && user.image) {
+            // OIDC user with a photo: show note, no edit button
+            oidcNote?.classList.remove('hidden');
+        }
+
+        document.getElementById('p-detail-username').textContent = user.username || user.email || '—';
         document.getElementById('p-detail-email').textContent = user.email || '—';
         document.getElementById('p-detail-role').textContent = user.role === 'admin' ? i18n.t('profile.role_admin') : i18n.t('profile.role_user');
         document.getElementById('p-detail-login').textContent = timeAgo(user.last_login_at);
@@ -84,6 +335,8 @@ async function init() {
         if (user.auth_provider && user.auth_provider !== 'local') {
             document.getElementById('password-section').classList.add('hidden');
         }
+
+        _renderProfileEdit(user);
 
         loadAppPasswords();
 
@@ -346,6 +599,137 @@ async function revokeAppPassword(id, label) {
     }
 }
 
+/**
+ * Render the Edit Profile card based on the current user.
+ *
+ * For OIDC users: the entire form is hidden and a single alert tells
+ * them their profile is managed at the IdP. For local users: the form
+ * is populated from the current values, and the username input is
+ * disabled when a handle is already claimed (PR 24's claim-once
+ * policy).
+ *
+ * @param {import('../../core/types.js').User} user
+ */
+function _renderProfileEdit(user) {
+    const oidcNote = document.getElementById('profile-edit-oidc-note');
+    const form = document.getElementById('profile-edit-form');
+    if (!oidcNote || !form) return;
+
+    const isOidc = user.auth_provider && user.auth_provider !== 'local';
+    if (isOidc) {
+        oidcNote.classList.remove('hidden');
+        form.classList.add('hidden');
+        return;
+    }
+
+    oidcNote.classList.add('hidden');
+    form.classList.remove('hidden');
+
+    const usernameInput = /** @type {HTMLInputElement} */ (document.getElementById('profile-edit-username'));
+    const usernameHint = document.getElementById('profile-edit-username-hint');
+    const givenInput = /** @type {HTMLInputElement} */ (document.getElementById('profile-edit-given-name'));
+    const familyInput = /** @type {HTMLInputElement} */ (document.getElementById('profile-edit-family-name'));
+
+    if (user.username) {
+        usernameInput.value = user.username;
+        usernameInput.disabled = true;
+        if (usernameHint) {
+            usernameHint.textContent = i18n.t('profile.username_already_claimed');
+        }
+    } else {
+        usernameInput.value = '';
+        usernameInput.disabled = false;
+        if (usernameHint) {
+            usernameHint.textContent = i18n.t('profile.username_claim_hint');
+        }
+    }
+    givenInput.value = user.given_name || '';
+    familyInput.value = user.family_name || '';
+}
+
+/**
+ * Submit the profile edit form. Only sends fields the user can change:
+ *   - Username only if not already claimed (input wasn't disabled).
+ *   - Given/family names only when their value differs from the
+ *     current (avoids 400-rejecting an empty string the user never
+ *     touched).
+ *
+ * @param {Event} e
+ */
+async function submitProfile(e) {
+    e.preventDefault();
+
+    const statusEl = document.getElementById('profile-edit-status');
+    const btn = /** @type {HTMLButtonElement} */ (document.getElementById('profile-edit-submit'));
+    const usernameInput = /** @type {HTMLInputElement} */ (document.getElementById('profile-edit-username'));
+    const givenInput = /** @type {HTMLInputElement} */ (document.getElementById('profile-edit-given-name'));
+    const familyInput = /** @type {HTMLInputElement} */ (document.getElementById('profile-edit-family-name'));
+
+    /** @type {{ username?: string, given_name?: string, family_name?: string }} */
+    const body = {};
+    if (!usernameInput.disabled && usernameInput.value.trim()) {
+        body.username = usernameInput.value.trim();
+    }
+    const given = givenInput.value.trim();
+    if (given) body.given_name = given;
+    const family = familyInput.value.trim();
+    if (family) body.family_name = family;
+
+    if (Object.keys(body).length === 0) {
+        statusEl.innerHTML = `<div class="alert alert-info"><i class="fas fa-info-circle"></i> ${escapeHtml(i18n.t('profile.profile_no_changes'))}</div>`;
+        return false;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${escapeHtml(i18n.t('profile.updating'))}`;
+
+    try {
+        const resp = await fetch(`${API}/auth/me/profile`, {
+            method: 'PATCH',
+            headers: headers(),
+            credentials: 'same-origin',
+            body: JSON.stringify(body)
+        });
+
+        if (resp.ok) {
+            /** @type {import('../../core/types.js').User} */
+            const updated = await resp.json();
+            _renderProfileEdit(updated);
+            // Also refresh the read-only "Account Details" username field.
+            const detailUsername = document.getElementById('p-detail-username');
+            if (detailUsername) detailUsername.textContent = updated.username || '—';
+            const topUsername = document.getElementById('p-username');
+            if (topUsername && updated.username) topUsername.textContent = updated.username;
+            statusEl.innerHTML = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${escapeHtml(i18n.t('profile.profile_saved'))}</div>`;
+        } else if (resp.status === 409) {
+            const err = await resp.json().catch(() => ({}));
+            // Distinguish "username taken" from "username immutable" using the
+            // human-readable message — both are 409. Server audit has the
+            // structured `reason` field; the JSON body just carries `message`.
+            const msg = (err.message || '').toLowerCase();
+            const key = msg.includes('already claimed') ? 'profile.username_immutable_error' : 'profile.username_taken_error';
+            statusEl.innerHTML = `<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(i18n.t(key))}</div>`;
+        } else if (resp.status === 403) {
+            statusEl.innerHTML = `<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(i18n.t('profile.edit_oidc_managed'))}</div>`;
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            statusEl.innerHTML =
+                '<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ' +
+                escapeHtml(err.message || i18n.t('profile.profile_save_failed')) +
+                '</div>';
+        }
+    } catch (err) {
+        statusEl.innerHTML =
+            '<div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> ' +
+            escapeHtml(i18n.t('profile.error_network', { message: /** @type {Error} */ (err).message })) +
+            '</div>';
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-save"></i> ${escapeHtml(i18n.t('profile.save_profile'))}`;
+    return false;
+}
+
 /** @param {string} str */
 function escapeHtml(str) {
     var div = document.createElement('div');
@@ -357,9 +741,13 @@ init();
 
 /* Wire up event handlers (replaces inline onclick/onsubmit) */
 document.getElementById('password-form').addEventListener('submit', changePassword);
+document.getElementById('profile-edit-form')?.addEventListener('submit', submitProfile);
 document.getElementById('app-pw-generate').addEventListener('click', createAppPassword);
 document.getElementById('app-pw-copy-btn').addEventListener('click', copyAppPassword);
 document.getElementById('app-pw-auto-toggle').addEventListener('click', toggleAutoPasswords);
+
+/* Photo-edit panel — wired once at module load, not per init() call */
+_setupPhotoEdit();
 
 /* Re-render when language changes */
 window.addEventListener('translationsLoaded', () => {

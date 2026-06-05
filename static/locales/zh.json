@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "此登录链接已不再有效",
+                "expired_body": "链接可能已过期或已被使用。我们可以为您发送一个新的 — 几秒钟内它将到达您的收件箱。",
+                "resend_to": "发送新链接至 {{email}}",
+                "generic_unavailable": "此登录链接已不再有效。它可能已被使用或已过期。请在登录页面请求新链接。",
+                "service_unavailable": "此服务器未启用魔法链接登录。",
+                "internal_error": "登录时出错。请重试。",
+                "resend_failure": "发送链接时出错。请重试。",
+                "cross_browser_title": "在此设备上继续登录?",
+                "cross_browser_body": "您在与请求时不同的浏览器或设备上打开了此登录链接。",
+                "cross_browser_warning": "如果是您请求了此链接,可以安全继续。否则,请关闭此页面 — 点击「继续」将使其他人登录您的账户。",
+                "cross_browser_continue": "继续并登录",
+                "resend_confirmation_title": "请检查您的收件箱",
+                "resend_confirmation_body": "如果登录链接属于活跃账户,新链接刚刚已发送。请检查您的收件箱。",
+                "return_link": "返回 OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} 在 OxiCloud 上与您共享了一个{{kind}}",
+                    "body": "{{inviter}} 在 OxiCloud 上与您共享了一个{{kind}}。\n\n点击下方链接打开:\n{{link}}\n\n该链接仅可使用一次,并将在 {{ttl_hours}} 小时后过期。\n如果您未预期收到此邀请,可以忽略此消息。\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "登录 OxiCloud",
+                    "body": "您好,\n\n使用下方链接登录 OxiCloud。该链接仅可使用一次,并将在 {{ttl_minutes}} 分钟后过期。请在请求时使用的同一设备上打开。\n\n{{link}}\n\n如果您未请求此登录链接,可以忽略此消息 — 无需进一步操作。\n\n— OxiCloud"
+                },
+                "kind_file": "文件",
+                "kind_folder": "文件夹",
+                "english_fallback_divider": "--- 以下为英文版本 ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "极简云存储系统"
@@ -10,7 +43,8 @@
         "favorites": "收藏",
         "photos": "照片",
         "music": "音乐",
-        "trash": "回收站"
+        "trash": "回收站",
+        "sharedwithme": "与我共享"
     },
     "photos": {
         "empty_state": "还没有照片",
@@ -125,7 +159,13 @@
         "about_description": "基于 Rust 和整洁架构构建的云存储平台。快速、安全、私密。",
         "admin_panel": "管理面板",
         "profile": "我的资料",
-        "role_user": "用户"
+        "role_user": "用户",
+        "theme": {
+            "light": "浅色",
+            "dark": "深色",
+            "auto": "跟随系统"
+        },
+        "manage_groups": "管理群组"
     },
     "share": {
         "dialogTitle": "共享链接",
@@ -269,7 +309,8 @@
             "archive": "压缩文件",
             "installer": "安装程序",
             "code": "代码"
-        }
+        },
+        "owner": "所有者"
     },
     "dialogs": {
         "rename_folder": "重命名文件夹",
@@ -329,7 +370,13 @@
         "move_error": "移动时出错",
         "empty_name": "名称不能为空",
         "name_exists": "已存在同名文件或文件夹",
-        "generic_error": "发生错误"
+        "generic_error": "发生错误",
+        "group_name_invalid": "组名必须符合邮件前缀格式（字母、数字、点、连字符、下划线；1–64个字符）。",
+        "group_cycle": "此成员会在组之间形成循环引用。",
+        "group_depth_exceeded": "嵌套深度超出允许的最大值（8）。",
+        "group_virtual_immutable": "“Internal”组由系统管理，无法修改。",
+        "group_not_found": "未找到组。",
+        "group_name_taken": "同名组已存在。"
     },
     "breadcrumb": {
         "home": "主页"
@@ -339,15 +386,36 @@
         "empty_state": "回收站为空",
         "original_location": "原始位置",
         "deleted_date": "删除日期",
+        "remaining": "剩余",
         "actions": "操作",
         "restore": "恢复",
         "delete_permanently": "永久删除",
-        "empty_confirm": "你确定要清空回收站吗？这将永久删除所有项目。"
+        "empty_confirm": "你确定要清空回收站吗？这将永久删除所有项目。",
+        "groupby": {
+            "remaining_days": "剩余天数",
+            "trashed_time": "删除时间"
+        }
+    },
+    "daysRemaining": {
+        "expired": "已过期",
+        "today": "今天",
+        "tomorrow": "明天",
+        "inDays": "{{count}} 天"
+    },
+    "expiryChip": {
+        "never": "永不过期",
+        "expired": "已过期",
+        "today": "今天到期",
+        "tomorrow": "明天到期",
+        "inDays": "{{count}} 天后到期",
+        "onDate": "于 {{date}} 到期"
     },
     "auth": {
         "login_title": "登录",
         "username": "用户名",
         "username_placeholder": "输入你的用户名",
+        "login_identifier": "用户名或邮箱",
+        "login_identifier_placeholder": "请输入用户名或邮箱",
         "password": "密码",
         "password_placeholder": "输入你的密码",
         "login_button": "登录",
@@ -378,7 +446,14 @@
         "admin_create_error": "创建管理员账号时出错",
         "or": "或",
         "sso_login": "使用 SSO 登录",
-        "sso_login_provider": "使用 {{provider}} 登录"
+        "sso_login_provider": "使用 {{provider}} 登录",
+        "magicLinkHint": "没有密码？输入您的邮箱，我们将向您发送一次性登录链接。",
+        "magicLinkEmailLabel": "邮箱地址",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "发送登录链接",
+        "magicLinkSent": "如果该邮箱存在账户，登录链接已发送。请查收您的收件箱。",
+        "magicLinkUnavailable": "此服务器不支持邮箱登录。",
+        "magicLinkNetworkError": "无法连接到服务器：{{message}}"
     },
     "storage": {
         "title": "存储空间",
@@ -428,7 +503,8 @@
         "clear": "清除最近",
         "accessed": "访问于",
         "empty_state": "没有最近文件",
-        "empty_hint": "您打开的文件将显示在这里"
+        "empty_hint": "您打开的文件将显示在这里",
+        "loadMore": "加载更多"
     },
     "batch": {
         "one_selected": "已选择 1 个项目",
@@ -643,6 +719,18 @@
         "minutes_ago": "{{n}}分钟前",
         "hours_ago": "{{n}}小时前",
         "days_ago": "{{n}}天前",
+        "edit_profile": "编辑个人资料",
+        "edit_oidc_managed": "要更改您的信息(姓名、名字、头像等),请前往您的身份提供商更新。变更将在您下次登录时显示。",
+        "username_claim_hint": "2-64 个字符,字母 / 数字 / 点 / 短横线 / 下划线。一旦选定,用户名将无法更改(DAV/NextCloud 客户端依赖它)。",
+        "username_already_claimed": "用户名已设置,不可更改(DAV/NextCloud 客户端依赖它)。",
+        "given_name": "名",
+        "family_name": "姓",
+        "save_profile": "保存更改",
+        "profile_saved": "个人资料已更新",
+        "profile_no_changes": "无更改可保存。",
+        "profile_save_failed": "保存失败",
+        "username_taken_error": "该用户名已被占用。",
+        "username_immutable_error": "您的用户名已设置,无法在此更改。如需重命名,请联系管理员。",
         "change_password": "修改密码",
         "current_password": "当前密码",
         "new_password": "新密码",
@@ -658,7 +746,20 @@
         "error_label_required": "请输入标签",
         "error_create_pw": "创建应用密码失败",
         "confirm_revoke": "撤销应用密码\"{{label}}\"？使用此密码的客户端将停止工作。",
-        "error_revoke": "撤销失败"
+        "error_revoke": "撤销失败",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "notifications": {
         "file_renamed": "文件已重命名",
@@ -682,5 +783,64 @@
         "files": "个文件",
         "complete": "已上传 {{count}} / {{total}}"
     },
-    "storage_quota_exceeded": "存储配额已超限"
+    "storage_quota_exceeded": "存储配额已超限",
+    "sharedwithme": {
+        "pageTitle": "与我共享",
+        "pageDescription": "其他用户与您共享的文件和文件夹",
+        "emptyStateTitle": "暂无内容与您共享",
+        "emptyStateDesc": "其他用户与您共享的项目将显示在此处",
+        "loadMore": "加载更多",
+        "sharedBy": "共享者",
+        "colName": "名称",
+        "colType": "类型",
+        "colSharedBy": "共享者",
+        "colDate": "共享日期",
+        "colPermissions": "权限"
+    },
+    "groupby": {
+        "none": "无",
+        "title": "分组方式",
+        "owner": "所有者",
+        "shareDate": "分享日期",
+        "type": "类型",
+        "type.folders": "文件夹",
+        "accessedAt": "访问日期",
+        "modifiedAt": "修改日期",
+        "createdAt": "创建日期",
+        "size": "大小",
+        "favoriteDate": "收藏日期",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "今天",
+        "last7days": "近7天",
+        "last30days": "近30天"
+    },
+    "groups": {
+        "title": "管理群组",
+        "create_button": "创建群组",
+        "create_dialog_title": "新群组",
+        "edit_dialog_title": "重命名群组",
+        "name_label": "名称",
+        "name_placeholder": "engineering",
+        "description_label": "描述（可选）",
+        "members_section": "成员",
+        "add_member_placeholder": "添加用户或群组…",
+        "no_members": "暂无成员。",
+        "remove_member": "移除",
+        "delete_group": "删除群组",
+        "delete_confirm": "删除群组 \"{name}\"？引用此群组的所有权限将被撤销。",
+        "empty_state": "暂无群组。",
+        "load_more": "加载更多",
+        "back_to_list": "返回",
+        "loading": "加载中…",
+        "virtual_badge": "系统",
+        "member_count_zero": "无成员",
+        "member_count_one": "1 个成员",
+        "member_count_other": "{count} 个成员",
+        "delete_confirm_label": "请输入群组名称以确认：",
+        "delete_confirm_mismatch": "请准确输入群组名称以确认。",
+        "virtual_internal_name": "内部"
+    }
 }

@@ -91,9 +91,15 @@ pub struct AdminCreateUserDto {
     /// "admin" or "user"; defaults to "user"
     pub role: Option<String>,
     /// Storage quota in bytes; 0 = unlimited. If omitted, uses role default.
+    /// Ignored when `is_external = true` (external users have no storage).
     pub quota_bytes: Option<i64>,
     /// Whether the account is active; defaults to true
     pub active: Option<bool>,
+    /// `true` to create a grant-only external user (no home folder, no
+    /// storage quota). Defaults to `false` (internal user). External
+    /// users authenticate via magic-link / OIDC / OCM federation —
+    /// password is set but never used.
+    pub is_external: Option<bool>,
 }
 
 /// Request body for admin password reset
@@ -222,4 +228,56 @@ pub struct StartMigrationDto {
 pub struct VerifyMigrationDto {
     /// Number of random blobs to sample-check (default: 100).
     pub sample_size: Option<usize>,
+}
+
+// ============================================================================
+// SMTP Settings DTOs (Admin Panel)
+// ============================================================================
+
+/// Read-only SMTP info shown on the admin SMTP page. SMTP configuration
+/// is sourced exclusively from environment variables — these fields are
+/// for display only and any change has to happen by updating the env
+/// and restarting the server.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SmtpInfoDto {
+    /// Whether `OXICLOUD_SMTP_HOST` is set and SMTP construction succeeded.
+    pub enabled: bool,
+    /// `OXICLOUD_SMTP_HOST`. Empty string when unset.
+    pub host: String,
+    /// `OXICLOUD_SMTP_PORT`. Default 587.
+    pub port: u16,
+    /// Transport encryption mode: `"starttls"`, `"tls"`, or `"none"`.
+    pub tls: String,
+    /// `OXICLOUD_SMTP_FROM` mailbox. Empty when unset.
+    pub from: String,
+    /// `<set>` if a SASL user is configured, `<anon>` otherwise.
+    /// Never echoes the username — admins compare against the
+    /// runtime config without having to look in `.env`.
+    pub user_state: &'static str,
+}
+
+/// Request body for `POST /api/admin/smtp/test`: send a hardcoded
+/// diagnostic email to the given recipient.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SendSmtpTestDto {
+    pub to: String,
+}
+
+/// Result of a `POST /api/admin/smtp/test` invocation. `success=true`
+/// carries the SMTP server's response code + first reply line; on
+/// failure the relevant error message goes in `error`. Always 200 OK
+/// so the frontend can render both outcomes in one place — the SMTP
+/// failure is a normal operational state, not an HTTP error.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SmtpTestResultDto {
+    pub success: bool,
+    /// SMTP status code (e.g. 250). Only set on success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<u16>,
+    /// First line of the SMTP server's reply. Only set on success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Human-readable error message. Only set on failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }

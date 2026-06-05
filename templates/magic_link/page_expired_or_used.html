@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="{{ locale_code }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>OxiCloud</title>
+    <link rel="icon" type="image/svg+xml" href="/logo/logo-plain.svg">
+    <script src="/js/core/theme-init.js"></script>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/views/auth.css">
+  </head>
+  <body>
+    <div class="auth-container">
+      <div class="auth-panel">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">
+            <svg viewBox="0 0 500 500">
+              <path d="M345 310c32 0 58-26 58-58s-26-58-58-58c-6.2 0-12 0.9-17.5 2.7C318 166 289 143 255 143c-34.3 0-63.1 22.6-73 53.7C176.9 195.7 171 195 165 195c-32 0-58 26-58 58s26 58 58 58h180z" fill="#fff"/>
+            </svg>
+          </div>
+          <div class="auth-logo-text">OxiCloud</div>
+        </div>
+        <h2 class="auth-title">{{ title }}</h2>
+        <p class="auth-subtitle">{{ body }}</p>
+        {%- if let Some(offer) = resend %}
+        <form method="post" action="{{ offer.action_url }}" class="auth-form">
+          <button type="submit" class="auth-button">{{ offer.button_label }}</button>
+        </form>
+        {%- endif %}
+        <p class="auth-subtitle"><a href="/">{{ return_link }}</a></p>
+      </div>
+    </div>
+  </body>
+</html>

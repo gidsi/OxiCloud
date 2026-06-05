@@ -8,14 +8,17 @@ pub mod device_code;
 pub mod entity_errors;
 pub mod file;
 pub mod folder;
+pub mod magic_link_token;
 pub mod playlist;
 pub mod session;
 pub mod share;
+pub mod subject_group;
 pub mod trashed_item;
 pub mod user;
 
 // Re-exportar errores de entidades para facilitar el uso
 pub use entity_errors::{
     CalendarError, CalendarEventError, CalendarEventResult, CalendarResult, FileError, FileResult,
-    FolderError, FolderResult, ShareError, ShareResult, UserError, UserResult,
+    FolderError, FolderResult, ShareError, ShareResult, SubjectGroupError, SubjectGroupResult,
+    UserError, UserResult,
 };

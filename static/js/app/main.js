@@ -7,19 +7,22 @@ import { installFetchInterceptor } from '../core/fetchWrapper.js';
 
 installFetchInterceptor();
 
-import { formatFileSize, formatQuotaSize } from '../core/formatters.js';
+import { Modal } from '../components/modal.js';
+import { escapeHtml, formatFileSize, formatQuotaSize } from '../core/formatters.js';
 import { i18n } from '../core/i18n.js';
 import { oxiIconsInit } from '../core/icons.js';
-import { Modal } from '../core/modal.js';
+import { batchToolbar } from '../features/files/batchToolbar.js';
 import { fileOps } from '../features/files/fileOperations.js';
-import { multiSelect } from '../features/files/multiSelect.js';
 import { favorites } from '../features/library/favorites.js';
 import { recent } from '../features/library/recent.js';
 import { fileSharing } from '../features/sharing/fileSharing.js';
-import { sharedView } from '../views/shared/sharedView.js';
+import { grants } from '../model/grants.js';
+import { recentView } from '../views/recent/recentView.js';
+import { trashView } from '../views/trash/trashView.js';
 import { checkAuthentication } from './authSession.js';
 import { loadFiles } from './filesView.js';
 import {
+    activateFilesUI,
     SECTIONS_MAPPER,
     switchToFavoritesSection,
     switchToFilesSection,
@@ -27,11 +30,11 @@ import {
     switchToPhotosSection,
     switchToRecentFilesSection,
     switchToSharedSection,
+    switchToSharedWithMeSection,
     switchToTrashSection
 } from './navigation.js';
 import { performSearch } from './searchView.js';
 import { app, appElements as elements } from './state.js';
-import { loadTrashItems } from './trashView.js';
 import { ui } from './ui.js';
 import { setupUserMenu } from './userMenu.js';
 
@@ -47,7 +50,7 @@ let uploadDropdownDocumentClickHandler = null;
 let uploadDropdownBindingsController = null;
 let actionsBarDelegationBound = false;
 
-const _multiSelectButons = `
+const _batchToolbarButons = `
     <div class="action-buttons batch-selection-bar hidden" id="multi-select-buttons">
         <div class="list-header-checkbox">
             <button class="batch-bar-close" id="batch-selection-close" title="Cancel selection">
@@ -80,6 +83,18 @@ const _multiSelectButons = `
 
 const _toggleButtons = `
     <div class="view-toggle">
+        <div class="group-by-selector hidden" id="group-by-selector">
+            <button class="toggle-btn group-by-btn" id="group-by-btn"
+                    title="Group by" data-i18n-title="groupby.title">
+                <span class="group-by-label"></span>
+            </button>
+            <button class="toggle-btn sort-dir-btn" id="sort-dir-btn"
+                    title="Sort direction" data-i18n-title="sortdir.title">
+                <i class="fas fa-arrow-up" id="sort-dir-icon"></i>
+            </button>
+            <div class="group-by-menu hidden" id="group-by-menu"></div>
+        </div>
+        <span class="view-toggle-separator hidden" id="group-by-separator"></span>
         <button class="toggle-btn active" id="grid-view-btn" title="Grid view">
             <i class="fas fa-th"></i>
         </button>
@@ -114,7 +129,7 @@ const ACTIONS_BAR_TEMPLATES = {
                 <span data-i18n="actions.new_folder">New folder</span>
             </button>
         </div>
-        ${_multiSelectButons}
+        ${_batchToolbarButons}
         ${_toggleButtons}
     `,
     trash: `
@@ -128,7 +143,7 @@ const ACTIONS_BAR_TEMPLATES = {
     `,
     favorites: `
         <div class="action-buttons" id="default-buttons"></div>
-        ${_multiSelectButons}
+        ${_batchToolbarButons}
         ${_toggleButtons}
     `,
     recent: `
@@ -138,14 +153,36 @@ const ACTIONS_BAR_TEMPLATES = {
                 <span data-i18n="actions.clear_recent">Clear recent</span>
             </button>
         </div>
-        ${_multiSelectButons}
+        ${_batchToolbarButons}
         ${_toggleButtons}
+    `,
+    sharedwithme: `
+        <div class="action-buttons" id="default-buttons"></div>
+        ${_batchToolbarButons}
+        ${_toggleButtons}
+    `,
+    shared: `
+        <div class="action-buttons" id="default-buttons"></div>
+        <div class="view-toggle">
+            <div class="group-by-selector hidden" id="group-by-selector">
+                <button class="toggle-btn group-by-btn" id="group-by-btn"
+                        title="Group by" data-i18n-title="groupby.title">
+                    <span class="group-by-label"></span>
+                </button>
+                <button class="toggle-btn sort-dir-btn" id="sort-dir-btn"
+                        title="Sort direction" data-i18n-title="sortdir.title">
+                    <i class="fas fa-arrow-up" id="sort-dir-icon"></i>
+                </button>
+                <div class="group-by-menu hidden" id="group-by-menu"></div>
+            </div>
+            <span class="view-toggle-separator hidden" id="group-by-separator"></span>
+        </div>
     `
 };
 
 /**
  *
- * @param {'files' | 'trash' | 'favorites' | 'recent' | 'hidden'} mode
+ * @param {'files' | 'trash' | 'favorites' | 'recent' | 'sharedwithme' | 'shared' | 'hidden'} mode
  * @param {boolean} [force=false]
  * @returns
  */
@@ -182,6 +219,84 @@ function setActionsBarMode(mode, force = false) {
     }
 }
 
+/**
+ * @typedef {{ key: string, label: string, setGroupBy: (key: string) => void }} GroupByCapableView
+ */
+
+/**
+ * The view that currently owns the group-by selector, or `null` when no
+ * section supports grouping.  Set by `setGroupByView()` from navigation.js.
+ * @type {{ setGroupBy: (key: string) => void, setDirection: (reversed: boolean) => void } | null}
+ */
+let _groupByView = null;
+
+/**
+ * Update the reference to the view that handles group-by changes.
+ * Called by navigation.js when the active section changes.
+ * @param {{ setGroupBy: (key: string) => void, setDirection: (reversed: boolean) => void } | null} view
+ */
+function setGroupByView(view) {
+    _groupByView = view;
+}
+
+/** @type {((e: MouseEvent) => void) | null} */
+let _groupByDocumentClickHandler = null;
+
+/**
+ * Populate and show (or hide) the group-by dropdown based on the active
+ * section's `groupByDefs`.  Pass an empty array (or omit) to hide the button.
+ *
+ * Must be called AFTER `setActionsBarMode()` so the selector elements exist
+ * in the DOM.
+ *
+ * @param {Array<{key: string, label: string, icon?: string}>} [defs]
+ */
+function syncGroupByMenu(defs = []) {
+    const selector = document.getElementById('group-by-selector');
+    const separator = document.getElementById('group-by-separator');
+    const menu = document.getElementById('group-by-menu');
+    if (!selector || !menu) return;
+
+    const hasDefs = defs.length > 0;
+    selector.classList.toggle('hidden', !hasDefs);
+    separator?.classList.toggle('hidden', !hasDefs);
+
+    if (!hasDefs) {
+        // Reset active indicator when the section has no group-by support
+        const btn = document.getElementById('group-by-btn');
+        btn?.classList.remove('active');
+        const lbl = btn?.querySelector('.group-by-label');
+        if (lbl) lbl.textContent = '';
+        // Reset direction button to ascending (↑)
+        document.getElementById('sort-dir-btn')?.classList.remove('active');
+        return;
+    }
+
+    // Rebuild menu options — call i18n.t() at call time so labels are
+    // localised. Each def supplies its own icon. A section opts into an
+    // ungrouped/sorted entry by including a def with key=''.
+    menu.innerHTML = '';
+    for (const def of defs) {
+        const iconClass = def.icon ?? 'fas fa-layer-group';
+        menu.insertAdjacentHTML(
+            'beforeend',
+            `<button class="group-by-option" data-group-by="${escapeHtml(def.key)}">` +
+                `<i class="${escapeHtml(iconClass)}"></i> ${escapeHtml(def.label)}` +
+                `</button>`
+        );
+    }
+
+    // One stable document-level handler to close the menu on outside clicks.
+    if (_groupByDocumentClickHandler) {
+        document.removeEventListener('click', _groupByDocumentClickHandler);
+    }
+    _groupByDocumentClickHandler = (e) => {
+        if (/** @type {HTMLElement} */ (e.target)?.closest('#group-by-selector')) return;
+        document.getElementById('group-by-menu')?.classList.add('hidden');
+    };
+    document.addEventListener('click', _groupByDocumentClickHandler);
+}
+
 function setupActionsBarDelegation() {
     if (actionsBarDelegationBound || !elements.actionsBar) return;
     actionsBarDelegationBound = true;
@@ -190,7 +305,36 @@ function setupActionsBarDelegation() {
         const btn = /** @type {HTMLElement} */ (e.target)?.closest('button');
         if (!btn) return;
 
+        // ── Group-by option selected ──────────────────────────────────────────
+        if (btn.classList.contains('group-by-option')) {
+            const key = btn.dataset.groupBy ?? '';
+            _groupByView?.setGroupBy(key);
+            document.querySelectorAll('.group-by-option').forEach((b) => {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+            document.getElementById('group-by-menu')?.classList.add('hidden');
+            const groupByBtn = document.getElementById('group-by-btn');
+            // Always active — there's no neutral "None" state anymore.
+            groupByBtn?.classList.add('active');
+            const lbl = groupByBtn?.querySelector('.group-by-label');
+            if (lbl) lbl.innerHTML = btn.innerHTML; // clone icon + label markup
+            // Changing order-by dimension resets direction to ascending
+            _groupByView?.setDirection(false);
+            document.getElementById('sort-dir-btn')?.classList.remove('active');
+            return;
+        }
+
         switch (btn.id) {
+            case 'sort-dir-btn': {
+                const nowReversed = !btn.classList.contains('active');
+                _groupByView?.setDirection(nowReversed);
+                btn.classList.toggle('active', nowReversed);
+                return;
+            }
+            case 'group-by-btn':
+                document.getElementById('group-by-menu')?.classList.toggle('hidden');
+                return;
             case 'upload-files-btn': {
                 e.stopPropagation();
                 const menu = document.getElementById('upload-dropdown-menu');
@@ -220,13 +364,13 @@ function setupActionsBarDelegation() {
                 break;
             case 'empty-trash-btn':
                 if (await fileOps.emptyTrash()) {
-                    loadTrashItems();
+                    await trashView.init();
                 }
                 break;
             case 'clear-recent-btn':
                 if (recent) {
-                    recent.clearRecentFiles();
-                    recent.displayRecentFiles();
+                    await recent.clearRecentFiles();
+                    await recentView.init();
                     ui.showNotification('Cleanup completed', 'Recent files history has been cleared');
                 }
                 break;
@@ -263,8 +407,11 @@ function setupActionsBarDelegation() {
 function deserializeHash() {
     const hashContext = /** type {OxiContext} */ {};
 
+    // External users have no home folder; default them to /#/sharedwithme
+    // (their actual landing) so the URL bar reflects what they'll see.
+    // Internal users default to the Files section.
     // FIXME rename files into drive ?
-    hashContext.section = 'files';
+    hashContext.section = app.isExternalUser ? 'sharedwithme' : 'files';
 
     const hash_elements = window.location.hash.split('/');
 
@@ -379,14 +526,20 @@ function initApp() {
     }
 
     // Initialize multi-select / batch actions
-    if (multiSelect?.init) {
+    if (batchToolbar?.init) {
         console.log('Initializing multi-select module');
-        multiSelect.init();
+        batchToolbar.init();
     }
 
     window.addEventListener('authenticationDone', async () => {
         // Check if a context was provided in the URL
         const hashContext = deserializeHash();
+
+        // Always fetch grants so shared badges are correct regardless of the
+        // initial section. Fire in the background — don't block section init.
+        grants.fetchIncomingGrants();
+        grants.fetchOutgoingGrants();
+
         switchSectionTo(hashContext.section);
         if (hashContext.section === 'files') {
             if (hashContext.path) {
@@ -516,8 +669,10 @@ function setupEventListeners() {
         } else {
             // change is from history, data provided in event
             switchSectionTo(e.state.section);
-            app.currentPath = e.state.id;
-            loadFiles({ insertHistory: false });
+            if (e.state.section === 'files') {
+                app.currentPath = e.state.id;
+                loadFiles({ insertHistory: false });
+            }
         }
     });
 
@@ -552,11 +707,8 @@ function setupEventListeners() {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             const query = elements.searchInput?.value.trim();
 
-            // In shared section, filter locally
-            if (app.currentSection === 'shared' && sharedView) {
-                sharedView.filterAndSortItems();
-                return;
-            }
+            // My Shares section does not support in-page search
+            if (app.currentSection === 'shared') return;
 
             if (query) {
                 performSearch(query);
@@ -652,6 +804,10 @@ function setupEventListeners() {
                     switchToSharedSection();
                     break;
 
+                case 'nav.sharedwithme':
+                    switchToSharedWithMeSection();
+                    break;
+
                 case 'nav.favorites':
                     // Switch to favorites view
                     switchToFavoritesSection();
@@ -723,6 +879,12 @@ function setupEventListeners() {
  * @param {string} name
  */
 export function selectFolder(id, name) {
+    // When entering from a non-files section (e.g. "Shared with me"),
+    // activate the Files UI (nav active state, breadcrumb, action bar,
+    // container) without resetting the current path.
+    if (app.currentSection !== 'files') {
+        activateFilesUI();
+    }
     app.breadcrumbPath.push({ id, name });
     app.currentPath = id;
     ui.updateBreadcrumb();
@@ -778,4 +940,4 @@ function updateStorageUsageDisplay(userData) {
     console.log(`Updated storage display: ${usagePercentage}% (${usedFormatted} / ${quotaFormatted})`);
 }
 
-export { deserializeHash, initApp, setActionsBarMode, updateHistory, updateStorageUsageDisplay };
+export { deserializeHash, initApp, setActionsBarMode, setGroupByView, syncGroupByMenu, updateHistory, updateStorageUsageDisplay };

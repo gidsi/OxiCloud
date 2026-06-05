@@ -81,7 +81,7 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -93,7 +93,7 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -120,19 +120,31 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Initialize test database
-        run: psql -h localhost -U postgres -d oxicloud_test -f migrations/20260307000000_initial_schema.sql
+        # Applies every migration + seeds the integration-test admin row.
+        # Same script used by `just test-integration` locally.
+        run: bash tests/common/init-test-schema.sh
         env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
           PGPASSWORD: postgres
+          PGDATABASE: oxicloud_test
 
       - name: Run tests
         run: cargo test --all-features --workspace
         env:
           DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+
+      - name: Run integration tests
+        run: cargo test --all-features --workspace --tests
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
+          RUSTFLAGS: "-Dwarnings --cfg integration_tests"
 
   rust-audit:
     name: Security Audit
@@ -140,7 +152,7 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -150,10 +162,17 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+        # build.rs runs the deconflict pass and js_bundle_validate() — any
+        # duplicate declaration or parse error in the JS bundle fails here.
+      - name: Validate JS bundle (node --check)
+        # belt-and-suspenders: node --check parses the bundle without executing it.
+        # Catches SyntaxErrors that OXC's parse check inside build.rs would also
+        # catch, but gives a human-readable error line in the CI log.
+        run: node --check static-dist/js/app.*.js
       - uses: actions/upload-artifact@v4
         with:
           name: oxicloud-release

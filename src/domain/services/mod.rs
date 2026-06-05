@@ -1,4 +1,5 @@
 pub mod authorization;
+pub mod email_normalize;
 pub mod i18n_service;
 pub mod path_service;
 

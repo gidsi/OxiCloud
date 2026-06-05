@@ -39,7 +39,7 @@ jobs:
       DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           # Build the exact tag behind the published release or manual dispatch.
           ref: ${{ github.event.inputs.version || github.event.release.tag_name || github.ref }}
@@ -61,7 +61,7 @@ jobs:
     needs: test
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           # Build the exact tag behind the published release or manual dispatch.
           ref: ${{ github.event.inputs.version || github.event.release.tag_name || github.ref }}

@@ -77,7 +77,7 @@ fn parse_addr(host: &str, port: u16) -> Result<SocketAddr, String> {
         .map_err(|e| format!("Invalid address '{}': {}", addr_str, e))
 }
 
-fn make_socket(addr: &SocketAddr) -> std::io::Result<Socket> {
+fn make_socket(addr: &SocketAddr, reuse_port: bool) -> std::io::Result<Socket> {
     let domain = if addr.is_ipv6() {
         Domain::IPV6
     } else {
@@ -85,9 +85,14 @@ fn make_socket(addr: &SocketAddr) -> std::io::Result<Socket> {
     };
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
     socket.set_reuse_address(true)?;
-    // Allow multiple workers on the same port (future-ready)
+    // SO_REUSEPORT: opt-in only — must be explicitly enabled via
+    // OXICLOUD_REUSE_PORT=true.  Disabled by default so that accidentally
+    // starting a second instance fails fast with "address already in use"
+    // rather than silently sharing the port.
     #[cfg(not(windows))]
-    socket.set_reuse_port(true)?;
+    if reuse_port {
+        socket.set_reuse_port(true)?;
+    }
     // Disable Nagle's algorithm — send small responses (JSON, PROPFIND)
     // immediately instead of waiting up to 40ms for coalescing.
     socket.set_tcp_nodelay(true)?;
@@ -128,7 +133,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     oxicloud::interfaces::middleware::trusted_proxy::log_config();
 
-    tracing::info!("OxiCloud v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "OxiCloud v{} | branch={} commit={}",
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_BRANCH"),
+        env!("GIT_HASH")
+    );
 
     // Load configuration from environment variables
     let config = common::config::AppConfig::from_env();
@@ -371,8 +381,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 auth_middleware,
             ));
 
-        // CalDAV/CardDAV/WebDAV with auth middleware (merged, not nested)
+        // CalDAV/CardDAV/WebDAV with auth + internal-only middleware
+        // (merged, not nested). External users have no calendar, no
+        // address book, and no home folder — locking them out of these
+        // protocol subtrees in one place avoids leaking the protocol
+        // surface to a principal kind that can do nothing with it. The
+        // `require_internal_user_layer` runs AFTER auth (tower order:
+        // later .layer() = outermost = runs first).
+        use oxicloud::interfaces::middleware::user::require_internal_user_layer;
         let caldav_protected = caldav_router
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                require_internal_user_layer,
+            ))
             .layer(axum::middleware::from_fn_with_state(
                 app_state.clone(),
                 auth_middleware,
@@ -384,6 +405,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let carddav_protected = carddav_router
             .layer(axum::middleware::from_fn_with_state(
                 app_state.clone(),
+                require_internal_user_layer,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                auth_middleware,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                dav_options_limiter.clone(),
+                rate_limit_dav_options,
+            ));
+        let webdav_protected = webdav_router
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                require_internal_user_layer,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                auth_middleware,
+            ));
+
+        // Magic-link redemption — public, no CSRF, no rate limit (the token IS
+        // the credential and `mark_used` is single-use). PR 12 will add a
+        // per-IP limiter on top.
+        let magic_link_router = interfaces::api::handlers::magic_link_handler::magic_link_routes()
+            .with_state(app_state.clone());
+            ));
+        let carddav_protected = carddav_router
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+<<<<<<< HEAD
                 auth_middleware,
             ))
             .layer(axum::middleware::from_fn_with_state(
@@ -394,10 +445,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             app_state.clone(),
             auth_middleware,
         ));
+=======
+                require_internal_user_layer,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                auth_middleware,
+            ));
+        let webdav_protected = webdav_router
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                require_internal_user_layer,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                auth_middleware,
+            ));
+
+        // Magic-link redemption — public, no CSRF, no rate limit (the token IS
+        // the credential and `mark_used` is single-use). PR 12 will add a
+        // per-IP limiter on top.
+        let magic_link_router = interfaces::api::handlers::magic_link_handler::magic_link_routes()
+            .with_state(app_state.clone());
+>>>>>>> upstream/main
 
         app = Router::new()
             // Health / readiness probes — no auth, mounted at root
             .merge(health_routes)
+            // Magic-link redemption — top-level, no `/api/` prefix
+            .merge(magic_link_router)
             // Rate-limited auth endpoints (login, register, refresh)
             .nest("/api/auth", auth_login)
             .nest("/api/auth", auth_register)
@@ -566,7 +642,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  script-src 'self'; \
                  worker-src 'self'; \
                  style-src 'self' 'unsafe-inline'; \
-                 img-src 'self' data: blob:; \
+                 img-src 'self' data: blob: https:; \
                  media-src 'self' blob:; \
                  connect-src 'self'; \
                  font-src 'self' data:; \
@@ -607,9 +683,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start server — tuned socket for low-latency responses
     // TODO: suport multiple addresses ?
     let addr = parse_addr(&config.server_host, config.server_port)?;
+
+    // SO_REUSEPORT: disabled by default — a second instance on the same port
+    // fails loudly instead of silently sharing the socket.  Set
+    // OXICLOUD_REUSE_PORT=true only when you deliberately run multiple
+    // workers (e.g. behind a process supervisor or during a rolling restart).
+    let reuse_port = std::env::var("OXICLOUD_REUSE_PORT")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+
+    if reuse_port {
+        tracing::warn!(
+            "OXICLOUD_REUSE_PORT is enabled — multiple processes may bind to port {}",
+            config.server_port
+        );
+    }
+
     tracing::info!("Starting OxiCloud server on http://{}", addr);
 
-    let socket = make_socket(&addr)?;
+    let socket = make_socket(&addr, reuse_port)?;
 
     let listener = tokio::net::TcpListener::from_std(socket.into())?;
 

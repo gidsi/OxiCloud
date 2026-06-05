@@ -4,14 +4,12 @@
  */
 
 import { refreshUserData } from '../../app/authSession.js';
-import { loadFiles } from '../../app/filesView.js';
+import { addItem as filesViewAddItem, loadFiles } from '../../app/filesView.js';
 import { app } from '../../app/state.js';
 import { showConfirmDialog, ui } from '../../app/ui.js';
 import { getCsrfHeaders, getCsrfToken } from '../../core/csrf.js';
 import { i18n } from '../../core/i18n.js';
 import { notifications } from '../../core/notifications.js';
-
-/** @import {TrashItem} from '../../core/types.js' */
 
 /**
  * @typedef {Object} BatchResult
@@ -781,7 +779,7 @@ const fileOps = {
 
                 // Optimistic UI: add folder card directly from server response
                 // — no reload needed since the backend already confirmed creation.
-                ui.addFolderToView(folder);
+                filesViewAddItem(folder);
 
                 ui.showNotification('Folder created', `"${name}" created successfully`);
             } else {
@@ -1243,28 +1241,6 @@ const fileOps = {
             console.error('Error deleting folder:', error);
             ui.showNotification('Error', 'Error deleting the folder');
             return false;
-        }
-    },
-
-    /**
-     * Get trash items
-     * @returns {Promise<Array<TrashItem>>} - List of trash items
-     */
-    async getTrashItems() {
-        try {
-            const response = await fetch('/api/trash', {
-                headers: getAuthHeaders()
-            });
-
-            if (response.ok) {
-                return /** @type {TrashItem[]} */ (await response.json());
-            } else {
-                console.error('Error fetching trash items:', response.statusText);
-                return [];
-            }
-        } catch (error) {
-            console.error('Error fetching trash items:', error);
-            return [];
         }
     },
 

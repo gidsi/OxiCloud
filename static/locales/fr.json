@@ -1,16 +1,50 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "Ce lien de connexion n'est plus valide",
+                "expired_body": "Le lien a peut-être expiré ou a déjà été utilisé. Nous pouvons vous en envoyer un nouveau — il arrivera dans votre boîte de réception dans quelques secondes.",
+                "resend_to": "Envoyer un nouveau lien à {{email}}",
+                "generic_unavailable": "Ce lien de connexion n'est plus valide. Il a peut-être déjà été utilisé ou a expiré. Demandez un nouveau lien depuis la page de connexion.",
+                "service_unavailable": "La connexion par lien magique n'est pas activée sur ce serveur.",
+                "internal_error": "Une erreur s'est produite lors de votre connexion. Veuillez réessayer.",
+                "resend_failure": "Une erreur s'est produite lors de l'envoi du lien. Veuillez réessayer.",
+                "cross_browser_title": "Continuer la connexion sur cet appareil ?",
+                "cross_browser_body": "Vous avez ouvert ce lien de connexion dans un navigateur ou un appareil différent de celui où vous l'avez demandé.",
+                "cross_browser_warning": "Si vous avez demandé ce lien, vous pouvez continuer en toute sécurité. Sinon, fermez cette page — cliquer sur Continuer connecterait quelqu'un d'autre à votre compte.",
+                "cross_browser_continue": "Continuer et se connecter",
+                "resend_confirmation_title": "Vérifiez votre boîte de réception",
+                "resend_confirmation_body": "Si le lien de connexion correspondait à un compte actif, un nouveau lien vient d'être envoyé. Veuillez vérifier votre boîte de réception.",
+                "return_link": "Retour à OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} a partagé un {{kind}} avec vous sur OxiCloud",
+                    "body": "{{inviter}} a partagé un {{kind}} avec vous sur OxiCloud.\n\nOuvrez-le en cliquant sur le lien ci-dessous :\n{{link}}\n\nLe lien est à usage unique et expire dans {{ttl_hours}} heures.\nSi vous n'attendiez pas cette invitation, vous pouvez ignorer ce message.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "Connexion à OxiCloud",
+                    "body": "Bonjour,\n\nUtilisez le lien ci-dessous pour vous connecter à OxiCloud. Le lien est à usage unique et expire dans {{ttl_minutes}} minutes. Ouvrez-le sur le même appareil que celui où vous l'avez demandé.\n\n{{link}}\n\nSi vous n'avez pas demandé ce lien de connexion, vous pouvez ignorer ce message — aucune action supplémentaire n'est nécessaire.\n\n— OxiCloud"
+                },
+                "kind_file": "fichier",
+                "kind_folder": "dossier",
+                "english_fallback_divider": "--- Version anglaise ci-dessous ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "Système de stockage cloud minimaliste"
     },
     "nav": {
         "files": "Fichiers",
-        "shared": "Partagés",
+        "shared": "Partages",
         "recent": "Récents",
         "favorites": "Favoris",
         "photos": "Photos",
         "music": "Musique",
-        "trash": "Corbeille"
+        "trash": "Corbeille",
+        "sharedwithme": "Partages avec moi"
     },
     "photos": {
         "empty_state": "Pas encore de photos",
@@ -125,7 +159,13 @@
         "about_description": "Plateforme de stockage cloud construite avec Rust et Architecture Propre. Rapide, sécurisée et privée.",
         "admin_panel": "Panneau d'administration",
         "profile": "Mon profil",
-        "role_user": "Utilisateur"
+        "role_user": "Utilisateur",
+        "theme": {
+            "light": "Clair",
+            "dark": "Sombre",
+            "auto": "Comme le système"
+        },
+        "manage_groups": "Gérer les groupes"
     },
     "share": {
         "dialogTitle": "Lien de partage",
@@ -150,7 +190,8 @@
         "shareCopied": "Lien copié dans le presse-papiers",
         "shareCreated": "Lien de partage créé avec succès",
         "shareUpdated": "Paramètres de partage mis à jour",
-        "shareRemoved": "Partage supprimé avec succès"
+        "shareRemoved": "Partage supprimé avec succès",
+        "inviteByEmail": "Inviter par e-mail — une invitation sera envoyée"
     },
     "share_dialogTitle": "Lien de partage",
     "share_linkLabel": "Lien partagé :",
@@ -269,7 +310,8 @@
             "archive": "Archive",
             "installer": "Installateur",
             "code": "Code"
-        }
+        },
+        "owner": "Propriétaire"
     },
     "dialogs": {
         "rename_folder": "Renommer le dossier",
@@ -329,7 +371,13 @@
         "move_error": "Erreur lors du déplacement",
         "empty_name": "Le nom ne peut pas être vide",
         "name_exists": "Un fichier ou dossier portant ce nom existe déjà",
-        "generic_error": "Une erreur est survenue"
+        "generic_error": "Une erreur est survenue",
+        "group_name_invalid": "Le nom du groupe doit respecter le format préfixe d'email (lettres, chiffres, point, tiret, souligné ; 1–64 caractères).",
+        "group_cycle": "Ce membre créerait une référence circulaire entre groupes.",
+        "group_depth_exceeded": "Cette profondeur d'imbrication dépasse le maximum autorisé (8).",
+        "group_virtual_immutable": "Le groupe « Internal » est géré par le système et ne peut pas être modifié.",
+        "group_not_found": "Groupe introuvable.",
+        "group_name_taken": "Un groupe portant ce nom existe déjà."
     },
     "breadcrumb": {
         "home": "Accueil"
@@ -339,15 +387,36 @@
         "empty_state": "La corbeille est vide",
         "original_location": "Emplacement d'origine",
         "deleted_date": "Date de suppression",
+        "remaining": "Restant",
         "actions": "Actions",
         "restore": "Restaurer",
         "delete_permanently": "Supprimer définitivement",
-        "empty_confirm": "Êtes-vous sûr de vouloir vider la corbeille ? Tous les éléments seront définitivement supprimés."
+        "empty_confirm": "Êtes-vous sûr de vouloir vider la corbeille ? Tous les éléments seront définitivement supprimés.",
+        "groupby": {
+            "remaining_days": "Jours restants",
+            "trashed_time": "Date de suppression"
+        }
+    },
+    "daysRemaining": {
+        "expired": "Expiré",
+        "today": "Aujourd'hui",
+        "tomorrow": "Demain",
+        "inDays": "{{count}} jours"
+    },
+    "expiryChip": {
+        "never": "N'expire jamais",
+        "expired": "Expiré",
+        "today": "Expire aujourd'hui",
+        "tomorrow": "Expire demain",
+        "inDays": "Expire dans {{count}} jours",
+        "onDate": "Expire le {{date}}"
     },
     "auth": {
         "login_title": "Se connecter",
         "username": "Nom d'utilisateur",
         "username_placeholder": "Entrez votre nom d'utilisateur",
+        "login_identifier": "Nom d'utilisateur ou e-mail",
+        "login_identifier_placeholder": "Saisissez votre nom d'utilisateur ou e-mail",
         "password": "Mot de passe",
         "password_placeholder": "Entrez votre mot de passe",
         "login_button": "Se connecter",
@@ -378,7 +447,14 @@
         "admin_create_error": "Erreur lors de la création du compte administrateur",
         "or": "ou",
         "sso_login": "Se connecter avec SSO",
-        "sso_login_provider": "Se connecter avec {{provider}}"
+        "sso_login_provider": "Se connecter avec {{provider}}",
+        "magicLinkHint": "Pas de mot de passe ? Saisissez votre adresse e-mail et nous vous enverrons un lien de connexion à usage unique.",
+        "magicLinkEmailLabel": "Adresse e-mail",
+        "magicLinkEmailPlaceholder": "vous@exemple.com",
+        "magicLinkSubmit": "Envoyer le lien de connexion",
+        "magicLinkSent": "Si un compte existe pour cette adresse, un lien de connexion vient d'être envoyé. Consultez votre boîte de réception.",
+        "magicLinkUnavailable": "La connexion par e-mail n'est pas disponible sur ce serveur.",
+        "magicLinkNetworkError": "Impossible de joindre le serveur : {{message}}"
     },
     "storage": {
         "title": "Stockage",
@@ -428,7 +504,8 @@
         "clear": "Effacer les récents",
         "accessed": "Consulté",
         "empty_state": "Aucun fichier récent",
-        "empty_hint": "Les fichiers que vous ouvrez apparaîtront ici"
+        "empty_hint": "Les fichiers que vous ouvrez apparaîtront ici",
+        "loadMore": "Charger plus"
     },
     "notifications": {
         "file_renamed": "Fichier renommé",
@@ -615,7 +692,23 @@
         "migration_verify_passed": "Vérification réussie",
         "migration_verify_failed": "Échec de la vérification",
         "migration_failed_blobs": "Blobs échoués",
-        "testing": "Test en cours..."
+        "testing": "Test en cours...",
+        "tab_smtp": "SMTP",
+        "smtp_title": "E-mail sortant (SMTP)",
+        "smtp_intro": "Le SMTP est configuré exclusivement via les variables d'environnement (OXICLOUD_SMTP_*). Les valeurs ci-dessous proviennent du serveur en cours d'exécution — pour les modifier, éditez l'environnement et redémarrez OxiCloud.",
+        "smtp_enabled_label": "État",
+        "smtp_enabled": "Activé",
+        "smtp_disabled": "Désactivé (hôte non défini)",
+        "smtp_test_title": "Envoyer un e-mail de test",
+        "smtp_test_intro": "Envoie un message de diagnostic au destinataire ci-dessous et affiche la réponse du serveur SMTP afin que vous puissiez la corréler avec les journaux de votre relais.",
+        "smtp_test_to": "Adresse du destinataire",
+        "smtp_send_test": "Envoyer l'e-mail de test",
+        "smtp_sending": "Envoi…",
+        "smtp_sent": "E-mail de test envoyé.",
+        "smtp_send_failed": "Échec de l'envoi.",
+        "smtp_server_code": "Le serveur a répondu",
+        "smtp_test_missing_to": "Veuillez saisir une adresse de destinataire.",
+        "smtp_not_configured": "Le SMTP n'est pas configuré sur ce serveur."
     },
     "profile": {
         "page_title": "Profil",
@@ -660,6 +753,18 @@
         "minutes_ago": "il y a {{n}} min",
         "hours_ago": "il y a {{n}}h",
         "days_ago": "il y a {{n}} jours",
+        "edit_profile": "Modifier le profil",
+        "edit_oidc_managed": "Pour modifier vos informations (nom, prénom, photo de profil, …), veuillez les mettre à jour chez votre fournisseur d'identité. Vos changements apparaîtront à votre prochaine connexion.",
+        "username_claim_hint": "2 à 64 caractères, lettres / chiffres / point / tiret / souligné. Une fois choisi, le nom d'utilisateur ne peut plus être modifié (les clients DAV/NextCloud en dépendent).",
+        "username_already_claimed": "Nom d'utilisateur fixé et non modifiable (les clients DAV/NextCloud en dépendent).",
+        "given_name": "Prénom",
+        "family_name": "Nom",
+        "save_profile": "Enregistrer",
+        "profile_saved": "Profil mis à jour",
+        "profile_no_changes": "Aucun changement à enregistrer.",
+        "profile_save_failed": "Échec de l'enregistrement",
+        "username_taken_error": "Ce nom d'utilisateur est déjà pris.",
+        "username_immutable_error": "Votre nom d'utilisateur est déjà défini et ne peut plus être modifié ici. Contactez un administrateur si vous souhaitez le renommer.",
         "change_password": "Changer le mot de passe",
         "current_password": "Mot de passe actuel",
         "new_password": "Nouveau mot de passe",
@@ -675,12 +780,84 @@
         "error_label_required": "Veuillez entrer un libellé",
         "error_create_pw": "Impossible de créer le mot de passe",
         "confirm_revoke": "Révoquer le mot de passe \"{{label}}\" ? Les clients l'utilisant ne fonctionneront plus.",
-        "error_revoke": "Échec de la révocation"
+        "error_revoke": "Échec de la révocation",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "Téléchargement en cours...",
         "files": "fichiers",
         "complete": "{{count}} / {{total}} téléchargés"
     },
-    "storage_quota_exceeded": "Quota de stockage dépassé"
+    "storage_quota_exceeded": "Quota de stockage dépassé",
+    "sharedwithme": {
+        "pageTitle": "Partagé avec moi",
+        "pageDescription": "Fichiers et dossiers que d'autres utilisateurs ont partagés avec vous",
+        "emptyStateTitle": "Rien n'a encore été partagé avec vous",
+        "emptyStateDesc": "Les éléments partagés avec vous par d'autres utilisateurs apparaîtront ici",
+        "loadMore": "Charger plus",
+        "sharedBy": "Partagé par",
+        "colName": "Nom",
+        "colType": "Type",
+        "colSharedBy": "Partagé par",
+        "colDate": "Date de partage",
+        "colPermissions": "Permissions"
+    },
+    "groupby": {
+        "none": "Aucun",
+        "title": "Grouper par",
+        "type": "Type",
+        "type.folders": "Dossiers",
+        "owner": "Propriétaire",
+        "shareDate": "Date de partage",
+        "favoriteDate": "Date d'ajout aux favoris",
+        "accessedAt": "Date d'accès",
+        "modifiedAt": "Date de modification",
+        "createdAt": "Date de création",
+        "size": "Taille",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "Aujourd'hui",
+        "last7days": "7 derniers jours",
+        "last30days": "30 derniers jours"
+    },
+    "groups": {
+        "title": "Gérer les groupes",
+        "create_button": "Créer un groupe",
+        "create_dialog_title": "Nouveau groupe",
+        "edit_dialog_title": "Renommer le groupe",
+        "name_label": "Nom",
+        "name_placeholder": "ingenierie",
+        "description_label": "Description (facultatif)",
+        "members_section": "Membres",
+        "add_member_placeholder": "Ajouter un utilisateur ou un groupe…",
+        "no_members": "Aucun membre pour le moment.",
+        "remove_member": "Retirer",
+        "delete_group": "Supprimer le groupe",
+        "delete_confirm": "Supprimer le groupe « {name} » ? Les autorisations associées à ce groupe seront révoquées.",
+        "empty_state": "Aucun groupe pour le moment.",
+        "load_more": "Charger plus",
+        "back_to_list": "Retour",
+        "loading": "Chargement…",
+        "virtual_badge": "Système",
+        "member_count_zero": "Aucun membre",
+        "member_count_one": "1 membre",
+        "member_count_other": "{count} membres",
+        "delete_confirm_label": "Tapez le nom du groupe pour confirmer :",
+        "delete_confirm_mismatch": "Tapez le nom du groupe exactement pour confirmer.",
+        "virtual_internal_name": "Interne"
+    }
 }

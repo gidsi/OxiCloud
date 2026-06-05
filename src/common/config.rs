@@ -609,6 +609,201 @@ impl NextcloudConfig {
     }
 }
 
+/// Transport encryption mode for the SMTP relay. Picked at startup
+/// from `OXICLOUD_SMTP_TLS=starttls|tls|none`. The default for an
+/// unconfigured deployment is `Starttls` (port 587 with `STARTTLS`),
+/// matching the most common modern submission setup.
+///
+/// `None` is allowed for development against MailHog / a local
+/// netcat trap. Production deployments using `None` get a startup
+/// `WARN` log so the choice is visible in operational telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmtpTlsMode {
+    /// Plain submission with `STARTTLS` upgrade (RFC 3207). Standard
+    /// for port 587.
+    Starttls,
+    /// Implicit TLS from the first byte (RFC 8314). Standard for
+    /// port 465.
+    Tls,
+    /// No encryption. Development only.
+    None,
+}
+
+impl SmtpTlsMode {
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "starttls" => Some(Self::Starttls),
+            "tls" | "implicit" | "smtps" => Some(Self::Tls),
+            "none" | "plain" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+/// Outbound SMTP transport configuration. Sourced exclusively from
+/// `OXICLOUD_SMTP_*` env vars. `host` empty means the feature is
+/// disabled — every endpoint that needs email returns 503 in that
+/// state so admins notice misconfiguration immediately rather than
+/// silently dropping mail.
+#[derive(Debug, Clone)]
+pub struct SmtpConfig {
+    /// SMTP server hostname or IP. Empty string disables the feature.
+    pub host: String,
+    /// Submission port (typically 587 for STARTTLS, 465 for implicit
+    /// TLS, 25 for relay-to-relay).
+    pub port: u16,
+    /// SASL username. Empty = no authentication (anonymous relay).
+    pub user: String,
+    /// SASL password. Logged as `***` redacted in startup banner.
+    pub pass: String,
+    /// `From:` mailbox. Either a bare address (`noreply@example.com`)
+    /// or RFC 5322 name-address (`OxiCloud <noreply@example.com>`).
+    pub from: String,
+    /// Transport encryption mode. See [`SmtpTlsMode`].
+    pub tls: SmtpTlsMode,
+}
+
+impl Default for SmtpConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 587,
+            user: String::new(),
+            pass: String::new(),
+            from: String::new(),
+            tls: SmtpTlsMode::Starttls,
+        }
+    }
+}
+
+impl SmtpConfig {
+    /// `true` iff `OXICLOUD_SMTP_HOST` was set to a non-empty value.
+    /// Used by DI to decide whether to construct an `EmailSender`.
+    pub fn is_enabled(&self) -> bool {
+        !self.host.is_empty()
+    }
+}
+
+/// Magic-link authentication configuration. Knobs that are specific to
+/// the invite-by-email / login-via-email flow.
+#[derive(Debug, Clone)]
+pub struct MagicLinkConfig {
+    /// TTL for **login-via-email** tokens (the ones a user requests
+    /// themselves from their own browser). Short by design — the user
+    /// just clicked the button moments before; if they take >10 minutes
+    /// to click the link, something's wrong. Combined with the per-
+    /// request challenge cookie (PR 22), this bounds the window for
+    /// mailbox compromise to turn into a session.
+    ///
+    /// Default: 10 minutes.
+    pub login_ttl_minutes: u64,
+    /// TTL for **invitation** tokens (the ones a sharer mints via
+    /// `POST /api/grants` for a recipient who has no prior browser
+    /// context with the server). Long because the recipient may not
+    /// check their email for hours or days. Cross-device by design;
+    /// no challenge cookie.
+    ///
+    /// Default: 24 hours. The legacy `OXICLOUD_MAGIC_LINK_TTL_HOURS`
+    /// env var is a deprecated alias that writes here.
+    pub invite_ttl_hours: u64,
+    /// Kill switch for the whole magic-link flow. When `false`:
+    /// - `POST /api/grants` rejects `subject.type = "email"` for unknown
+    ///   email addresses (no lazy external-user creation).
+    /// - `POST /api/auth/magic-link/send` returns the uniform stub
+    ///   response without actually issuing a token.
+    ///
+    /// This is the coarser "turn it all off" switch; the fine-grained
+    /// version is [`allowed_email_domains`] below.
+    pub allow_external_users: bool,
+    /// Allowlist of email domains accepted when minting a new external
+    /// user. Empty = no restriction (any domain is allowed, subject to
+    /// [`allow_external_users`]). Entries are lowercased and trimmed
+    /// at load time; matching is case-insensitive exact-match on the
+    /// post-`@` part of the address.
+    ///
+    /// Example: `["partner-a.com", "partner-b.io"]` — only addresses
+    /// `<anything>@partner-a.com` or `<anything>@partner-b.io` can be
+    /// invited; everything else is rejected with 403.
+    ///
+    /// Wildcards / subdomain semantics are intentionally out of scope:
+    /// `partner.com` does NOT match `eng.partner.com`. List every
+    /// subdomain explicitly.
+    pub allowed_email_domains: Vec<String>,
+    /// Per-sharer ceiling on email-typed grant invitations from
+    /// `POST /api/grants`. Keyed on `caller_id`. Exceeding the ceiling
+    /// returns 429. Default: 50/hour.
+    pub invite_per_caller_per_hour: u32,
+    /// Per-target-email ceiling on `POST /api/auth/magic-link/send`,
+    /// keyed on the normalised recipient address. Anti-bombing.
+    /// Exceeding the ceiling is silently absorbed (uniform 200) so
+    /// the response shape can't be used as an enumeration oracle.
+    /// Default: 5/hour.
+    pub send_per_email_per_hour: u32,
+    /// Per-source-IP backstop on `POST /api/auth/magic-link/send`,
+    /// keyed on the trusted client IP. Bounds the cost of an attacker
+    /// spreading low per-email volume across many target addresses.
+    /// Default: 200/hour.
+    pub send_per_ip_per_hour: u32,
+    /// Policy switch: whether magic-link is offered to users who
+    /// already have a password configured.
+    ///
+    /// - `false` (default, strict): users with a password get
+    ///   audit-logged `has_password` and no mail. Their password is
+    ///   the only authentication path; magic-link would weaken it to
+    ///   "mailbox compromise = account compromise".
+    /// - `true` (lenient): users with a password can also request a
+    ///   magic-link as a sign-in path. Aligns with modern SaaS UX
+    ///   (Slack, Notion, etc.) — operators who treat email as the
+    ///   canonical recovery channel anyway pick this.
+    ///
+    /// OIDC-linked users are **always** rejected from magic-link
+    /// regardless of this flag — the IdP is the security boundary and
+    /// may enforce MFA we shouldn't bypass. See
+    /// `magic_link_eligibility()` for the precedence ladder.
+    pub open_to_password_users: bool,
+}
+
+impl Default for MagicLinkConfig {
+    fn default() -> Self {
+        Self {
+            login_ttl_minutes: 10,
+            invite_ttl_hours: 24,
+            allow_external_users: true,
+            allowed_email_domains: Vec::new(),
+            invite_per_caller_per_hour: 50,
+            send_per_email_per_hour: 5,
+            send_per_ip_per_hour: 200,
+            open_to_password_users: false,
+        }
+    }
+}
+
+impl MagicLinkConfig {
+    /// Whether an email address is allowed under the current allowlist.
+    ///
+    /// Returns `true` when the allowlist is empty (no restriction).
+    /// Otherwise the domain part of `email` (lowercased) must match one
+    /// of the allowlist entries exactly. Malformed addresses without an
+    /// `@` always return `false` — fail closed so a typo in the
+    /// upstream validator can't slip past this check.
+    ///
+    /// Caller is expected to have already passed `email` through the
+    /// email regex / normaliser; this method does not re-validate. It
+    /// only performs the domain comparison.
+    pub fn is_email_allowed(&self, email: &str) -> bool {
+        if self.allowed_email_domains.is_empty() {
+            return true;
+        }
+        let Some((_, domain)) = email.rsplit_once('@') else {
+            return false;
+        };
+        let domain_lc = domain.to_ascii_lowercase();
+        self.allowed_email_domains
+            .iter()
+            .any(|d| d.as_str() == domain_lc.as_str())
+    }
+}
+
 /// Feature configuration (feature flags)
 #[derive(Debug, Clone)]
 pub struct FeaturesConfig {
@@ -670,6 +865,40 @@ pub struct AppConfig {
     pub wopi: WopiConfig,
     /// Nextcloud compatibility configuration
     pub nextcloud: NextcloudConfig,
+    /// Outbound SMTP configuration (magic-link invitations, etc.)
+    pub smtp: SmtpConfig,
+    /// Magic-link authentication configuration (TTL, external-users kill switch)
+    pub magic_link: MagicLinkConfig,
+    /// I18n configuration (default locale for server-rendered surfaces)
+    pub i18n: I18nConfig,
+}
+
+/// Server-side i18n knobs.
+///
+/// Locale discovery itself is driven by `static/locales/*.json` at boot
+/// (see [`crate::common::locale::LocaleRegistry`]) — no hardcoded list,
+/// no `build.rs`. This struct only carries the configurable defaults
+/// around that discovery.
+#[derive(Debug, Clone)]
+pub struct I18nConfig {
+    /// Fallback locale used when:
+    /// - an anonymous request's `Accept-Language` matches nothing in
+    ///   the registry,
+    /// - a user's `preferred_locale` is `NULL`,
+    /// - an OIDC `locale` claim doesn't resolve.
+    ///
+    /// Must be present in `static/locales/`; the registry-build step
+    /// errors at startup if this is set to a locale we don't ship.
+    /// Defaults to `"en"`. Override via `OXICLOUD_DEFAULT_LOCALE`.
+    pub default_locale: String,
+}
+
+impl Default for I18nConfig {
+    fn default() -> Self {
+        Self {
+            default_locale: "en".to_string(),
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -690,6 +919,9 @@ impl Default for AppConfig {
             oidc: OidcConfig::default(),
             wopi: WopiConfig::default(),
             nextcloud: NextcloudConfig::default(),
+            smtp: SmtpConfig::default(),
+            magic_link: MagicLinkConfig::default(),
+            i18n: I18nConfig::default(),
         }
     }
 }
@@ -1152,6 +1384,105 @@ impl AppConfig {
             }
         }
 
+        // SMTP configuration. `HOST` empty = feature disabled — every
+        // endpoint that needs email returns 503 in that state.
+        if let Ok(v) = env::var("OXICLOUD_SMTP_HOST") {
+            config.smtp.host = v.trim().to_string();
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_PORT")
+            && let Ok(p) = v.parse::<u16>()
+        {
+            config.smtp.port = p;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_USER") {
+            config.smtp.user = v;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_PASS") {
+            config.smtp.pass = v;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_FROM") {
+            config.smtp.from = v;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_TLS")
+            && let Some(mode) = SmtpTlsMode::parse(&v)
+        {
+            config.smtp.tls = mode;
+        }
+
+        if config.smtp.is_enabled() && config.smtp.tls == SmtpTlsMode::None {
+            tracing::warn!(
+                "OXICLOUD_SMTP_TLS=none — outbound mail will travel in plaintext. \
+                 Use 'starttls' or 'tls' for production deployments."
+            );
+        }
+
+        // Magic-link configuration
+        // Legacy `OXICLOUD_MAGIC_LINK_TTL_HOURS` is preserved as a
+        // deprecated alias for `OXICLOUD_MAGIC_LINK_INVITE_TTL_HOURS`.
+        // Existing deployments keep working with their old env var;
+        // the new explicit var wins if both are set.
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_TTL_HOURS")
+            && let Ok(h) = v.parse::<u64>()
+            && h > 0
+        {
+            tracing::warn!(
+                "OXICLOUD_MAGIC_LINK_TTL_HOURS is deprecated — \
+                 use OXICLOUD_MAGIC_LINK_INVITE_TTL_HOURS (invitations) \
+                 and OXICLOUD_MAGIC_LINK_LOGIN_TTL_MINUTES (login-via-email)."
+            );
+            config.magic_link.invite_ttl_hours = h;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_INVITE_TTL_HOURS")
+            && let Ok(h) = v.parse::<u64>()
+            && h > 0
+        {
+            config.magic_link.invite_ttl_hours = h;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_LOGIN_TTL_MINUTES")
+            && let Ok(m) = v.parse::<u64>()
+            && m > 0
+        {
+            config.magic_link.login_ttl_minutes = m;
+        }
+        if let Ok(v) = env::var("OXICLOUD_ALLOW_EXTERNAL_USERS") {
+            config.magic_link.allow_external_users = v.parse::<bool>().unwrap_or(true);
+        }
+        if let Ok(v) = env::var("OXICLOUD_EXTERNAL_EMAIL_DOMAINS") {
+            config.magic_link.allowed_email_domains = v
+                .split(',')
+                .map(|d| d.trim().to_ascii_lowercase())
+                .filter(|d| !d.is_empty())
+                .collect();
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_INVITE_PER_CALLER_PER_HOUR")
+            && let Ok(n) = v.parse::<u32>()
+            && n > 0
+        {
+            config.magic_link.invite_per_caller_per_hour = n;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_SEND_PER_EMAIL_PER_HOUR")
+            && let Ok(n) = v.parse::<u32>()
+            && n > 0
+        {
+            config.magic_link.send_per_email_per_hour = n;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_SEND_PER_IP_PER_HOUR")
+            && let Ok(n) = v.parse::<u32>()
+            && n > 0
+        {
+            config.magic_link.send_per_ip_per_hour = n;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_OPEN_TO_PASSWORD_USERS") {
+            config.magic_link.open_to_password_users = v == "true" || v == "1";
+        }
+
+        if let Ok(v) = env::var("OXICLOUD_DEFAULT_LOCALE") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                config.i18n.default_locale = trimmed.to_string();
+            }
+        }
+
         config
     }
 
@@ -1194,4 +1525,55 @@ impl AppConfig {
 /// Gets a default global configuration
 pub fn default_config() -> AppConfig {
     AppConfig::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_allowlist_accepts_any_email() {
+        let cfg = MagicLinkConfig::default();
+        assert!(cfg.allowed_email_domains.is_empty());
+        assert!(cfg.is_email_allowed("alice@example.com"));
+        assert!(cfg.is_email_allowed("bob@whatever.io"));
+    }
+
+    #[test]
+    fn allowlist_matches_case_insensitively() {
+        let cfg = MagicLinkConfig {
+            allowed_email_domains: vec!["partner-a.com".to_string(), "partner-b.io".to_string()],
+            ..MagicLinkConfig::default()
+        };
+        assert!(cfg.is_email_allowed("alice@partner-a.com"));
+        // Uppercase domain in the email — must still match.
+        assert!(cfg.is_email_allowed("alice@PARTNER-A.COM"));
+        assert!(cfg.is_email_allowed("eve@partner-b.io"));
+        // Unlisted domain — rejected.
+        assert!(!cfg.is_email_allowed("mallory@other.com"));
+    }
+
+    #[test]
+    fn allowlist_does_not_match_subdomains_implicitly() {
+        let cfg = MagicLinkConfig {
+            allowed_email_domains: vec!["partner.com".to_string()],
+            ..MagicLinkConfig::default()
+        };
+        assert!(cfg.is_email_allowed("alice@partner.com"));
+        // Subdomain must be listed explicitly — exact match only.
+        assert!(!cfg.is_email_allowed("alice@eng.partner.com"));
+        // Suffix match is not enough — different domain.
+        assert!(!cfg.is_email_allowed("alice@evilpartner.com"));
+    }
+
+    #[test]
+    fn malformed_email_fails_closed() {
+        let cfg = MagicLinkConfig {
+            allowed_email_domains: vec!["partner.com".to_string()],
+            ..MagicLinkConfig::default()
+        };
+        // No `@` — rejected even though allowlist is set.
+        assert!(!cfg.is_email_allowed("not-an-email"));
+        assert!(!cfg.is_email_allowed(""));
+    }
 }

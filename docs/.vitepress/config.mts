@@ -11,6 +11,17 @@ export default defineConfig({
     lastmodDateOnly: false,
   },
 
+  // Internal planning notes (docs/plan/*) and AI hand-off prompts
+  // aren't user-facing docs and contain raw Rust/pseudocode whose
+  // generics (Option<String>, Vec<SubjectGroup>, …) trip Vue's
+  // template parser ("Element is missing end tag" because <String>,
+  // <SubjectGroup>, etc. look like unclosed HTML tags). Keep them
+  // in-tree for engineering reference but skip them at site-build time.
+  srcExclude: [
+    "plan/**",
+    "**/*.prompt",
+  ],
+
   markdown: {
     image: {
       lazyLoading: true,
@@ -86,6 +97,7 @@ export default defineConfig({
             { text: "Favorites & Recent", link: "/guide/favorites-and-recent" },
             { text: "Search", link: "/guide/search" },
             { text: "Thumbnails & Transcoding", link: "/guide/thumbnails-and-transcoding" },
+            { text: "Sharing", link: "/guide/sharing" },
             { text: "Trash & Recycle Bin", link: "/guide/trash" },
             { text: "ZIP & Compression", link: "/guide/zip-and-compression" },
             { text: "Internationalization", link: "/guide/i18n" },
@@ -96,10 +108,17 @@ export default defineConfig({
           items: [
             { text: "Internal Architecture", link: "/architecture/" },
             { text: "Caching", link: "/architecture/caching" },
+            { text: "Resource Listing API", link: "/architecture/resource-listing" },
             { text: "Storage Safety", link: "/architecture/file-system-safety" },
             { text: "Database Transactions", link: "/architecture/database-transactions" },
+            { text: "ReBAC Authorization", link: "/architecture/rebac-authorization" },
             { text: "Share Integration", link: "/architecture/share-integration" },
             { text: "Storage Quotas", link: "/architecture/storage-quotas" },
+            { text: "File and Blob lifecycle", link: "/architecture/file-and-blob-lifecycle" },
+            { text: "ReBAC & Authorization", link: "/architecture/rebac-authorization" },
+            { text: "User lifecycle", link: "/architecture/user-lifecycle" },
+            { text: "Authentication model", link: "/architecture/auth-model" },
+            { text: "Magic-link auth", link: "/architecture/magic-link-auth" },
           ],
         },
         { text: "FAQ", link: "/faq" },

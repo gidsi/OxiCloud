@@ -15,8 +15,12 @@ spec:
       labels:
         {{- include "oxicloud.selectorLabels" . | nindent 8 }}
     spec:
+      {{- if and .Values.persistence.enabled .Values.persistence.fsGroup }}
+      securityContext:
+        fsGroup: {{ .Values.persistence.fsGroup }}
+      {{- end }}
       containers:
-        - name: oxicloud
+        - name: oxicloud-app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
@@ -26,19 +30,13 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "oxicloud.fullname" . }}-config
-            - secretRef:
-                name: {{ if .Values.secrets.existingSecret }}{{ .Values.secrets.existingSecret }}{{ else }}{{ include "oxicloud.fullname" . }}-secret{{ end }}
+          {{- if .Values.envs }}
           env:
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ if .Values.secrets.existingSecret }}{{ .Values.secrets.existingSecret }}{{ else }}{{ include "oxicloud.fullname" . }}-secret{{ end }}
-                  key: DB_PASSWORD
-            - name: OXICLOUD_DB_CONNECTION_STRING
-              value: "postgres://{{ .Values.postgresql.auth.username }}:$(DB_PASSWORD)@{{ .Release.Name }}-postgresql/{{ .Values.postgresql.auth.database }}"
+            {{- toYaml .Values.envs | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: storage-data
-              mountPath: /app/storage
+              mountPath: {{ .Values.persistence.mountPath | default "/app/storage" }}
       {{- if not .Values.persistence.enabled }}
       volumes:
         - name: storage-data

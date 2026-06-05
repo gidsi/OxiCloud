@@ -14,6 +14,7 @@ pub mod local_blob_backend;
 pub mod login_lockout_service;
 pub mod migration_blob_backend;
 pub mod migration_job;
+pub mod mock_email_sender;
 pub mod nextcloud_chunked_upload_service;
 pub mod oidc_service;
 pub mod password_hasher;
@@ -23,6 +24,7 @@ pub mod pg_acl_engine;
 pub mod retry_blob_backend;
 pub mod s3_blob_backend;
 pub mod share_unlock_cookie;
+pub mod smtp_email_sender;
 pub mod thumbnail_service;
 #[cfg(test)]
 mod thumbnail_service_test;

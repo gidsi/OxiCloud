@@ -154,6 +154,7 @@ function switchTab(name, el) {
     if (name === 'users') loadUsers();
     if (name === 'dashboard') loadDashboard();
     if (name === 'storage') loadStorage();
+    if (name === 'smtp') loadSmtp();
 }
 
 async function loadDashboard() {
@@ -240,7 +241,7 @@ async function loadUsers() {
                 return (
                     '<tr>' +
                     '<td><div class="user-info"><span class="user-name">' +
-                    escapeHtml(u.username) +
+                    escapeHtml(u.username || u.email || '—') +
                     (isSelf ? ` <span class="user-self-badge">${escapeHtml(i18n.t('admin.you_badge'))}</span>` : '') +
                     '</span><span class="user-email">' +
                     escapeHtml(u.email) +
@@ -273,7 +274,7 @@ async function loadUsers() {
                     '<button class="btn btn-sm btn-secondary admin-action-btn" data-action="quota" data-uid="' +
                     _escJs(u.id) +
                     '" data-uname="' +
-                    _escJs(u.username) +
+                    _escJs(u.username || u.email) +
                     '" data-quota="' +
                     u.storage_quota_bytes +
                     '" title="' +
@@ -284,7 +285,7 @@ async function loadUsers() {
                         : '<button class="btn btn-sm btn-secondary admin-action-btn" data-action="reset-pw" data-uid="' +
                           _escJs(u.id) +
                           '" data-uname="' +
-                          _escJs(u.username) +
+                          _escJs(u.username || u.email) +
                           '" title="' +
                           escapeHtml(i18n.t('admin.reset_password_title')) +
                           '"><i class="fas fa-key"></i></button>') +
@@ -315,7 +316,7 @@ async function loadUsers() {
                     '<button class="btn btn-sm btn-danger admin-action-btn" data-action="delete" data-uid="' +
                     _escJs(u.id) +
                     '" data-uname="' +
-                    _escJs(u.username) +
+                    _escJs(u.username || u.email) +
                     '" title="' +
                     escapeHtml(i18n.t('admin.delete_title')) +
                     '"' +
@@ -1158,6 +1159,110 @@ function showAccessDenied() {
     showElement('access-denied');
 }
 
+/* ── SMTP tab ──────────────────────────────────────────────────────────── */
+
+/**
+ * Fetch the runtime SMTP info and render the read-only status grid.
+ * Configuration is sourced exclusively from `OXICLOUD_SMTP_*` env vars;
+ * this view is purely diagnostic — no save path exists.
+ *
+ * @returns {Promise<void>}
+ */
+async function loadSmtp() {
+    try {
+        const resp = await fetch(`${API}/admin/smtp/info`, {
+            headers: headers(),
+            credentials: 'same-origin'
+        });
+        if (!resp.ok) return;
+        /** @type {{enabled: boolean, host: string, port: number, tls: string, from: string, user_state: string}} */
+        const info = await resp.json();
+
+        const enabledEl = document.getElementById('smtp-enabled');
+        if (enabledEl) {
+            enabledEl.textContent = info.enabled ? i18n.t('admin.smtp_enabled') || 'Enabled' : i18n.t('admin.smtp_disabled') || 'Disabled (host unset)';
+            enabledEl.style.color = info.enabled ? 'var(--success)' : 'var(--text-muted)';
+        }
+        const setText = (/** @type {string} */ id, /** @type {string} */ value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value || '—';
+        };
+        setText('smtp-host', info.host);
+        setText('smtp-port', String(info.port));
+        setText('smtp-tls', info.tls);
+        setText('smtp-from', info.from);
+        setText('smtp-user-state', info.user_state);
+    } catch (e) {
+        console.error('Failed to load SMTP info', e);
+    }
+}
+
+/**
+ * Send a diagnostic test email through the configured SMTP relay.
+ * Backend always responds with 200 carrying `{success, code, message,
+ * error}` — SMTP-level failures are operational data, not HTTP errors.
+ *
+ * @returns {Promise<void>}
+ */
+async function sendSmtpTest() {
+    const input = /** @type {HTMLInputElement | null} */ (document.getElementById('smtp-test-to'));
+    const resultEl = document.getElementById('smtp-test-result');
+    const btn = /** @type {HTMLButtonElement | null} */ (document.getElementById('btn-smtp-test'));
+    if (!input || !resultEl) return;
+
+    const to = input.value.trim();
+    if (!to) {
+        resultEl.className = 'alert alert-error';
+        resultEl.style.display = 'block';
+        resultEl.textContent = i18n.t('admin.smtp_test_missing_to') || 'Enter a recipient address.';
+        return;
+    }
+
+    if (btn) btn.disabled = true;
+    resultEl.className = 'alert alert-info';
+    resultEl.style.display = 'block';
+    resultEl.textContent = i18n.t('admin.smtp_sending') || 'Sending…';
+
+    try {
+        const resp = await fetch(`${API}/admin/smtp/test`, {
+            method: 'POST',
+            headers: headers(),
+            credentials: 'same-origin',
+            body: JSON.stringify({ to })
+        });
+        if (resp.status === 503) {
+            resultEl.className = 'alert alert-error';
+            resultEl.textContent = i18n.t('admin.smtp_not_configured') || 'SMTP is not configured on this server.';
+            return;
+        }
+        if (!resp.ok) {
+            resultEl.className = 'alert alert-error';
+            resultEl.textContent = `HTTP ${resp.status}: ${await resp.text()}`;
+            return;
+        }
+        /** @type {{success: boolean, code?: number, message?: string, error?: string}} */
+        const data = await resp.json();
+        if (data.success) {
+            resultEl.className = 'alert alert-success';
+            const codeLabel = i18n.t('admin.smtp_server_code') || 'Server replied';
+            resultEl.innerHTML =
+                `<strong>${escapeHtml(i18n.t('admin.smtp_sent') || 'Test email sent.')}</strong><br>` +
+                `${escapeHtml(codeLabel)}: <code>${data.code ?? ''} ${escapeHtml(data.message ?? '')}</code>`;
+        } else {
+            resultEl.className = 'alert alert-error';
+            const failLabel = i18n.t('admin.smtp_send_failed') || 'Send failed.';
+            resultEl.innerHTML = `<strong>${escapeHtml(failLabel)}</strong><br>` + `<code>${escapeHtml(data.error ?? 'unknown error')}</code>`;
+        }
+    } catch (e) {
+        resultEl.className = 'alert alert-error';
+        resultEl.textContent = i18n.t('admin.error_network', {
+            message: /** @type {Error} */ (e).message
+        });
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 /* ── Apply i18n when translations load / change ── */
 document.addEventListener('translationsLoaded', () => {
     i18n.translatePage();
@@ -1186,6 +1291,11 @@ document.getElementById('tab-btn-oidc').addEventListener('click', function () {
 document.getElementById('tab-btn-storage').addEventListener('click', function () {
     switchTab('storage', this);
 });
+document.getElementById('tab-btn-smtp').addEventListener('click', function () {
+    switchTab('smtp', this);
+});
+
+document.getElementById('btn-smtp-test').addEventListener('click', sendSmtpTest);
 
 document.getElementById('ds-registration').addEventListener('change', function () {
     toggleRegistration(/** @type {HTMLInputElement} */ (this).checked);

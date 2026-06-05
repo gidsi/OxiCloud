@@ -23,9 +23,19 @@ impl std::fmt::Display for UserRole {
 #[derive(Debug, Clone)]
 pub struct User {
     id: Uuid,
-    username: String,
+    /// Optional handle (2-64 chars, no `@`). NULL for users created via
+    /// email-invitation (`is_external = true`) and for users who have
+    /// not yet claimed a handle (PR-18 email-only signups). When set, it
+    /// must satisfy `validate_username` and must NOT contain `@` —
+    /// keeping the username and email namespaces provably disjoint.
+    username: Option<String>,
     email: String,
-    password_hash: String,
+    /// Optional Argon2 password hash. NULL when the user has no password
+    /// (externals, OIDC-only users, email-only signups awaiting their
+    /// welcome magic-link). After PR 16 this column carries no sentinel
+    /// strings — `is_some()` means "real argon2 hash"; `None` means "no
+    /// password configured".
+    password_hash: Option<String>,
     role: UserRole,
     storage_quota_bytes: i64,
     storage_used_bytes: i64,
@@ -35,40 +45,113 @@ pub struct User {
     active: bool,
     oidc_provider: Option<String>,
     oidc_subject: Option<String>,
+    image: Option<String>,
+    /// TRUE = grant-only external recipient (magic-link, OIDC-only, OCM
+    /// federated). FALSE = storage-owning internal user. Hooks that
+    /// provision per-user resources (home folder, default calendar, …)
+    /// must short-circuit when `is_external` is TRUE — see tip #2 in
+    /// `application/ports/user_lifecycle.rs`. The DB CHECK constraint
+    /// `users_external_no_storage` is the schema-level safety net.
+    is_external: bool,
+    /// Optional human-readable first/given name. Populated from OIDC
+    /// standard claim `given_name` at JIT provisioning, or via the
+    /// profile-edit endpoint. External users start with `None`.
+    given_name: Option<String>,
+    /// Optional human-readable last/family name. Populated from OIDC
+    /// standard claim `family_name` at JIT provisioning, or via the
+    /// profile-edit endpoint. External users start with `None`.
+    family_name: Option<String>,
+    /// When the user demonstrated control of their email address (PR 23).
+    /// `None` = unverified. `Some(ts)` = timestamp of the first proof,
+    /// preserved across subsequent verifications.
+    ///
+    /// Set on successful magic-link redemption (invitation OR
+    /// login-via-email — clicking the link proves the inbox is theirs)
+    /// or on OIDC JIT with `email_verified=true` claim. Classic password
+    /// signups stay `None` until the user goes through a magic-link
+    /// flow. PR 23 ships the signal only — future policy PRs gate
+    /// features (uploads, shares, etc.) on this column.
+    email_verified_at: Option<DateTime<Utc>>,
+    /// User-chosen locale for server-rendered surfaces (transactional
+    /// emails, future authenticated HTML pages). `None` = no preference,
+    /// resolves to `OXICLOUD_DEFAULT_LOCALE` at use time. Set by:
+    /// - the frontend language switcher (PATCH /api/auth/me/profile),
+    /// - the OIDC JIT path at provisioning **only**, never re-applied
+    ///   on subsequent logins (a UI choice always wins over the IdP),
+    /// - the magic-link invitation flow, which copies the inviter's
+    ///   value into the new external user's row.
+    ///
+    /// Schema-level CHECK enforces a textual BCP-47 shape; the
+    /// application layer is the authoritative gatekeeper against the
+    /// `LocaleRegistry`.
+    preferred_locale: Option<String>,
 }
 
 impl User {
-    /// Create a new user with a pre-hashed password.
+    /// Create a new user.
     ///
-    /// The password hashing should be done externally using PasswordHasherPort
-    /// to maintain clean architecture and keep cryptographic dependencies
-    /// out of the domain layer.
+    /// One unified constructor for every kind of user (internal, OIDC-linked,
+    /// external). The credential slots and the `is_external` marker are all
+    /// caller-controlled — what makes a user "OIDC" is `oidc_subject =
+    /// Some(_)`, what makes them "external" is `is_external = true`. There
+    /// are no hidden sentinel values; an absent credential is `None`.
     ///
     /// # Arguments
-    /// * `username` - User's username (3-32 characters)
-    /// * `email` - User's email address
-    /// * `password_hash` - Pre-hashed password (from PasswordHasherPort)
-    /// * `role` - User's role
-    /// * `storage_quota_bytes` - Storage quota in bytes
+    /// * `email` — required, must satisfy `validate_email`
+    /// * `username` — optional handle (2-64 chars, no `@`)
+    /// * `password_hash` — pre-hashed via PasswordHasherPort, or `None` if
+    ///   the user has no password yet (magic-link or OIDC bootstrap)
+    /// * `oidc_provider`, `oidc_subject` — both `Some` when the user is
+    ///   linked to an external IdP, both `None` otherwise
+    /// * `role` — `Admin` is rejected when `is_external = true` (mirrors the
+    ///   `users_external_not_admin` DB CHECK constraint)
+    /// * `storage_quota_bytes` — caller-set; external callers should pass 0
+    ///   to satisfy the `users_external_no_storage` invariant
+    /// * `is_external` — TRUE for grant-only recipients (magic-link, OCM)
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        username: String,
         email: String,
-        password_hash: String,
+        username: Option<String>,
+        password_hash: Option<String>,
+        oidc_provider: Option<String>,
+        oidc_subject: Option<String>,
         role: UserRole,
         storage_quota_bytes: i64,
+        is_external: bool,
     ) -> UserResult<Self> {
-        // Validations
-        Self::validate_username(&username)?;
         Self::validate_email(&email)?;
-
-        if password_hash.is_empty() {
+        if let Some(ref u) = username {
+            Self::validate_username(u)?;
+        }
+        if let Some(ref h) = password_hash
+            && h.is_empty()
+        {
             return Err(UserError::InvalidPassword(
                 "Password hash cannot be empty".to_string(),
             ));
         }
+        // Schema-level CHECKs are mirrored at the entity layer so callers
+        // get a typed error instead of an opaque DB rejection.
+        if is_external && matches!(role, UserRole::Admin) {
+            return Err(UserError::ValidationError(
+                "External users cannot hold the admin role".to_string(),
+            ));
+        }
+        if is_external && storage_quota_bytes != 0 {
+            return Err(UserError::ValidationError(
+                "External users must have storage_quota_bytes = 0".to_string(),
+            ));
+        }
+        // OIDC linkage is all-or-nothing: both provider and subject set,
+        // or neither. The DB has a UNIQUE index on (provider, subject)
+        // WHERE both non-NULL; partial state would corrupt that.
+        if oidc_provider.is_some() != oidc_subject.is_some() {
+            return Err(UserError::ValidationError(
+                "oidc_provider and oidc_subject must both be set or both be None".to_string(),
+            ));
+        }
 
         let now = Utc::now();
-
         Ok(Self {
             id: Uuid::new_v4(),
             username,
@@ -81,46 +164,29 @@ impl User {
             updated_at: now,
             last_login_at: None,
             active: true,
-            oidc_provider: None,
-            oidc_subject: None,
-        })
-    }
-
-    /// Create a new OIDC-authenticated user (no password required).
-    pub fn new_oidc(
-        username: String,
-        email: String,
-        role: UserRole,
-        storage_quota_bytes: i64,
-        oidc_provider: String,
-        oidc_subject: String,
-    ) -> UserResult<Self> {
-        Self::validate_username(&username)?;
-        Self::validate_email(&email)?;
-        let now = Utc::now();
-        Ok(Self {
-            id: Uuid::new_v4(),
-            username,
-            email,
-            password_hash: "__OIDC_NO_PASSWORD__".to_string(),
-            role,
-            storage_quota_bytes,
-            storage_used_bytes: 0,
-            created_at: now,
-            updated_at: now,
-            last_login_at: None,
-            active: true,
-            oidc_provider: Some(oidc_provider),
-            oidc_subject: Some(oidc_subject),
+            oidc_provider,
+            oidc_subject,
+            image: None,
+            is_external,
+            given_name: None,
+            family_name: None,
+            // PR 23: unverified at creation. Stamped on the first
+            // magic-link redemption or OIDC JIT (where the IdP has
+            // already confirmed the email).
+            email_verified_at: None,
+            // PR C: no locale preference at creation. OIDC JIT, the
+            // language switcher, or invitation-time inheritance fill
+            // this in later. NULL resolves to OXICLOUD_DEFAULT_LOCALE.
+            preferred_locale: None,
         })
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn from_data(
         id: Uuid,
-        username: String,
+        username: Option<String>,
         email: String,
-        password_hash: String,
+        password_hash: Option<String>,
         role: UserRole,
         storage_quota_bytes: i64,
         storage_used_bytes: i64,
@@ -143,15 +209,27 @@ impl User {
             active,
             oidc_provider: None,
             oidc_subject: None,
+            image: None,
+            // `from_data` is the minimal-args reconstruction path used by
+            // tests and JWT-claim-based principal hydration (which doesn't
+            // carry `is_external`). Default to FALSE — JWT-validated
+            // principals are existing internal users; magic-link external
+            // sessions take a different path that hydrates from DB via
+            // `from_data_full`.
+            is_external: false,
+            given_name: None,
+            family_name: None,
+            email_verified_at: None,
+            preferred_locale: None,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn from_data_full(
         id: Uuid,
-        username: String,
+        username: Option<String>,
         email: String,
-        password_hash: String,
+        password_hash: Option<String>,
         role: UserRole,
         storage_quota_bytes: i64,
         storage_used_bytes: i64,
@@ -161,6 +239,12 @@ impl User {
         active: bool,
         oidc_provider: Option<String>,
         oidc_subject: Option<String>,
+        image: Option<String>,
+        is_external: bool,
+        given_name: Option<String>,
+        family_name: Option<String>,
+        email_verified_at: Option<DateTime<Utc>>,
+        preferred_locale: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -176,6 +260,12 @@ impl User {
             active,
             oidc_provider,
             oidc_subject,
+            image,
+            is_external,
+            given_name,
+            family_name,
+            email_verified_at,
+            preferred_locale,
         }
     }
 
@@ -184,8 +274,12 @@ impl User {
         self.id
     }
 
-    pub fn username(&self) -> &str {
-        &self.username
+    /// The user's chosen handle. `None` for users who have not claimed
+    /// one (externals, fresh email-only signups). Display callers should
+    /// fall back through `given_name`/`family_name` to `email` when this
+    /// is `None`.
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
     }
 
     pub fn email(&self) -> &str {
@@ -220,8 +314,31 @@ impl User {
         self.active
     }
 
-    pub fn password_hash(&self) -> &str {
-        &self.password_hash
+    /// The Argon2 password hash, or `None` when the user has no password
+    /// configured (externals, OIDC-only users, post-PR-18 email-only
+    /// signups). `verify_password` callers must short-circuit to
+    /// "invalid credentials" when this is `None`.
+    pub fn password_hash(&self) -> Option<&str> {
+        self.password_hash.as_deref()
+    }
+
+    /// Convenience: does the user have a real password configured?
+    pub fn has_password(&self) -> bool {
+        self.password_hash.is_some()
+    }
+
+    /// Best-effort label for audit-log interpolation. Returns the
+    /// username when set; falls back to the user_id otherwise. Always
+    /// implements `Display` (returns `String`) so audit lines can stay
+    /// `username = %user.display_for_audit()` regardless of whether the
+    /// user has claimed a handle. Reserve this for `target: "audit"`
+    /// lines — user-facing display callers should walk the
+    /// `username → given/family → email` fallback chain themselves.
+    pub fn display_for_audit(&self) -> String {
+        match &self.username {
+            Some(u) => u.clone(),
+            None => self.id.to_string(),
+        }
     }
 
     pub fn oidc_provider(&self) -> Option<&str> {
@@ -232,16 +349,129 @@ impl User {
         self.oidc_subject.as_deref()
     }
 
+    pub fn image(&self) -> Option<&str> {
+        self.image.as_deref()
+    }
+
+    /// `TRUE` for grant-only external recipients (magic-link, OIDC-only,
+    /// OCM federated). Hooks provisioning per-user resources must
+    /// short-circuit when this returns `true` — see tip #2 in
+    /// `application/ports/user_lifecycle.rs`.
+    pub fn is_external(&self) -> bool {
+        self.is_external
+    }
+
+    pub fn given_name(&self) -> Option<&str> {
+        self.given_name.as_deref()
+    }
+
+    pub fn family_name(&self) -> Option<&str> {
+        self.family_name.as_deref()
+    }
+
+    /// When the user first demonstrated control of their email (PR 23).
+    /// `None` = unverified. See `mark_email_verified` for the trigger
+    /// points (magic-link redemption, OIDC JIT with verified claim).
+    pub fn email_verified_at(&self) -> Option<DateTime<Utc>> {
+        self.email_verified_at
+    }
+
+    /// `true` iff the user has demonstrated control of their email.
+    /// Convenience wrapper over `email_verified_at().is_some()`.
+    pub fn is_email_verified(&self) -> bool {
+        self.email_verified_at.is_some()
+    }
+
+    /// Stamp the first proof-of-email-control timestamp. **Idempotent**:
+    /// if `email_verified_at` is already `Some`, this is a no-op so
+    /// re-verifications preserve the original time. Call from the
+    /// magic-link redemption path and from OIDC JIT when the IdP
+    /// confirms the email.
+    pub fn mark_email_verified(&mut self) {
+        if self.email_verified_at.is_none() {
+            let now = Utc::now();
+            self.email_verified_at = Some(now);
+            self.updated_at = now;
+        }
+    }
+
+    pub fn set_image(&mut self, image: Option<String>) {
+        self.image = image;
+        self.updated_at = Utc::now();
+    }
+
+    pub fn set_given_name(&mut self, given_name: Option<String>) {
+        self.given_name = given_name;
+        self.updated_at = Utc::now();
+    }
+
+    pub fn set_family_name(&mut self, family_name: Option<String>) {
+        self.family_name = family_name;
+        self.updated_at = Utc::now();
+    }
+
+    /// Borrow the user's stored locale code (e.g. `"fr"`, `"zh-TW"`),
+    /// if any. The application layer is expected to feed this through
+    /// `LocaleRegistry::parse_or_default` before rendering, so an
+    /// orphaned code from a since-removed locale falls back gracefully
+    /// instead of triggering a translation error.
+    pub fn preferred_locale(&self) -> Option<&str> {
+        self.preferred_locale.as_deref()
+    }
+
+    /// Set or clear the user's preferred locale. The caller is
+    /// responsible for having already validated the code against the
+    /// `LocaleRegistry` — at the entity layer we treat the field as
+    /// opaque text, the way we do for `given_name` / `family_name`.
+    /// Passing `None` clears the preference (subsequent renders fall
+    /// back to the server default).
+    pub fn set_preferred_locale(&mut self, locale: Option<String>) {
+        self.preferred_locale = locale;
+        self.updated_at = Utc::now();
+    }
+
+    /// Claim or change the username. Runs the same validation as the
+    /// constructor — callers must still ensure uniqueness at the repo
+    /// level. Bumps `updated_at`. Used by the post-create profile-edit
+    /// endpoint so a user who started with `None` can claim a handle
+    /// later, or change to a different one. The home folder name is NOT
+    /// renamed: it was display text at creation; the folder is owned
+    /// by `user_id`.
+    pub fn set_username(&mut self, new_username: String) -> UserResult<()> {
+        Self::validate_username(&new_username)?;
+        self.username = Some(new_username);
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Unset the username (return to `None`). Use sparingly — most
+    /// users keep their handle once claimed. Mainly here so admin
+    /// tooling can clear a problematic handle without deleting the
+    /// account.
+    pub fn clear_username(&mut self) {
+        self.username = None;
+        self.updated_at = Utc::now();
+    }
+
     /// Returns true if this is an OIDC-only user (no password)
     pub fn is_oidc_user(&self) -> bool {
         self.oidc_provider.is_some()
     }
 
-    /// Update the password hash.
-    ///
-    /// The new password should be hashed externally using PasswordHasherPort
-    /// before calling this method.
-    pub fn update_password_hash(&mut self, new_hash: String) {
+    /// Returns true iff this user has any non-magic-link authentication
+    /// method available — either a real password hash, or a linked OIDC
+    /// subject. Magic-link eligibility for "no other credential" mode is
+    /// the negation of this; the `OXICLOUD_MAGIC_LINK_OPEN_TO_PASSWORD_USERS`
+    /// flag widens the policy at the service layer (`magic_link_eligibility`).
+    pub fn has_login_credential(&self) -> bool {
+        self.password_hash.is_some() || self.oidc_subject.is_some()
+    }
+
+    /// Set the password hash. The new password must be hashed externally
+    /// via `PasswordHasherPort` before calling this. Passing `None`
+    /// clears the password (e.g. when a user opts back into magic-link-only
+    /// auth).
+    pub fn update_password_hash(&mut self, new_hash: Option<String>) {
         self.password_hash = new_hash;
         self.updated_at = Utc::now();
     }
@@ -273,13 +503,24 @@ impl User {
 
     // ── Shared validation helpers ──────────────────────────────────────
 
-    /// Usernames must be 3-32 chars and contain only ASCII alphanumerics,
-    /// hyphens, underscores, and dots.  This prevents XSS payloads like
-    /// `<img/src=x>` from being stored as usernames.
+    /// Usernames are 2-64 chars of `[A-Za-z0-9._-]`. The `@` character is
+    /// explicitly forbidden — keeping the username and email namespaces
+    /// provably disjoint is what closes the cross-collision attack class
+    /// described in the auth-simplification plan (a user can never claim
+    /// a handle that shadows another user's email). No leading/trailing
+    /// dot or hyphen. The character set also prevents XSS payloads from
+    /// being stored as usernames.
     fn validate_username(username: &str) -> UserResult<()> {
-        if username.len() < 3 || username.len() > 32 {
+        let len = username.chars().count();
+        if !(2..=64).contains(&len) {
             return Err(UserError::InvalidUsername(
-                "Username must be between 3 and 32 characters".to_string(),
+                "Username must be between 2 and 64 characters".to_string(),
+            ));
+        }
+        if username.contains('@') {
+            return Err(UserError::InvalidUsername(
+                "Username must not contain '@' — use the email field for email addresses"
+                    .to_string(),
             ));
         }
         if !username
@@ -291,7 +532,6 @@ impl User {
                     .to_string(),
             ));
         }
-        // Disallow leading/trailing dots or hyphens
         if username.starts_with('.')
             || username.starts_with('-')
             || username.ends_with('.')

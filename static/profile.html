@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Declares the page supports both modes. Switching between them is
+         driven by the CSS `color-scheme` property (via the `data-color-scheme`
+         attribute on <html> set by theme-init.js), not by mutating this tag. -->
+    <meta name="color-scheme" content="light dark">
     <title>OxiCloud — My Profile</title>
     <link rel="icon" type="image/svg+xml" href="/logo/logo-plain.svg">
     <script src="/js/core/theme-init.js"></script>
@@ -40,12 +44,53 @@
   <div id="main-content" class="hidden">
     <div class="profile-card">
       <div class="avatar-section">
-        <div class="avatar-large" id="p-avatar">—</div>
+        <div class="avatar-large-wrap">
+          <div class="avatar-large" id="p-avatar">—</div>
+          <button class="avatar-edit-btn hidden" id="p-avatar-edit-btn" data-i18n-title="profile.edit_photo" title="Edit photo">
+            <i class="fas fa-pencil-alt"></i>
+          </button>
+        </div>
         <div class="avatar-info">
           <h1 id="p-username">—</h1>
           <div class="email" id="p-email">—</div>
           <span class="role-badge" id="p-role-badge">—</span>
+          <p class="avatar-oidc-note hidden" id="p-avatar-oidc-note" data-i18n="profile.photo_managed_by_oidc">Photo managed by your identity provider.</p>
         </div>
+      </div>
+
+      <!-- Photo edit panel (local accounts only) -->
+      <div class="avatar-edit-panel hidden" id="p-avatar-edit-panel">
+        <div class="avatar-edit-tabs">
+          <button class="avatar-tab active" id="p-tab-url" data-i18n="profile.photo_tab_url">URL</button>
+          <button class="avatar-tab" id="p-tab-upload" data-i18n="profile.photo_tab_upload">Upload</button>
+        </div>
+
+        <!-- URL input mode -->
+        <div class="avatar-tab-pane" id="p-pane-url">
+          <input type="url" id="p-image-url" class="avatar-url-input"
+                 data-i18n-placeholder="profile.photo_url_placeholder"
+                 placeholder="https://example.com/photo.jpg">
+          <small class="avatar-hint" data-i18n="profile.photo_url_hint">https://, http://, or data:image/…;base64,… accepted</small>
+        </div>
+
+        <!-- Upload mode -->
+        <div class="avatar-tab-pane hidden" id="p-pane-upload">
+          <label class="avatar-file-label" for="p-image-file">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <span data-i18n="profile.photo_choose_file">Choose a photo (PNG, JPEG, WebP)</span>
+          </label>
+          <input type="file" id="p-image-file" class="avatar-file-input"
+                 accept="image/png,image/jpeg,image/webp">
+          <img class="avatar-preview hidden" id="p-image-preview" alt="Preview" src="">
+          <small class="avatar-hint" data-i18n="profile.photo_resize_note">Images larger than 512 × 512 px are automatically resized.</small>
+        </div>
+
+        <div class="avatar-edit-actions">
+          <button class="btn btn-primary" id="p-avatar-save" data-i18n="profile.photo_save">Save</button>
+          <button class="btn btn-danger-sm" id="p-avatar-remove" data-i18n="profile.photo_remove">Remove photo</button>
+          <button class="btn btn-secondary" id="p-avatar-cancel" data-i18n="profile.photo_cancel">Cancel</button>
+        </div>
+        <div id="p-avatar-status"></div>
       </div>
     </div>
 
@@ -69,6 +114,36 @@
           <div class="info-value" id="p-detail-login">—</div>
         </div>
       </div>
+    </div>
+
+    <div class="profile-card" id="profile-edit-section">
+      <h2><i class="fas fa-id-badge"></i> <span data-i18n="profile.edit_profile">Edit Profile</span></h2>
+
+      <div id="profile-edit-oidc-note" class="alert alert-info hidden">
+        <i class="fas fa-info-circle"></i>
+        <span data-i18n="profile.edit_oidc_managed">To change your information (name, first name, profile picture, …), please update it at your identity provider. Your changes will appear on your next sign-in.</span>
+      </div>
+
+      <form id="profile-edit-form">
+        <div class="form-group">
+          <label for="profile-edit-username" data-i18n="profile.username">Username</label>
+          <input type="text" id="profile-edit-username" maxlength="64" autocomplete="username"
+                 data-i18n-placeholder="profile.username_placeholder" placeholder="e.g. alice">
+          <small id="profile-edit-username-hint" data-i18n="profile.username_claim_hint">2–64 characters, letters/digits/dot/dash/underscore. Once chosen, the username can't be changed (DAV/NextCloud clients depend on it).</small>
+        </div>
+        <div class="form-group">
+          <label for="profile-edit-given-name" data-i18n="profile.given_name">First name</label>
+          <input type="text" id="profile-edit-given-name" maxlength="128" autocomplete="given-name">
+        </div>
+        <div class="form-group">
+          <label for="profile-edit-family-name" data-i18n="profile.family_name">Last name</label>
+          <input type="text" id="profile-edit-family-name" maxlength="128" autocomplete="family-name">
+        </div>
+        <button type="submit" class="btn btn-primary" id="profile-edit-submit">
+          <i class="fas fa-save"></i> <span data-i18n="profile.save_profile">Save changes</span>
+        </button>
+        <div id="profile-edit-status"></div>
+      </form>
     </div>
 
     <div class="profile-card">

@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "このサインインリンクは無効になりました",
+                "expired_body": "リンクは期限切れか、すでに使用された可能性があります。新しいリンクをお送りできます — 数秒以内にメールが届きます。",
+                "resend_to": "{{email}} に新しいリンクを送信",
+                "generic_unavailable": "このサインインリンクは無効になりました。すでに使用されたか、期限が切れた可能性があります。ログインページから新しいリンクをリクエストしてください。",
+                "service_unavailable": "マジックリンクサインインは、このサーバーで有効になっていません。",
+                "internal_error": "サインイン中にエラーが発生しました。もう一度お試しください。",
+                "resend_failure": "リンクの送信中にエラーが発生しました。もう一度お試しください。",
+                "cross_browser_title": "このデバイスでサインインを続けますか?",
+                "cross_browser_body": "このサインインリンクを、リクエストしたものとは別のブラウザーまたはデバイスで開きました。",
+                "cross_browser_warning": "このリンクをあなたがリクエストしたのであれば、続行しても安全です。そうでない場合は、このページを閉じてください — 「続行」をクリックすると、他の人があなたのアカウントにサインインしてしまいます。",
+                "cross_browser_continue": "続行してサインイン",
+                "resend_confirmation_title": "受信トレイをご確認ください",
+                "resend_confirmation_body": "サインインリンクがアクティブなアカウントのものであれば、新しいリンクが今送信されました。受信トレイをご確認ください。",
+                "return_link": "OxiCloud に戻る"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} さんが OxiCloud で {{kind}} をあなたと共有しました",
+                    "body": "{{inviter}} さんが OxiCloud で {{kind}} をあなたと共有しました。\n\n以下のリンクをクリックして開いてください:\n{{link}}\n\nリンクは一度のみ有効で、{{ttl_hours}} 時間で期限切れになります。\nこの招待に心当たりがない場合は、このメッセージを無視していただいて結構です。\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "OxiCloud にサインイン",
+                    "body": "こんにちは、\n\n以下のリンクから OxiCloud にサインインしてください。リンクは一度のみ有効で、{{ttl_minutes}} 分で期限切れになります。リクエストしたものと同じデバイスで開いてください。\n\n{{link}}\n\nこのサインインリンクをリクエストしていない場合は、このメッセージを無視していただいて結構です — それ以上の操作は必要ありません。\n\n— OxiCloud"
+                },
+                "kind_file": "ファイル",
+                "kind_folder": "フォルダー",
+                "english_fallback_divider": "--- 以下は英語版 ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "ミニマリストクラウドストレージシステム"
@@ -10,7 +43,8 @@
         "favorites": "お気に入り",
         "photos": "写真",
         "music": "音楽",
-        "trash": "ゴミ箱"
+        "trash": "ゴミ箱",
+        "sharedwithme": "自分と共有"
     },
     "photos": {
         "empty_state": "写真はまだありません",
@@ -125,7 +159,13 @@
         "about_description": "RustとClean Architectureで構築されたクラウドストレージプラットフォーム。高速・安全・プライベート。",
         "admin_panel": "管理パネル",
         "profile": "マイプロフィール",
-        "role_user": "ユーザー"
+        "role_user": "ユーザー",
+        "theme": {
+            "light": "ライト",
+            "dark": "ダーク",
+            "auto": "システムに合わせる"
+        },
+        "manage_groups": "グループを管理"
     },
     "share": {
         "dialogTitle": "共有リンク",
@@ -269,7 +309,8 @@
             "archive": "アーカイブ",
             "installer": "インストーラー",
             "code": "コード"
-        }
+        },
+        "owner": "オーナー"
     },
     "dialogs": {
         "rename_folder": "フォルダ名を変更",
@@ -329,7 +370,13 @@
         "move_error": "移動エラー",
         "empty_name": "名前を空にすることはできません",
         "name_exists": "同じ名前のファイルまたはフォルダが既に存在します",
-        "generic_error": "エラーが発生しました"
+        "generic_error": "エラーが発生しました",
+        "group_name_invalid": "グループ名はメールプレフィックス形式に一致している必要があります（文字、数字、ドット、ダッシュ、アンダースコア；1～64文字）。",
+        "group_cycle": "このメンバーはグループ間で循環参照を作成します。",
+        "group_depth_exceeded": "ネストの深さが許容されている最大値（8）を超えています。",
+        "group_virtual_immutable": "「Internal」グループはシステム管理であり、変更できません。",
+        "group_not_found": "グループが見つかりません。",
+        "group_name_taken": "この名前のグループはすでに存在します。"
     },
     "breadcrumb": {
         "home": "ホーム"
@@ -339,15 +386,36 @@
         "empty_state": "ゴミ箱は空です",
         "original_location": "元の場所",
         "deleted_date": "削除日",
+        "remaining": "残り",
         "actions": "操作",
         "restore": "復元",
         "delete_permanently": "完全に削除",
-        "empty_confirm": "ゴミ箱を空にしますか？すべてのアイテムが完全に削除されます。"
+        "empty_confirm": "ゴミ箱を空にしますか？すべてのアイテムが完全に削除されます。",
+        "groupby": {
+            "remaining_days": "残り日数",
+            "trashed_time": "削除日時"
+        }
+    },
+    "daysRemaining": {
+        "expired": "期限切れ",
+        "today": "今日",
+        "tomorrow": "明日",
+        "inDays": "{{count}}日"
+    },
+    "expiryChip": {
+        "never": "期限なし",
+        "expired": "期限切れ",
+        "today": "今日で期限切れ",
+        "tomorrow": "明日で期限切れ",
+        "inDays": "{{count}}日後に期限切れ",
+        "onDate": "{{date}}に期限切れ"
     },
     "auth": {
         "login_title": "サインイン",
         "username": "ユーザー名",
         "username_placeholder": "ユーザー名を入力",
+        "login_identifier": "ユーザー名またはメールアドレス",
+        "login_identifier_placeholder": "ユーザー名またはメールアドレスを入力",
         "password": "パスワード",
         "password_placeholder": "パスワードを入力",
         "login_button": "サインイン",
@@ -378,7 +446,14 @@
         "admin_create_error": "管理者アカウントの作成エラー",
         "or": "または",
         "sso_login": "SSOでサインイン",
-        "sso_login_provider": "{{provider}}でサインイン"
+        "sso_login_provider": "{{provider}}でサインイン",
+        "magicLinkHint": "パスワードをお持ちでない方は、メールアドレスを入力するとワンタイムサインインリンクをお送りします。",
+        "magicLinkEmailLabel": "メールアドレス",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "サインインリンクを送信",
+        "magicLinkSent": "そのメールアドレスのアカウントが存在する場合、サインインリンクが送信されました。受信トレイをご確認ください。",
+        "magicLinkUnavailable": "このサーバーではメールでのサインインは利用できません。",
+        "magicLinkNetworkError": "サーバーに接続できませんでした: {{message}}"
     },
     "storage": {
         "title": "ストレージ",
@@ -428,7 +503,8 @@
         "clear": "最近をクリア",
         "accessed": "アクセス日",
         "empty_state": "最近のファイルはありません",
-        "empty_hint": "開いたファイルがここに表示されます"
+        "empty_hint": "開いたファイルがここに表示されます",
+        "loadMore": "さらに読み込む"
     },
     "notifications": {
         "file_renamed": "ファイル名を変更しました",
@@ -660,6 +736,18 @@
         "minutes_ago": "{{n}}分前",
         "hours_ago": "{{n}}時間前",
         "days_ago": "{{n}}日前",
+        "edit_profile": "プロフィールを編集",
+        "edit_oidc_managed": "情報(姓、名、プロフィール写真など)を変更するには、IDプロバイダーで更新してください。次回サインイン時に反映されます。",
+        "username_claim_hint": "2〜64文字、英数字 / ドット / ハイフン / アンダースコア。一度選択すると、ユーザー名は変更できません(DAV/NextCloudクライアントが依存します)。",
+        "username_already_claimed": "ユーザー名は設定済みで変更できません(DAV/NextCloudクライアントが依存します)。",
+        "given_name": "名",
+        "family_name": "姓",
+        "save_profile": "変更を保存",
+        "profile_saved": "プロフィールを更新しました",
+        "profile_no_changes": "保存する変更はありません。",
+        "profile_save_failed": "保存に失敗しました",
+        "username_taken_error": "このユーザー名はすでに使用されています。",
+        "username_immutable_error": "ユーザー名はすでに設定されており、ここでは変更できません。名前を変更したい場合は管理者にお問い合わせください。",
         "change_password": "パスワード変更",
         "current_password": "現在のパスワード",
         "new_password": "新しいパスワード",
@@ -675,12 +763,84 @@
         "error_label_required": "ラベルを入力してください",
         "error_create_pw": "アプリパスワードの作成に失敗しました",
         "confirm_revoke": "アプリパスワード「{{label}}」を失効させますか？使用中のクライアントは動作しなくなります。",
-        "error_revoke": "失効に失敗しました"
+        "error_revoke": "失効に失敗しました",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "アップロード中...",
         "files": "ファイル",
         "complete": "{{count}} / {{total}} アップロード済み"
     },
-    "storage_quota_exceeded": "ストレージ容量を超過しました"
+    "storage_quota_exceeded": "ストレージ容量を超過しました",
+    "sharedwithme": {
+        "pageTitle": "自分と共有",
+        "pageDescription": "他のユーザーがあなたと共有したファイルとフォルダー",
+        "emptyStateTitle": "まだ何も共有されていません",
+        "emptyStateDesc": "他のユーザーがあなたと共有したアイテムがここに表示されます",
+        "loadMore": "さらに読み込む",
+        "sharedBy": "共有者",
+        "colName": "名前",
+        "colType": "タイプ",
+        "colSharedBy": "共有者",
+        "colDate": "共有日",
+        "colPermissions": "権限"
+    },
+    "groupby": {
+        "none": "なし",
+        "title": "グループ化",
+        "owner": "オーナー",
+        "shareDate": "共有日",
+        "type": "種類",
+        "type.folders": "フォルダー",
+        "accessedAt": "アクセス日",
+        "modifiedAt": "更新日",
+        "createdAt": "作成日",
+        "size": "サイズ",
+        "favoriteDate": "お気に入り登録日",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "今日",
+        "last7days": "過去7日間",
+        "last30days": "過去30日間"
+    },
+    "groups": {
+        "title": "グループを管理",
+        "create_button": "グループを作成",
+        "create_dialog_title": "新規グループ",
+        "edit_dialog_title": "グループ名を変更",
+        "name_label": "名前",
+        "name_placeholder": "engineering",
+        "description_label": "説明（任意）",
+        "members_section": "メンバー",
+        "add_member_placeholder": "ユーザーまたはグループを追加…",
+        "no_members": "メンバーはまだいません。",
+        "remove_member": "削除",
+        "delete_group": "グループを削除",
+        "delete_confirm": "グループ「{name}」を削除しますか？このグループを参照しているすべての権限が取り消されます。",
+        "empty_state": "グループはまだありません。",
+        "load_more": "もっと読み込む",
+        "back_to_list": "戻る",
+        "loading": "読み込み中…",
+        "virtual_badge": "システム",
+        "member_count_zero": "メンバーなし",
+        "member_count_one": "1 メンバー",
+        "member_count_other": "{count} メンバー",
+        "delete_confirm_label": "確認のためにグループ名を入力してください:",
+        "delete_confirm_mismatch": "確認のためにグループ名を正確に入力してください。",
+        "virtual_internal_name": "内部"
+    }
 }

@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { test, expect, Page } from '@playwright/test';
-import { loginAsAdmin } from './helpers';
+import { expect, Page } from '@playwright/test';
+import { test, loginAsAdmin } from './helpers';
 
 const FIXTURES = path.join(__dirname, '../../fixtures');
 
@@ -73,7 +73,7 @@ test.describe('Folder management', () => {
   });
 
   test('folder creation', async ({ page }) => {
-    const name = `Test folder ${Date.now()}`;
+    const name = `Test folder creation`;
 
     await submitNewFolder(page, name);
 
@@ -92,7 +92,7 @@ test.describe('Folder management', () => {
   });
 
   test('folder reject if already exists', async ({ page }) => {
-    const name = `Test folder ${Date.now()}`;
+    const name = `Test existing folder`;
 
     // Prerequisite: create the folder once successfully.
     await submitNewFolder(page, name);
@@ -122,9 +122,8 @@ test.describe('Folder management', () => {
   });
 
   test('folder rename', async ({ page }) => {
-    const ts = Date.now();
-    const original = `Test folder ${ts}`;
-    const renamed = `Renamed folder ${ts}`;
+    const original = `Test folder`;
+    const renamed = `Renamed folders`;
 
     // Prerequisite: create the folder to rename.
     await submitNewFolder(page, original);

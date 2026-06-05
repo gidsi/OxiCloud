@@ -11,7 +11,10 @@
 use uuid::Uuid;
 
 use crate::common::errors::DomainError;
-use crate::domain::services::authorization::{Grant, Permission, Resource, Subject};
+use crate::domain::services::authorization::{
+    Grant, GrantCursor, IncomingGrantSummary, OutgoingResourceSummary, Permission, Resource,
+    ResourceKind, Subject,
+};
 
 pub trait AuthorizationEngine: Send + Sync + 'static {
     /// Returns true if `subject` has `permission` on `resource`, considering
@@ -36,7 +39,18 @@ pub trait AuthorizationEngine: Send + Sync + 'static {
         resource: Resource,
     ) -> Result<(), DomainError> {
         if self.check(subject, permission, resource).await? {
+            // Granted path: high-traffic (every authorized request hits
+            // this), so kept at `debug` and structured for grep-friendly
+            // filtering. Not an audit event — the audit trail focuses
+            // on denials and explicit mutations elsewhere.
             tracing::debug!(
+                target: "oxicloud::authz",
+                event = "authz.allowed",
+                subject_type = subject.type_str(),
+                subject_id = %subject.id(),
+                permission = permission.as_str(),
+                resource_type = resource.type_str(),
+                resource_id = %resource.id(),
                 "👮🏻‍♂️ perms: ✔ Subject '{}' has permission to '{}' on resource '{}'",
                 subject,
                 permission,
@@ -48,8 +62,23 @@ pub trait AuthorizationEngine: Send + Sync + 'static {
                 Resource::Folder(id) => ("Folder", id),
                 Resource::File(id) => ("File", id),
             };
-            // log it for audit
+            // Audit-worthy: denials are the interesting signal. Routed
+            // through the `audit` tracing target so log aggregators can
+            // surface them separately from operational debug traffic.
+            // Span context (request_id, client_ip, user_id) is attached
+            // automatically by the request-scope span set in
+            // `interfaces/middleware/trace_span.rs`, so this log line
+            // doesn't need to duplicate those fields — they appear in
+            // the structured output of every log written inside the
+            // request span.
             tracing::info!(
+                target: "audit",
+                event = "authz.denied",
+                subject_type = subject.type_str(),
+                subject_id = %subject.id(),
+                permission = permission.as_str(),
+                resource_type = resource.type_str(),
+                resource_id = %resource.id(),
                 "👮🏻‍♂️ perms: ⛔ Subject '{}' hasn't permission to '{}' on resource '{}'",
                 subject,
                 permission,
@@ -67,6 +96,26 @@ pub trait AuthorizationEngine: Send + Sync + 'static {
         permission_filter: Option<Permission>,
     ) -> Result<Vec<Grant>, DomainError>;
 
+    /// Cursor-paginated list of resources explicitly granted to `subject`,
+    /// optionally filtered by resource kind. Multiple permission rows for the
+    /// same resource are collapsed into one `IncomingGrantSummary`.
+    ///
+    /// Ordered by `MIN(granted_at) DESC, resource_id DESC` — stable across
+    /// concurrent inserts because the cursor encodes both fields.
+    ///
+    /// Pass `kinds = &[]` to return all resource kinds.
+    /// Returns `(summaries, next_cursor)` — `next_cursor` is `None` when the
+    /// last page has been reached.
+    async fn list_incoming_resources_paged(
+        &self,
+        subject: Subject,
+        kinds: &[ResourceKind],
+        limit: u32,
+        cursor: Option<GrantCursor>,
+        sort_by: &str,
+        reverse: bool,
+    ) -> Result<(Vec<IncomingGrantSummary>, Option<GrantCursor>), DomainError>;
+
     /// All grants on a specific resource (for "Manage sharing" UI). Caller
     /// must verify the caller has `Share` on the resource before invoking.
     async fn list_grants_on_resource(&self, resource: Resource) -> Result<Vec<Grant>, DomainError>;
@@ -75,15 +124,50 @@ pub trait AuthorizationEngine: Send + Sync + 'static {
     /// `GET /api/grants/outgoing` ("things I've shared with others").
     async fn list_outgoing_grants(&self, granted_by: Uuid) -> Result<Vec<Grant>, DomainError>;
 
+    /// Cursor-paginated list of resources that `granted_by` has shared with
+    /// others. Multiple permission rows for the same (subject, resource) pair
+    /// are collapsed into one `OutgoingGrantEntry`; multiple subjects on the
+    /// same resource are grouped into one `OutgoingResourceSummary`.
+    ///
+    /// Returns `(summaries, next_cursor)`.
+    async fn list_outgoing_resources_paged(
+        &self,
+        granted_by: Uuid,
+        limit: u32,
+        cursor: Option<GrantCursor>,
+        sort_by: &str,
+        reverse: bool,
+    ) -> Result<(Vec<OutgoingResourceSummary>, Option<GrantCursor>), DomainError>;
+
     /// Create a grant. Idempotent — duplicates are absorbed by the UNIQUE
-    /// constraint and the existing row is returned.
+    /// constraint; if the row already exists its `expires_at` is updated.
     async fn grant(
         &self,
         granted_by: Uuid,
         subject: Subject,
         permission: Permission,
         resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Grant, DomainError>;
+
+    /// Update `expires_at` on every grant row for the given subject.
+    /// Used when a share's expiry is changed — one call updates all
+    /// permission rows for that token in a single UPDATE.
+    async fn set_expiry_for_subject(
+        &self,
+        subject: Subject,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError>;
+
+    /// Update `expires_at` on every grant row for the given `(subject, resource)`
+    /// pair. Used by `set_role` to sync the expiry of retained grants when the
+    /// caller changes expiry without changing permissions.
+    async fn set_expiry_on_resource(
+        &self,
+        subject: Subject,
+        resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError>;
 
     /// Revoke a specific grant by its UUID. Returns `Ok(())` whether or not
     /// the row existed (idempotent revoke).

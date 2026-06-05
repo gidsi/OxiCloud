@@ -5,6 +5,7 @@
 //! `AuthorizationEngine` port consumes them and the `PgAclEngine` implementation
 //! maps them to / from `storage.access_grants` rows.
 
+use crate::application::dtos::cursor::PageCursor;
 use std::fmt;
 use uuid::Uuid;
 
@@ -24,9 +25,6 @@ pub enum Subject {
     Group(Uuid),
     /// An anonymous share token (`storage.shares.id`).
     Token(Uuid),
-    /// A federated identity from another server — Open Cloud Mesh, external
-    /// OIDC, etc. Refers to `auth.external_subjects.id` (future table).
-    External(Uuid),
 }
 
 impl Subject {
@@ -36,26 +34,27 @@ impl Subject {
             Subject::User(_) => "user",
             Subject::Group(_) => "group",
             Subject::Token(_) => "token",
-            Subject::External(_) => "external",
         }
     }
 
     /// The raw UUID regardless of variant.
     pub fn id(&self) -> Uuid {
         match self {
-            Subject::User(id) | Subject::Group(id) | Subject::Token(id) | Subject::External(id) => {
-                *id
-            }
+            Subject::User(id) | Subject::Group(id) | Subject::Token(id) => *id,
         }
     }
 
     /// Reconstruct from a SQL row's `(subject_type, subject_id)` pair.
+    ///
+    /// `"external"` is no longer accepted: PR-2 of the external-users
+    /// work folded the federated-identity case into `Subject::User(uuid)`
+    /// with `auth.users.is_external = TRUE`. The DB CHECK constraint
+    /// on `storage.access_grants.subject_type` was narrowed to match.
     pub fn from_parts(subject_type: &str, id: Uuid) -> Option<Self> {
         match subject_type {
             "user" => Some(Subject::User(id)),
             "group" => Some(Subject::Group(id)),
             "token" => Some(Subject::Token(id)),
-            "external" => Some(Subject::External(id)),
             _ => None,
         }
     }
@@ -199,7 +198,148 @@ pub struct Grant {
     pub permission: Permission,
     pub granted_by: Uuid,
     pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+impl Grant {
+    pub fn is_expired(&self) -> bool {
+        self.expires_at.is_some_and(|exp| exp < chrono::Utc::now())
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ResourceKind — type-only discriminator (no id), used for filtering queries
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Resource type without an id — used to filter paginated grant queries by
+/// type. Mirrors the `resource_type` column values in `storage.access_grants`.
+/// Add new variants here when new resource types are supported.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResourceKind {
+    File,
+    Folder,
+    // Future: Calendar, AddressBook, Playlist, …
+}
+
+impl ResourceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResourceKind::File => "file",
+            ResourceKind::Folder => "folder",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "file" => Some(ResourceKind::File),
+            "folder" => Some(ResourceKind::Folder),
+            _ => None,
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// IncomingGrantSummary — aggregated across multiple permission rows
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Multiple `access_grants` rows for the same `(subject, resource)` collapsed
+/// into one record. Used by `list_incoming_resources_paged` to avoid sending
+/// duplicate resource items to the caller.
+#[derive(Debug, Clone)]
+pub struct IncomingGrantSummary {
+    pub resource_type: ResourceKind,
+    pub resource_id: Uuid,
+    /// All permissions held on this resource (aggregated).
+    pub permissions: Vec<Permission>,
+    /// Earliest `granted_at` across all permission rows.
+    pub granted_at: chrono::DateTime<chrono::Utc>,
+    /// Granter of the earliest grant.
+    pub granted_by: Uuid,
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// OutgoingGrantEntry / OutgoingResourceSummary — per-subject grant within a
+// resource that the current user shared with others
+// ════════════════════════════════════════════════════════════════════════════
+
+/// One (subject, permissions) pair within an outgoing resource summary.
+/// The `subject_display` field is resolved by the SQL layer: username for
+/// `user` subjects, share item_name for `token` subjects.
+#[derive(Debug, Clone)]
+pub struct OutgoingGrantEntry {
+    pub grant_id: Uuid,
+    pub subject_type: String,
+    pub subject_id: Uuid,
+    /// Human-readable label: username (users) or share name (tokens).
+    pub subject_display: String,
+    /// All permissions held by this subject on the resource (aggregated).
+    pub permissions: Vec<Permission>,
+    pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// True when the token subject has a password set (`storage.shares.password_hash IS NOT NULL`).
+    /// Always `false` for `user` subjects.
+    pub has_password: bool,
+}
+
+/// All subjects that the current user has shared a single resource with,
+/// together with the resource type, id, and when it was first shared.
+#[derive(Debug, Clone)]
+pub struct OutgoingResourceSummary {
+    pub resource_type: ResourceKind,
+    pub resource_id: Uuid,
+    /// Earliest `granted_at` across all grants on this resource.
+    pub first_shared_at: chrono::DateTime<chrono::Utc>,
+    /// One entry per (subject, permissions) pair.
+    pub grants: Vec<OutgoingGrantEntry>,
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GrantCursor — opaque pagination cursor for list_incoming_resources_paged
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Encodes the position of the last seen item in a cursor-paginated grant
+/// listing. The encoding is opaque to API callers — only the backend
+/// decodes it.
+///
+/// The `sort_by` field must match the active sort dimension — if the caller
+/// switches sort order the handler discards any cursor whose `sort_by` does
+/// not match, restarting from the first page.
+///
+/// Sort-key fields populated per `sort_by` value:
+/// - `"granted_at"` (default) — uses `granted_at` + `resource_id`
+/// - `"name"`        — uses `resource_name` (lowercased) + `resource_id`
+/// - `"type"`        — uses `type_order` + `resource_name` (lowercased) + `resource_id`
+/// - `"granted_by"`  — uses `resource_name` (owner display name, lowercased) + `granted_at` + `resource_id`
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GrantCursor {
+    /// Sort dimension that was active when this cursor was produced.
+    #[serde(default = "GrantCursor::default_sort")]
+    pub sort_by: String,
+    pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub resource_id: Uuid,
+    /// Lowercased sort string — resource name for `"name"`/`"type"`,
+    /// owner display name for `"granted_by"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_name: Option<String>,
+    /// Generic integer sort key:
+    /// - `"type"`  — category_order (0 = Folder, 100 = Image, …)
+    /// - `"size"`  — file size in bytes (-1 = Folder sentinel)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_int: Option<i64>,
+    /// Whether the result set was reversed when this cursor was produced.
+    /// Must be passed unchanged on subsequent page requests.
+    #[serde(default)]
+    pub reverse: bool,
+}
+
+impl GrantCursor {
+    fn default_sort() -> String {
+        "granted_at".to_owned()
+    }
+}
+
+/// Delegate encode/decode to the shared [`PageCursor`] trait.
+impl PageCursor for GrantCursor {}
 
 #[cfg(test)]
 mod tests {
@@ -208,17 +348,14 @@ mod tests {
     #[test]
     fn subject_roundtrip() {
         let id = Uuid::new_v4();
-        let cases = [
-            Subject::User(id),
-            Subject::Group(id),
-            Subject::Token(id),
-            Subject::External(id),
-        ];
+        let cases = [Subject::User(id), Subject::Group(id), Subject::Token(id)];
         for s in cases {
             let back = Subject::from_parts(s.type_str(), s.id()).unwrap();
             assert_eq!(s, back);
         }
         assert!(Subject::from_parts("unknown", id).is_none());
+        // `external` is no longer a valid subject_type — folded into `user`.
+        assert!(Subject::from_parts("external", id).is_none());
     }
 
     #[test]

@@ -1,0 +1,745 @@
+/* ============================================================
+ * ResourceList component styles
+ *
+ * All styles for .file-item (both grid cards and list rows),
+ * the list header, drag ghost, per-item checkboxes, and
+ * section-specific item modifiers (.favorite-item, .recent-item,
+ * .trash-item).
+ *
+ * Page-level shell (.files-container, .selection-rect) →  fileManager.css
+ * Batch-action toolbar (.batch-selection-bar, .batch-btn …) → multiSelect.css
+ * Section page headers (.list-header.favorites-header …)   → views/*.css
+ * ============================================================ */
+
+/* ── Base icon container ─────────────────────────────────── */
+
+.file-icon {
+    width: 100px;
+    height: 70px;
+    border-radius: 8px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+/* Thumbnail image inside file-icon (grid and list views) */
+.file-icon .file-thumb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 1;
+}
+
+/* ── Item states ─────────────────────────────────────────── */
+
+.file-item {
+    background-color: var(--color-item);
+}
+
+.file-item.selected {
+    background-color: var(--color-item-selected);
+}
+
+.file-item:hover {
+    background-color: var(--color-item-hover);
+    border-color: var(--color-border-medium);
+}
+
+.file-item.selected:hover {
+    background-color: var(--color-item-hover-accent);
+}
+
+.file-item.dragging {
+    opacity: 0.8;
+    background-color: var(--color-bg-input);
+}
+
+.file-item.drop-target {
+    background-color: var(--color-warning-ring);
+}
+
+.file-badge-shared {
+    color: var(--color-badge-blue-text);
+}
+
+.file-item .file-icon > i,
+.file-item .file-icon > svg {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ── Per-item checkboxes (list + grid) ───────────────────── */
+
+.list-header-checkbox,
+.file-item .checkbox-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.list-header-checkbox input[type="checkbox"],
+.file-item .checkbox-cell input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    cursor: pointer;
+    accent-color: var(--color-accent);
+    border-radius: 4px;
+}
+
+.list-header.selection-mode {
+    grid-template-columns: 36px 1fr;
+    background-color: var(--color-multiselect-bg);
+    color: var(--color-multiselect-text);
+    border-bottom-color: var(--color-multiselect-border);
+}
+
+.list-header.selection-mode .list-header-checkbox input[type="checkbox"] {
+    accent-color: var(--color-accent);
+}
+
+/* ── List view ───────────────────────────────────────────── */
+
+.list-header {
+    display: grid;
+    grid-template-columns: var(--files-list-columns);
+    column-gap: 12px;
+    padding: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+    background-color: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border-faint);
+    align-items: center;
+}
+
+/* Trash view: Name → [Path] → Size → Date → Actions
+ * Override --files-list-columns so the trash header AND trash items align.
+ * No checkbox (selectable=false), no owner cell visible, no type column.
+ *
+ * Mobile-first: the Path column is hidden by default to keep the layout
+ * legible on narrow screens (path stays accessible via itemTooltip on hover).
+ * From 1000px upward, Path reappears and claims roughly half the table
+ * width via a 3fr share against Name's 1fr. */
+.files-list-view.trash-list {
+    --files-list-columns: minmax(180px, 1fr) 110px 130px 100px;
+}
+
+.files-list-view.trash-list .file-item .path-cell,
+.files-list-view.trash-list .list-header.trash-header > div:nth-child(2) {
+    display: none;
+}
+
+@media (min-width: 1000px) {
+    .files-list-view.trash-list {
+        --files-list-columns: minmax(180px, 1fr) 3fr 110px 130px 100px;
+    }
+
+    .files-list-view.trash-list .file-item .path-cell,
+    .files-list-view.trash-list .list-header.trash-header > div:nth-child(2) {
+        display: block;
+    }
+}
+
+.list-header > div,
+.files-list-view .file-item > div {
+    min-width: 0;
+}
+
+/* Size column: always nth-child(5) because .owner-cell is always in the DOM
+   (even when hidden via display:none, it still occupies a child slot). */
+.list-header > div:nth-child(5),
+.files-list-view .file-item .size-cell {
+    justify-self: end;
+    text-align: right;
+}
+
+/* ── Owner column ────────────────────────────────────────── */
+
+/* Styles applied whenever the cell is visible (hidden class absent).
+   The .hidden utility class (display:none !important) keeps it invisible
+   by default — it is stamped directly in the HTML templates. */
+.owner-cell {
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Expand the grid track as soon as at least one owner cell is visible. */
+.files-list-view:has(.owner-cell:not(.hidden)) {
+    --files-list-columns: 36px minmax(200px, 2fr) 120px 100px 110px 130px 72px;
+}
+
+.files-list-view {
+    --files-list-columns: 36px minmax(200px, 2fr) 100px 110px 130px 72px;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    background-color: var(--color-item);
+    box-shadow: 0 1px 3px var(--color-shadow-xs);
+}
+
+.files-list-view .file-item {
+    display: grid;
+    grid-template-columns: var(--files-list-columns);
+    column-gap: 12px;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--color-border-xfaint);
+    align-items: center;
+    cursor: pointer;
+}
+
+.files-list-view .file-item.drop-target {
+    border: 1px dashed var(--color-warning-border);
+}
+
+.files-list-view .file-item .name-cell {
+    color: var(--color-text);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.files-list-view .file-item .name-cell span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.files-list-view .file-item .file-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 16px;
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+.list-header > div:nth-child(5),
+.files-list-view .file-item .date-cell {
+    justify-self: center;
+    text-align: center;
+}
+
+.files-list-view .file-item .date-cell {
+    color: var(--color-text-muted);
+    font-size: 14px;
+}
+
+.files-list-view .file-item .size-cell {
+    color: var(--color-text-muted);
+    font-size: 14px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.files-list-view .file-item .type-cell {
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.files-list-view .file-item .action-cell {
+    align-items: center;
+    text-align: right;
+}
+
+/* Styles for the built-in action-cell buttons (favorite-star, kebab).
+ * `.btn-action` is excluded — it owns its own colors via the generic
+ * `.btn-action` rule + variant modifiers (e.g. `.btn-action--delete`). */
+.files-list-view .file-item .action-cell button:not(.btn-action),
+.files-list-view .file-item .action-cell div {
+    display: inline;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--color-text-subtle);
+    font-size: 16px;
+}
+
+.files-list-view .file-item .action-cell button:not(.btn-action):hover {
+    background: var(--color-border-subtle);
+    color: var(--color-text-dark);
+}
+
+/* could be visible if we want */
+.files-list-view .file-item .action-cell button.favorite-star {
+    display: none;
+    border: none;
+}
+
+.files-list-view .file-item:hover .action-cell button.favorite-star {
+    display: inline;
+}
+
+/* ── Grid view ───────────────────────────────────────────── */
+
+.files-grid-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+    position: relative;
+}
+
+/* header not visible in grid mode */
+.files-grid-view .list-header {
+    display: none;
+}
+
+.files-grid-view .file-item {
+    border-radius: 12px;
+    border: 2px solid var(--color-border);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 1px 3px var(--color-shadow-xs);
+    cursor: pointer;
+    width: 100%;
+    min-height: 160px;
+    position: relative;
+}
+
+.files-grid-view .file-item.dragging {
+    opacity: 0.5;
+    transform: scale(0.95);
+    box-shadow: none;
+}
+
+.files-grid-view .file-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px var(--color-shadow-sm);
+    border-color: var(--color-border-medium);
+}
+
+.files-grid-view .file-item.selected {
+    border-color: var(--color-accent);
+    box-shadow:
+        0 0 0 1px var(--color-accent-ring-dark),
+        0 4px 12px var(--color-accent-ring);
+}
+
+.files-grid-view .file-item.selected:hover {
+    box-shadow:
+        0 0 0 1px var(--color-accent-ring-strong),
+        0 6px 18px var(--color-accent-ring-dark);
+}
+
+/* elements hidden in grid view */
+.files-grid-view .file-item .date-cell,
+.files-grid-view .file-item .size-cell,
+.files-grid-view .file-item .owner-cell {
+    display: none;
+}
+
+/* Selection checkbox */
+.files-grid-view .file-item .checkbox-cell {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--color-item);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    z-index: 10;
+    cursor: pointer;
+}
+
+.files-grid-view .file-item:hover .checkbox-cell {
+    opacity: 1;
+}
+
+.files-grid-view .file-item.selected .checkbox-cell {
+    opacity: 1;
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.files-grid-view .file-item.selected .checkbox-cell i {
+    color: var(--color-danger-text);
+    font-size: 11px;
+}
+
+/* More actions button (three dots) */
+.files-grid-view .file-item .file-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    z-index: 10;
+    cursor: pointer;
+    color: var(--color-text-subtle);
+    font-size: 16px;
+}
+
+.files-grid-view .file-item:hover .file-actions {
+    opacity: 1;
+}
+
+.files-grid-view .file-item .file-actions:hover {
+    background: var(--color-border-light);
+    color: var(--color-text-dark);
+}
+
+.files-grid-view .file-item.drop-target {
+    background-color: var(--color-warning-ring);
+    border: 2px dashed var(--color-warning-border);
+}
+
+.files-grid-view .file-item .file-badge-shared {
+    position: absolute;
+    top: 38px;
+    right: 38px;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 12;
+    font-size: 15px;
+    padding: 0;
+    line-height: 1;
+}
+
+/* Favorite star (mirrors file-actions button pattern) */
+.files-grid-view .file-item button.favorite-star {
+    position: absolute;
+    top: 8px;
+    right: 38px;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    z-index: 12;
+    cursor: pointer;
+    color: var(--color-border-medium);
+    font-size: 15px;
+    padding: 0;
+    line-height: 1;
+}
+
+.files-grid-view .file-item:hover button.favorite-star {
+    opacity: 1;
+}
+
+.files-grid-view .file-item button.favorite-star:hover {
+    color: var(--color-star-text);
+}
+
+.files-grid-view .file-item button.favorite-star.active {
+    opacity: 1;
+    color: var(--color-star-text-hover);
+}
+
+.files-grid-view .file-item button.favorite-star.active:hover {
+    color: var(--color-star-active);
+}
+
+.files-grid-view .file-item .name-cell {
+    font-size: 14px;
+    font-weight: 500;
+    text-align: center;
+    margin-bottom: 5px;
+    color: var(--color-text);
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 8px;
+}
+
+.files-grid-view .file-item .name-cell span {
+    padding-top: 8px;
+    padding-bottom: 8px;
+    display: block;
+}
+
+.files-grid-view .file-item .name-cell svg.favorite-star-inline {
+    display: none;
+}
+
+.files-grid-view .file-item .type-cell {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
+.files-grid-view .file-item .file-icon {
+    margin: auto;
+    margin-bottom: 10px;
+    font-size: 30px;
+}
+
+.files-grid-view .file-item .file-icon > i,
+.files-grid-view .file-item .file-icon > svg {
+    top: 5px;
+    width: 60px;
+    height: 60px;
+}
+
+/* ── Drag ghost ──────────────────────────────────────────── */
+
+.dragged-items {
+    --dragged-files-list-columns: 36px minmax(200px, 1fr);
+    flex-direction: column;
+    background-color: transparent;
+    overflow: hidden;
+    border-radius: 10px;
+    width: 100%;
+}
+
+.dragged-items .file-item {
+    grid-template-columns: var(--dragged-files-list-columns);
+    column-gap: 12px;
+    align-items: center;
+    background-color: var(--color-item);
+    display: flex;
+    padding: 4px;
+    width: 360px;
+    height: 46px;
+    color: var(--color-text);
+}
+
+/* file name text is truncated */
+.dragged-items .file-item div:nth-child(2) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dragged-items .file-item .file-icon {
+    width: 36px;
+    height: 36px;
+}
+
+.dragged-items div.fading {
+    -webkit-mask-image: linear-gradient(to bottom, var(--color-item) 10%, transparent);
+    mask-image: linear-gradient(to bottom, var(--color-item) 10%, transparent);
+}
+
+.dragged-items-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    transform: translate(50%, -50%);
+    background: var(--color-content-debug-bg);
+    color: var(--color-content-debug-text);
+    border-radius: 50%;
+    min-width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 2px;
+}
+
+/* ── Swimlane group header ───────────────────────────────── */
+
+/* Spans the full grid width in list view; no-op in grid view since
+   grid wraps it naturally. */
+.resource-list__swimlane-header {
+    grid-column: 1 / -1;
+    padding: 6px 12px 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-faint);
+    border-bottom: 1px solid var(--color-border);
+    margin-top: 8px;
+    cursor: default;
+    user-select: none;
+}
+
+.resource-list__swimlane-header:first-child,
+.list-header + .resource-list__swimlane-header {
+    margin-top: 0;
+}
+
+/* When the header contains a rich DOM node (e.g. a user vignette for the
+   "owner" group-by), reset the typographic overrides that only make sense
+   for plain-text labels, and lay the node out inline. */
+.resource-list__swimlane-header--node {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: inherit;
+    font-weight: normal;
+    color: inherit;
+}
+
+/* ── Swimlane group card (list view only) ────────────────── */
+
+/* When swimlane groups are present, dissolve the outer container into the
+   page background so each group card reads as its own panel. */
+.files-list-view:has(.resource-list__swimlane-group) {
+    background-color: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+    gap: 10px;
+}
+
+/* Each group is a self-contained card */
+.files-list-view .resource-list__swimlane-group {
+    background-color: var(--color-item);
+    border-radius: 10px;
+    box-shadow: 0 1px 3px var(--color-shadow-xs);
+    overflow: hidden;
+}
+
+/* The header inside a group card is always first — no extra top margin */
+.files-list-view .resource-list__swimlane-group .resource-list__swimlane-header {
+    margin-top: 0;
+}
+
+/* ── Swimlane group wrapper (grid view) ──────────────────── */
+
+/* The group wrapper must be transparent to the grid so .file-item children
+   continue to flow in the parent's columns (subgrid mirrors the column tracks).
+   The wrapper spans the full row width; items inside fill the columns naturally. */
+.files-grid-view .resource-list__swimlane-group {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    gap: 20px;
+}
+
+/* ── Section item modifiers ──────────────────────────────── */
+
+/* — Favorites — */
+
+.file-item.favorite-item {
+    border-left: 3px solid var(--color-warning-border);
+
+    [dir="rtl"] & {
+        border-right: 3px solid var(--color-warning-border);
+        border-left: unset;
+    }
+}
+
+/* list-view column override */
+.file-item.favorite-item {
+    position: relative;
+    grid-template-columns: 30px minmax(200px, 2fr) 1fr 1fr 120px;
+}
+
+.file-item.favorite-item .favorite-indicator {
+    position: relative;
+    top: 0;
+    right: 0;
+    width: 30px;
+    height: 30px;
+}
+
+/* — Recent — */
+
+.files-grid-view .file-item.recent-item {
+    border-left: 3px solid var(--color-recent-border);
+
+    [dir="rtl"] & {
+        border-right: 3px solid var(--color-recent-border);
+        border-left: unset;
+    }
+}
+
+/* list-view column override */
+.file-item.recent-item {
+    position: relative;
+    grid-template-columns: 30px minmax(200px, 2fr) 1fr 1fr 120px;
+}
+
+.file-item.recent-item .recent-indicator {
+    position: relative;
+    top: 0;
+    right: 0;
+    width: 30px;
+    height: 30px;
+}
+
+/* ── Path column (opt-in via ResourceListConfig.showPath) ──────────
+ * Visible in list view only — grid cards hide it because they have no
+ * dedicated column slot. itemTooltip still surfaces the path on hover.
+ */
+.files-list-view .file-item .path-cell {
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.files-grid-view .file-item .path-cell {
+    display: none;
+}
+
+/* ── Custom inline actions (ResourceListConfig.customActions) ──────
+ * Always visible in both list and grid view — used by trash for the
+ * restore / permanent-delete buttons that must be one click away.
+ */
+.btn-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-text-subtle);
+    font-size: 16px;
+    padding: 0;
+}
+
+.btn-action:hover {
+    background: var(--color-border-subtle);
+    color: var(--color-text-dark);
+}
+
+.files-grid-view .file-item .btn-action {
+    margin-top: 4px;
+}

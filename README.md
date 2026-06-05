@@ -7,13 +7,13 @@
 </p>
 
 <p align="center">
-  <a href="https://diocrafts.github.io/OxiCloud/">Documentation</a>
+  <a href="https://AtalayaLabs.github.io/OxiCloud/">Documentation</a>
   ·
   <a href="#quick-start">Quick Start</a>
   ·
-  <a href="https://github.com/DioCrafts/OxiCloud/stargazers">Star OxiCloud</a>
+  <a href="https://github.com/AtalayaLabs/OxiCloud/stargazers">Star OxiCloud</a>
   ·
-  <a href="https://github.com/DioCrafts/OxiCloud/issues/new?template=feature_request.md">Request a Feature</a>
+  <a href="https://github.com/AtalayaLabs/OxiCloud/issues/new?template=feature_request.md">Request a Feature</a>
   ·
   <a href="#supported-clients">Supported Clients</a>
   ·
@@ -21,20 +21,20 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/diocrafts/OxiCloud/releases"><img src="https://img.shields.io/github/release/diocrafts/OxiCloud.svg?style=for-the-badge" alt="Latest release" /></a>
-  <a href="https://github.com/diocrafts/OxiCloud/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/diocrafts/OxiCloud/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI" /></a>
-  <a href="https://github.com/diocrafts/OxiCloud/stargazers"><img src="https://img.shields.io/github/stars/diocrafts/OxiCloud?style=for-the-badge&logo=github" alt="GitHub stars" /></a>
-  <a href="https://hub.docker.com/r/diocrafts/oxicloud"><img src="https://img.shields.io/docker/image-size/diocrafts/oxicloud?style=for-the-badge&logo=docker" alt="Docker image size" /></a>
+  <a href="https://github.com/AtalayaLabs/OxiCloud/releases"><img src="https://img.shields.io/github/release/AtalayaLabs/OxiCloud.svg?style=for-the-badge" alt="Latest release" /></a>
+  <a href="https://github.com/AtalayaLabs/OxiCloud/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AtalayaLabs/OxiCloud/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI" /></a>
+  <a href="https://github.com/AtalayaLabs/OxiCloud/stargazers"><img src="https://img.shields.io/github/stars/AtalayaLabs/OxiCloud?style=for-the-badge&logo=github" alt="GitHub stars" /></a>
+  <a href="https://hub.docker.com/r/AtalayaLabs/oxicloud"><img src="https://img.shields.io/docker/image-size/AtalayaLabs/oxicloud?style=for-the-badge&logo=docker" alt="Docker image size" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.93%2B-orange?style=for-the-badge&logo=rust" alt="Rust 1.93+" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT license" /></a>
 </p>
 
 <p align="center">
-  If OxiCloud saves you setup time, RAM, or complexity, <a href="https://github.com/DioCrafts/OxiCloud/stargazers">give it a star</a>.
-  If something is missing, <a href="https://github.com/DioCrafts/OxiCloud/issues/new?template=feature_request.md">ask for a feature</a> or <a href="https://github.com/DioCrafts/OxiCloud/issues/new?template=documentation_request.md">request a docs improvement</a>.
+  If OxiCloud saves you setup time, RAM, or complexity, <a href="https://github.com/AtalayaLabs/OxiCloud/stargazers">give it a star</a>.
+  If something is missing, <a href="https://github.com/AtalayaLabs/OxiCloud/issues/new?template=feature_request.md">ask for a feature</a> or <a href="https://github.com/AtalayaLabs/OxiCloud/issues/new?template=documentation_request.md">request a docs improvement</a>.
 </p>
 
-![OxiCloud dashboard](<images/Captura de pantalla 2025-03-23 230739.png>)
+![OxiCloud dashboard](<images/Captura de pantalla 2026-05-28 a las 22.35.08.png>)
 
 ## Why People Try OxiCloud
 
@@ -57,7 +57,7 @@ What pulls people in:
 Requires Docker and Docker Compose.
 
 ```bash
-git clone https://github.com/DioCrafts/OxiCloud.git
+git clone https://github.com/AtalayaLabs/OxiCloud.git
 cd OxiCloud
 cp example.env .env
 
@@ -73,7 +73,7 @@ Open `http://localhost:8086`.
 Requires Rust 1.93+ and PostgreSQL.
 
 ```bash
-git clone https://github.com/DioCrafts/OxiCloud.git
+git clone https://github.com/AtalayaLabs/OxiCloud.git
 cd OxiCloud
 cp example.env .env
 
@@ -138,10 +138,10 @@ Roadmap: [TODO-LIST.md](TODO-LIST.md)
 
 If you want OxiCloud to get better faster, use the repo like a product feedback loop, not just a code dump.
 
-- Give it a star if you want more people to discover the project: [Star OxiCloud](https://github.com/DioCrafts/OxiCloud/stargazers)
-- Propose missing functionality: [feature request](https://github.com/DioCrafts/OxiCloud/issues/new?template=feature_request.md)
-- Point out confusing onboarding or weak docs: [documentation request](https://github.com/DioCrafts/OxiCloud/issues/new?template=documentation_request.md)
-- Report breakage or regressions: [bug report](https://github.com/DioCrafts/OxiCloud/issues/new?template=bug_report.md)
+- Give it a star if you want more people to discover the project: [Star OxiCloud](https://github.com/AtalayaLabs/OxiCloud/stargazers)
+- Propose missing functionality: [feature request](https://github.com/AtalayaLabs/OxiCloud/issues/new?template=feature_request.md)
+- Point out confusing onboarding or weak docs: [documentation request](https://github.com/AtalayaLabs/OxiCloud/issues/new?template=documentation_request.md)
+- Report breakage or regressions: [bug report](https://github.com/AtalayaLabs/OxiCloud/issues/new?template=bug_report.md)
 - Build it with us: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 The best feature ideas usually come from real deployment pain. If you hit friction, open an issue and describe the workflow you want.
@@ -172,7 +172,7 @@ Integration docs: [OIDC setup](docs/config/oidc.md) · [OIDC architecture](docs/
 
 ## Documentation
 
-- Docs site: [diocrafts.github.io/OxiCloud](https://diocrafts.github.io/OxiCloud/)
+- Docs site: [AtalayaLabs.github.io/OxiCloud](https://AtalayaLabs.github.io/OxiCloud/)
 - Deployment: [docs/config/deployment.md](docs/config/deployment.md)
 - Batch operations: [docs/guide/batch-operations.md](docs/guide/batch-operations.md)
 - Search: [docs/guide/search.md](docs/guide/search.md)
@@ -187,14 +187,36 @@ cargo clippy --all-features --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Contributor guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-
 ## Contributing
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
 
 If you are not ready to code yet, starring the project and opening a precise feature request is still a meaningful contribution.
 
+<div align="center">
+
+## Contributors
+
+OxiCloud is a community-driven project, and we appreciate all contributions. Check out the [Contributors](https://github.com/AtalayaLabs/OxiCloud/graphs/contributors) page to see the amazing people who have helped make OxiCloud better.
+
+<a href="https://github.com/AtalayaLabs/OxiCloud/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=AtalayaLabs/OxiCloud" alt="Contributors" />
+</a>
+
+## Star History
+
+<a href="https://www.star-history.com/#AtalayaLabs/OxiCloud&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=AtalayaLabs/OxiCloud&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=AtalayaLabs/OxiCloud&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=AtalayaLabs/OxiCloud&type=Date" />
+ </picture>
+</a>
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](https://opensource.org/licenses/MIT). See [LICENSE](LICENSE).
+
+**OxiCloud** is a trademark of the OxiCloud project. All other trademarks are the property of their respective owners.
+
+</div>

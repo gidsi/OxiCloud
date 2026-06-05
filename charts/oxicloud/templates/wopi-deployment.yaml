@@ -40,10 +40,7 @@ spec:
             - name: extra_params
               value: {{ .Values.wopi.collabora.extraParams | quote }}
             - name: username
-              valueFrom:
-                secretKeyRef:
-                  name: {{ if .Values.secrets.existingSecret }}{{ .Values.secrets.existingSecret }}{{ else }}{{ include "oxicloud.fullname" . }}-secret{{ end }}
-                  key: WOPI_ADMIN_USERNAME
+              value: admin
             - name: password
               valueFrom:
                 secretKeyRef:

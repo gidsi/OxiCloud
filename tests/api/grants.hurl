@@ -150,7 +150,7 @@ jsonpath "$[?(@.resource.id=='{{shared_folder_id}}')].permission" == "read"
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 9 — Promote Bob to Manager (adds comment, create, update, share).
+# Step 9 — Promote Bob to Admin (adds comment, create, update, share, delete).
 #           PUT /api/grants/role reconciles the row set in one call.
 # ─────────────────────────────────────────────────────────────
 PUT {{base_url}}/api/grants/role
@@ -159,12 +159,12 @@ Content-Type: application/json
 {
   "subject":  { "type": "user",   "id": "{{dave_user_id}}" },
   "resource": { "type": "folder", "id": "{{shared_folder_id}}" },
-  "role": "manager"
+  "role": "admin"
 }
 
 HTTP 200
 [Asserts]
-jsonpath "$" count == 5
+jsonpath "$" count == 6
 
 
 # ─────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ jsonpath "$" count == 5
 PUT {{base_url}}/api/folders/{{shared_folder_id}}/rename
 Authorization: Bearer {{dave_token}}
 Content-Type: application/json
-{ "name": "renamed-by-bob-as-manager" }
+{ "name": "renamed-by-bob-as-admin" }
 
 HTTP 200
 
@@ -192,7 +192,7 @@ HTTP 200
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 12 — Bob re-shares to Carol (he has Share via Manager).
+# Step 12 — Bob re-shares to Carol (he has Share via Admin).
 # ─────────────────────────────────────────────────────────────
 POST {{base_url}}/api/grants
 Authorization: Bearer {{dave_token}}
@@ -386,12 +386,12 @@ perm_file_id: jsonpath "$.id"
 # ════════════════════════════════════════════════════════════════════
 
 # ── Folder reads ─────────────────────────────────────────────
-GET {{base_url}}/api/folders/{{perm_folder_id}}/contents
+GET {{base_url}}/api/folders/{{perm_folder_id}}/resources?resource_types=folder
 Authorization: Bearer {{adam_token}}
 
 HTTP 404
 
-GET {{base_url}}/api/folders/{{perm_folder_id}}/contents/paginated
+GET {{base_url}}/api/folders/{{perm_folder_id}}/resources
 Authorization: Bearer {{adam_token}}
 
 HTTP 404
@@ -506,15 +506,15 @@ Content-Type: application/json
 HTTP 201
 
 # ── Read endpoints now succeed ──────────────────────────────
-GET {{base_url}}/api/folders/{{perm_folder_id}}/contents
+GET {{base_url}}/api/folders/{{perm_folder_id}}/resources?resource_types=folder
 Authorization: Bearer {{adam_token}}
 
 HTTP 200
 [Asserts]
-jsonpath "$" count == 1
-jsonpath "$[0].id" == "{{perm_child_id}}"
+jsonpath "$.items" count == 1
+jsonpath "$.items[0].resource.id" == "{{perm_child_id}}"
 
-GET {{base_url}}/api/folders/{{perm_folder_id}}/contents/paginated
+GET {{base_url}}/api/folders/{{perm_folder_id}}/resources
 Authorization: Bearer {{adam_token}}
 
 HTTP 200
@@ -557,7 +557,7 @@ HTTP 200
 header "Content-Type" startsWith "image/"
 
 # ── Cascading: child folder also readable via parent's grant ─
-GET {{base_url}}/api/folders/{{perm_child_id}}/contents
+GET {{base_url}}/api/folders/{{perm_child_id}}/resources?resource_types=folder
 Authorization: Bearer {{adam_token}}
 
 HTTP 200

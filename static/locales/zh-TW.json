@@ -1,4 +1,37 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "此登入連結已不再有效",
+                "expired_body": "連結可能已過期或已被使用。我們可以為您發送一個新的 — 幾秒鐘內將會抵達您的收件匣。",
+                "resend_to": "發送新連結至 {{email}}",
+                "generic_unavailable": "此登入連結已不再有效。它可能已被使用或已過期。請在登入頁面請求新連結。",
+                "service_unavailable": "此伺服器未啟用魔法連結登入。",
+                "internal_error": "登入時發生錯誤。請重試。",
+                "resend_failure": "發送連結時發生錯誤。請重試。",
+                "cross_browser_title": "在此裝置上繼續登入?",
+                "cross_browser_body": "您在與請求時不同的瀏覽器或裝置上開啟了此登入連結。",
+                "cross_browser_warning": "如果是您請求了此連結,可以安全繼續。否則,請關閉此頁面 — 點擊「繼續」將使其他人登入您的帳戶。",
+                "cross_browser_continue": "繼續並登入",
+                "resend_confirmation_title": "請檢查您的收件匣",
+                "resend_confirmation_body": "如果登入連結屬於活躍帳戶,新連結剛剛已發送。請檢查您的收件匣。",
+                "return_link": "返回 OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} 在 OxiCloud 上與您分享了一個{{kind}}",
+                    "body": "{{inviter}} 在 OxiCloud 上與您分享了一個{{kind}}。\n\n點擊下方連結開啟:\n{{link}}\n\n該連結僅可使用一次,並將在 {{ttl_hours}} 小時後過期。\n如果您未預期收到此邀請,可以忽略此訊息。\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "登入 OxiCloud",
+                    "body": "您好,\n\n使用下方連結登入 OxiCloud。該連結僅可使用一次,並將在 {{ttl_minutes}} 分鐘後過期。請在請求時使用的同一裝置上開啟。\n\n{{link}}\n\n如果您未請求此登入連結,可以忽略此訊息 — 無需進一步操作。\n\n— OxiCloud"
+                },
+                "kind_file": "檔案",
+                "kind_folder": "資料夾",
+                "english_fallback_divider": "--- 以下為英文版本 ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "極簡雲端儲存系統"
@@ -10,7 +43,8 @@
         "favorites": "收藏",
         "photos": "照片",
         "music": "音樂",
-        "trash": "回收站"
+        "trash": "回收站",
+        "sharedwithme": "與我共享"
     },
     "photos": {
         "empty_state": "還沒有照片",
@@ -125,7 +159,13 @@
         "about_description": "基於 Rust 和整潔架構構建的雲端儲存平臺。快速、安全、私密。",
         "admin_panel": "管理面板",
         "profile": "我的資料",
-        "role_user": "使用者"
+        "role_user": "使用者",
+        "theme": {
+            "light": "淺色",
+            "dark": "深色",
+            "auto": "跟隨系統"
+        },
+        "manage_groups": "管理群組"
     },
     "share": {
         "dialogTitle": "共享連結",
@@ -269,7 +309,8 @@
             "archive": "壓縮檔案",
             "installer": "安裝程式",
             "code": "程式碼"
-        }
+        },
+        "owner": "擁有者"
     },
     "dialogs": {
         "rename_folder": "重新命名資料夾",
@@ -329,7 +370,13 @@
         "move_error": "移動時出錯",
         "empty_name": "名稱不能為空",
         "name_exists": "已存在同名檔案或資料夾",
-        "generic_error": "發生錯誤"
+        "generic_error": "發生錯誤",
+        "group_name_invalid": "群組名稱必須符合電子郵件前綴格式（字母、數字、點、連字符、下劃線；1–64 個字元）。",
+        "group_cycle": "此成員會在群組之間形成循環參照。",
+        "group_depth_exceeded": "嵌套深度超過允許的最大值（8）。",
+        "group_virtual_immutable": "「Internal」群組由系統管理，無法修改。",
+        "group_not_found": "找不到群組。",
+        "group_name_taken": "已存在同名群組。"
     },
     "breadcrumb": {
         "home": "主頁"
@@ -339,15 +386,36 @@
         "empty_state": "回收站為空",
         "original_location": "原始位置",
         "deleted_date": "刪除日期",
+        "remaining": "剩餘",
         "actions": "操作",
         "restore": "恢復",
         "delete_permanently": "永久刪除",
-        "empty_confirm": "你確定要清空回收站嗎？這將永久刪除所有專案。"
+        "empty_confirm": "你確定要清空回收站嗎？這將永久刪除所有專案。",
+        "groupby": {
+            "remaining_days": "剩餘天數",
+            "trashed_time": "刪除時間"
+        }
+    },
+    "daysRemaining": {
+        "expired": "已過期",
+        "today": "今天",
+        "tomorrow": "明天",
+        "inDays": "{{count}} 天"
+    },
+    "expiryChip": {
+        "never": "永不過期",
+        "expired": "已過期",
+        "today": "今天到期",
+        "tomorrow": "明天到期",
+        "inDays": "{{count}} 天後到期",
+        "onDate": "於 {{date}} 到期"
     },
     "auth": {
         "login_title": "登入",
         "username": "使用者名稱",
         "username_placeholder": "輸入你的使用者名稱",
+        "login_identifier": "使用者名稱或電子郵件",
+        "login_identifier_placeholder": "請輸入使用者名稱或電子郵件",
         "password": "密碼",
         "password_placeholder": "輸入你的密碼",
         "login_button": "登入",
@@ -378,7 +446,14 @@
         "admin_create_error": "建立管理員賬號時出錯",
         "or": "或",
         "sso_login": "使用 SSO 登入",
-        "sso_login_provider": "使用 {{provider}} 登入"
+        "sso_login_provider": "使用 {{provider}} 登入",
+        "magicLinkHint": "沒有密碼？輸入您的電子郵件，我們將向您發送一次性登入連結。",
+        "magicLinkEmailLabel": "電子郵件地址",
+        "magicLinkEmailPlaceholder": "you@example.com",
+        "magicLinkSubmit": "傳送登入連結",
+        "magicLinkSent": "若該電子郵件存在帳號，登入連結已發送。請查收您的收件匣。",
+        "magicLinkUnavailable": "此伺服器不支援電子郵件登入。",
+        "magicLinkNetworkError": "無法連線到伺服器：{{message}}"
     },
     "storage": {
         "title": "儲存空間",
@@ -428,7 +503,8 @@
         "clear": "清除最近",
         "accessed": "訪問於",
         "empty_state": "沒有最近檔案",
-        "empty_hint": "您開啟的檔案將顯示在這裡"
+        "empty_hint": "您開啟的檔案將顯示在這裡",
+        "loadMore": "載入更多"
     },
     "batch": {
         "one_selected": "已選擇 1 個專案",
@@ -643,6 +719,18 @@
         "minutes_ago": "{{n}}分鐘前",
         "hours_ago": "{{n}}小時前",
         "days_ago": "{{n}}天前",
+        "edit_profile": "編輯個人資料",
+        "edit_oidc_managed": "要更改您的資訊(姓名、名字、頭像等),請前往您的身分提供者更新。變更將在您下次登入時顯示。",
+        "username_claim_hint": "2-64 個字元,字母 / 數字 / 點 / 短橫線 / 底線。一旦選定,使用者名稱將無法更改(DAV/NextCloud 用戶端依賴它)。",
+        "username_already_claimed": "使用者名稱已設定,不可更改(DAV/NextCloud 用戶端依賴它)。",
+        "given_name": "名",
+        "family_name": "姓",
+        "save_profile": "儲存變更",
+        "profile_saved": "個人資料已更新",
+        "profile_no_changes": "沒有變更可儲存。",
+        "profile_save_failed": "儲存失敗",
+        "username_taken_error": "該使用者名稱已被使用。",
+        "username_immutable_error": "您的使用者名稱已設定,無法在此更改。如需重新命名,請聯絡管理員。",
         "change_password": "修改密碼",
         "current_password": "當前密碼",
         "new_password": "新密碼",
@@ -658,7 +746,20 @@
         "error_label_required": "請輸入標籤",
         "error_create_pw": "建立應用密碼失敗",
         "confirm_revoke": "撤銷應用密碼\"{{label}}\"？使用此密碼的客戶端將停止工作。",
-        "error_revoke": "撤銷失敗"
+        "error_revoke": "撤銷失敗",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "notifications": {
         "file_renamed": "檔案已重新命名",
@@ -682,5 +783,64 @@
         "files": "個檔案",
         "complete": "已上傳 {{count}} / {{total}}"
     },
-    "storage_quota_exceeded": "儲存配額已超限"
+    "storage_quota_exceeded": "儲存配額已超限",
+    "sharedwithme": {
+        "pageTitle": "與我共享",
+        "pageDescription": "其他使用者與您共享的檔案和資料夾",
+        "emptyStateTitle": "目前沒有內容與您共享",
+        "emptyStateDesc": "其他使用者與您共享的項目將顯示在這裡",
+        "loadMore": "載入更多",
+        "sharedBy": "共享者",
+        "colName": "名稱",
+        "colType": "類型",
+        "colSharedBy": "共享者",
+        "colDate": "共享日期",
+        "colPermissions": "權限"
+    },
+    "groupby": {
+        "none": "無",
+        "title": "分組方式",
+        "owner": "擁有者",
+        "shareDate": "分享日期",
+        "type": "類型",
+        "type.folders": "資料夾",
+        "accessedAt": "存取日期",
+        "modifiedAt": "修改日期",
+        "createdAt": "建立日期",
+        "size": "大小",
+        "favoriteDate": "收藏日期",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "今天",
+        "last7days": "近7天",
+        "last30days": "近30天"
+    },
+    "groups": {
+        "title": "管理群組",
+        "create_button": "建立群組",
+        "create_dialog_title": "新群組",
+        "edit_dialog_title": "重新命名群組",
+        "name_label": "名稱",
+        "name_placeholder": "engineering",
+        "description_label": "描述（選填）",
+        "members_section": "成員",
+        "add_member_placeholder": "新增使用者或群組…",
+        "no_members": "尚無成員。",
+        "remove_member": "移除",
+        "delete_group": "刪除群組",
+        "delete_confirm": "刪除群組「{name}」？引用此群組的所有授權將被撤銷。",
+        "empty_state": "尚無群組。",
+        "load_more": "載入更多",
+        "back_to_list": "返回",
+        "loading": "載入中…",
+        "virtual_badge": "系統",
+        "member_count_zero": "無成員",
+        "member_count_one": "1 個成員",
+        "member_count_other": "{count} 個成員",
+        "delete_confirm_label": "請輸入群組名稱以確認：",
+        "delete_confirm_mismatch": "請準確輸入群組名稱以確認。",
+        "virtual_internal_name": "內部"
+    }
 }

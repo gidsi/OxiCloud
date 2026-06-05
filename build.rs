@@ -13,9 +13,11 @@
 //! **Debug mode** (`cargo build`):
 //!   • Copies HTML files to `$OUT_DIR` for `include_str!()` only.
 
+use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // ─── HTML files embedded via include_str!() in Rust source ───────────────────
 const HTML_INCLUDE: &[&str] = &[
@@ -25,18 +27,6 @@ const HTML_INCLUDE: &[&str] = &[
     "device-verify.html",
     "nextcloud-login.html",
     "share.html",
-];
-
-// ─── View CSS files linked directly in index.html (not via @import) ──────────
-const INDEX_VIEW_CSS: &[&str] = &[
-    "views/inlineViewer.css",
-    "views/favorites.css",
-    "views/recent.css",
-    "views/shared.css",
-    "views/trash.css",
-    "views/photos.css",
-    "views/photosLightbox.css",
-    "views/music.css",
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -50,6 +40,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed=static");
     println!("cargo:rerun-if-changed=build.rs");
+
+    git_status();
 
     // ── Guard: Docker cacher stage has no static/ ────────────────────────────
     if !static_dir.exists() {
@@ -75,6 +67,64 @@ fn main() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Grab git values
+// Support Github,  is treated (need upgrade if move to gitlab CircleCI, ...)
+// ═══════════════════════════════════════════════════════════════════════════════
+fn git_status() {
+    // Rerun the build script when the commit or branch changes
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/refs/heads");
+
+    let git_hash = first_env(&["GITHUB_SHA", "CI_COMMIT_SHA", "CIRCLE_SHA1", "GIT_COMMIT"])
+        .or_else(|| git(&["rev-parse", "HEAD"]))
+        .unwrap_or_else(|| "unknown".into());
+
+    println!("cargo:rustc-env=GIT_HASH={git_hash}");
+
+    let git_branch = first_env(&[
+        "GITHUB_HEAD_REF",    // GitHub: PR source branch (empty on push)
+        "GITHUB_REF_NAME",    // GitHub: branch/tag on push
+        "CI_COMMIT_REF_NAME", // GitLab
+        "CIRCLE_BRANCH",      // CircleCI
+        "GIT_BRANCH",         // Jenkins
+    ])
+    .or_else(|| git(&["rev-parse", "--abbrev-ref", "HEAD"]))
+    .filter(|b| b != "HEAD") // detached HEAD is not a real branch name
+    .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=GIT_BRANCH={git_branch}");
+
+    // CI builds: rerun if the injected env changes
+    for k in [
+        "GITHUB_SHA",
+        "GITHUB_HEAD_REF",
+        "GITHUB_REF_NAME",
+        "CI_COMMIT_SHA",
+        "CI_COMMIT_REF_NAME",
+        "CIRCLE_SHA1",
+        "CIRCLE_BRANCH",
+        "GIT_COMMIT",
+        "GIT_BRANCH",
+    ] {
+        println!("cargo:rerun-if-env-changed={k}");
+    }
+
+    println!("cargo:warning=OxiCloud building with git hash: {git_hash} and branch: {git_branch}");
+}
+
+fn git(args: &[&str]) -> Option<String> {
+    let out = Command::new("git").args(args).output().ok()?;
+    out.status.success().then_some(())?;
+    let s = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+fn first_env(keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|k| env::var(k).ok())
+        .filter(|s| !s.is_empty())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Release pipeline
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -91,18 +141,28 @@ fn process_release(manifest_dir: &Path, static_dir: &Path, out_dir: &Path) {
 
     let css_dir = static_dir.join("css");
 
+    // Read index.html once — used for both CSS and JS extraction.
+    let index_html = fs::read_to_string(static_dir.join("index.html")).expect("read index.html");
+
     // ── 2. Resolve main.css @imports ─────────────────────────────────────────
     let resolved_main = resolve_css_imports(&css_dir.join("main.css"), &css_dir);
     let minified_main = css_minify_safe(&resolved_main);
     fs::write(dist_dir.join("css/main.css"), &minified_main).expect("write main.css");
 
     // ── 3. Build CSS bundle for index.html ───────────────────────────────────
+    // Derive the list of view CSS files directly from the <link> tags in index.html
+    // so build.rs never needs to be updated when a new stylesheet is added.
     let mut css_all = resolved_main;
-    for view in INDEX_VIEW_CSS {
-        let p = css_dir.join(view);
+    for view in extract_css_links(&index_html) {
+        let p = css_dir.join(&view);
         if p.exists() {
             css_all.push_str(&fs::read_to_string(&p).unwrap_or_default());
             css_all.push('\n');
+        } else {
+            eprintln!(
+                "cargo:warning=CSS link in index.html not found: {}",
+                p.display()
+            );
         }
     }
     let css_bundle = css_minify_safe(&css_all);
@@ -116,9 +176,11 @@ fn process_release(manifest_dir: &Path, static_dir: &Path, out_dir: &Path) {
     // ── 5. Bundle all ES modules into one IIFE ───────────────────────────────
     // Walk the import graph starting from every <script type="module"> in index.html,
     // strip import/export syntax, wrap in an IIFE, then minify as a classic script.
-    let index_html = fs::read_to_string(static_dir.join("index.html")).expect("read index.html");
     let module_scripts = extract_module_scripts(&index_html);
     let js_raw = build_js_module_bundle(&module_scripts, static_dir);
+    // Validate the raw bundle with OXC before minifying — catches re-declaration
+    // collisions and other syntax errors that would silently survive minification.
+    js_bundle_validate(&js_raw);
     let js_bundle = js_minify_script_safe(&js_raw);
     let js_hash = fnv_hash(js_bundle.as_bytes());
     let js_name = format!("app.{js_hash}.js");
@@ -251,6 +313,29 @@ fn minify_tree_css(dir: &Path) {
 // JS bundling (ES module → single IIFE)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Collect `<link rel="stylesheet" href="/css/…">` paths from HTML as paths
+/// relative to the CSS directory (e.g. `views/mySharesView.css`).
+/// Skips `main.css` (resolved separately via @import chain).
+fn extract_css_links(html: &str) -> Vec<String> {
+    html.lines()
+        .filter_map(|l| {
+            let t = l.trim();
+            if t.starts_with("<link") && t.contains("stylesheet") && t.contains("href=\"/css/") {
+                let s = t.find("href=\"/css/")? + 11; // skip `href="/css/`
+                let e = t[s..].find('"')? + s;
+                let rel = t[s..e].to_string();
+                if rel == "main.css" || rel.starts_with("app.") {
+                    None
+                } else {
+                    Some(rel)
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Collect `<script type="module" src="…">` paths from HTML.
 fn extract_module_scripts(html: &str) -> Vec<String> {
     html.lines()
@@ -273,8 +358,12 @@ fn extract_module_scripts(html: &str) -> Vec<String> {
 ///   1. DFS from each entry point, following `import … from '…'` edges.
 ///   2. Post-order traversal ensures every dependency is emitted before its importer.
 ///   3. Cycles are broken by marking files as visited before recursing.
-///   4. Each file has its import/export syntax stripped before being appended.
-///   5. The result is wrapped in `(function(){"use strict"; …})();`.
+///   4. **Deconflict pass**: any top-level binding that is private (not exported)
+///      and shared across two or more modules is renamed `NAME_<idx>` in every
+///      module that declares it.  This prevents `SyntaxError: already declared`
+///      when all modules land in the same IIFE scope.
+///   5. Each file has its import/export syntax stripped before being appended.
+///   6. The result is wrapped in `(function(){"use strict"; …})();`.
 fn build_js_module_bundle(entry_scripts: &[String], static_dir: &Path) -> String {
     use std::collections::HashSet;
 
@@ -290,26 +379,204 @@ fn build_js_module_bundle(entry_scripts: &[String], static_dir: &Path) -> String
         "cargo:warning=bundle: {} files in dependency order:",
         order.len()
     );
+
+    // Read all sources upfront — the deconflict pass needs the full set.
+    let mut sources: Vec<String> = order
+        .iter()
+        .map(|f| match fs::read_to_string(f) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("cargo:warning=bundle: cannot read {}: {e}", f.display());
+                String::new()
+            }
+        })
+        .collect();
+
+    // Deconflict: rename private top-level bindings that collide across modules.
+    deconflict_module_sources(&order, &mut sources);
+
+    // Concatenate into a single IIFE.
     let mut bundle = String::with_capacity(2 * 1024 * 1024);
     bundle.push_str("(function(){\n\"use strict\";\n");
-    let mut declared_namespaces = std::collections::HashSet::new();
-    for (i, file) in order.iter().enumerate() {
+    let mut declared_namespaces = HashSet::new();
+    for (i, (file, src)) in order.iter().zip(sources.iter()).enumerate() {
         println!(
             "cargo:warning=bundle [{:>3}/{}] {}",
             i + 1,
             order.len(),
             file.display()
         );
-        match fs::read_to_string(file) {
-            Ok(src) => {
-                bundle.push_str(&strip_esm_syntax(&src, file, &mut declared_namespaces));
-                bundle.push('\n');
-            }
-            Err(e) => eprintln!("cargo:warning=bundle: cannot read {}: {e}", file.display()),
-        }
+        bundle.push_str(&strip_esm_syntax(src, file, &mut declared_namespaces));
+        bundle.push('\n');
     }
     bundle.push_str("})();\n");
     bundle
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deconflict pass
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Rename private top-level bindings that appear in more than one module so
+/// they don't collide when all modules are concatenated into one IIFE scope.
+///
+/// Only **private** (non-exported) names are renamed.  Exported names are the
+/// public API — other modules reference them directly by name after
+/// import-stripping and must not be touched.
+///
+/// The renamed form is `NAME_<module_index>` where the index is the position
+/// of the module in the bundle order — guaranteed unique within the bundle.
+fn deconflict_module_sources(order: &[PathBuf], sources: &mut [String]) {
+    use std::collections::{HashMap, HashSet};
+
+    // Per-module: private (non-exported) top-level binding names.
+    let private_bindings: Vec<Vec<String>> = sources
+        .iter()
+        .map(|src| {
+            let all = top_level_bindings(src);
+            let exported: HashSet<String> = extract_exported_names(src).into_iter().collect();
+            all.into_iter().filter(|n| !exported.contains(n)).collect()
+        })
+        .collect();
+
+    // Count how many modules declare each private name.
+    let mut name_count: HashMap<String, usize> = HashMap::new();
+    for bindings in &private_bindings {
+        for name in bindings {
+            *name_count.entry(name.clone()).or_insert(0) += 1;
+        }
+    }
+
+    // Collision set: names declared privately in more than one module.
+    let collisions: HashSet<String> = name_count
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(name, _)| name)
+        .collect();
+
+    if collisions.is_empty() {
+        return;
+    }
+
+    let mut sorted: Vec<&str> = collisions.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    println!(
+        "cargo:warning=bundle: deconflicting {} name(s): {}",
+        sorted.len(),
+        sorted.join(", ")
+    );
+
+    // Rename each colliding binding within every module that declares it.
+    for (idx, src) in sources.iter_mut().enumerate() {
+        for name in &private_bindings[idx] {
+            if collisions.contains(name) {
+                let new_name = format!("{name}_{idx}");
+                *src = rename_binding(src, name, &new_name);
+                println!(
+                    "cargo:warning=bundle:   [{idx}] {name} -> {new_name}  ({})",
+                    order[idx].file_name().unwrap_or_default().to_string_lossy()
+                );
+            }
+        }
+    }
+}
+
+/// Return the names of all top-level bindings in an ES-module source file that
+/// are **locally declared AND not exported**, using OXC for accurate analysis.
+///
+/// Two categories are excluded so the deconflict pass never touches them:
+///
+/// 1. **Import bindings** (`import { ui } from '…'`): after import-stripping,
+///    these names resolve directly to the exporting module's declaration already
+///    present in the IIFE scope — renaming them would break those references.
+///
+/// 2. **Exported bindings**: other modules import these by name after stripping,
+///    so they must keep their original names.  `ParseReturn::module_record` is
+///    used instead of the text-based `extract_exported_names` helper because
+///    multi-line `export { … }` blocks would otherwise be missed.
+fn top_level_bindings(source: &str) -> Vec<String> {
+    use oxc_allocator::Allocator;
+    use oxc_parser::Parser;
+    use oxc_semantic::SemanticBuilder;
+    use oxc_span::SourceType;
+
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, source, SourceType::mjs()).parse();
+    if !ret.errors.is_empty() {
+        return Vec::new(); // parse failed — skip deconflict for this file
+    }
+
+    // Collect exported local names from the module record (handles single-line
+    // and multi-line export blocks, re-exports, export-declarations, etc.).
+    let exported: std::collections::HashSet<&str> = ret
+        .module_record
+        .local_export_entries
+        .iter()
+        .filter_map(|e| e.local_name.name())
+        .map(|s| s.as_str())
+        .collect();
+
+    let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+    let scoping = semantic.scoping();
+    let root = scoping.root_scope_id();
+    scoping
+        .get_bindings(root)
+        .iter()
+        .filter_map(|(ident, &symbol_id)| {
+            let name = ident.as_str();
+            // Skip import bindings and exported bindings.
+            let flags = scoping.symbol_flags(symbol_id);
+            if flags.is_import() || exported.contains(name) {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+        .collect()
+}
+
+/// Replace every whole-word occurrence of `old` with `new` in `source`.
+///
+/// "Whole word" means the characters immediately before and after the match
+/// are not JavaScript identifier characters (`[a-zA-Z0-9_$]`).  This prevents
+/// `LOAD_MORE_ID` from being accidentally renamed when the source contains
+/// `LOAD_MORE_ID_EXTRA`.
+fn rename_binding(source: &str, old: &str, new: &str) -> String {
+    let old_len = old.len();
+    let mut out = String::with_capacity(source.len());
+    let mut start = 0;
+
+    while let Some(rel) = source[start..].find(old) {
+        let pos = start + rel;
+        let after = pos + old_len;
+
+        let boundary_before = pos == 0
+            || source[..pos]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !is_js_ident_char(c));
+
+        let boundary_after = after >= source.len()
+            || source[after..]
+                .chars()
+                .next()
+                .is_none_or(|c| !is_js_ident_char(c));
+
+        out.push_str(&source[start..pos]);
+        if boundary_before && boundary_after {
+            out.push_str(new);
+        } else {
+            out.push_str(old);
+        }
+        start = after;
+    }
+    out.push_str(&source[start..]);
+    out
+}
+
+#[inline]
+fn is_js_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$'
 }
 
 /// DFS post-order: push `file` to `order` after all its imports.
@@ -558,7 +825,7 @@ fn strip_esm_syntax(
             if !t.ends_with(';') && !t.contains(" from ") {
                 skipping = true; // multi-line import
             }
-            let aliases = collect_import_aliases(t);
+            let aliases = collect_import_aliases(t, declared_namespaces);
             if aliases.is_empty() {
                 out.push('\n');
             } else {
@@ -628,7 +895,9 @@ fn try_strip_export_prefix(line: &str) -> Option<String> {
 
 /// For `import { A, B as C, D as E } from '…'` return `"const C = B;\nconst E = D;"`.
 /// Returns an empty string when there are no aliases.
-fn collect_import_aliases(stmt: &str) -> String {
+/// Aliases already present in `declared` are skipped; newly emitted aliases are
+/// inserted into `declared` so that subsequent files don't re-declare them.
+fn collect_import_aliases(stmt: &str, declared: &mut std::collections::HashSet<String>) -> String {
     let brace_start = match stmt.find('{') {
         Some(i) => i + 1,
         None => return String::new(),
@@ -645,6 +914,12 @@ fn collect_import_aliases(stmt: &str) -> String {
         if let Some(as_pos) = b.find(" as ") {
             let orig = b[..as_pos].trim();
             let alias = b[as_pos + 4..].trim();
+            // Already declared earlier in the bundle — skip to avoid
+            // `SyntaxError: Identifier already declared`.
+            if declared.contains(alias) {
+                continue;
+            }
+            declared.insert(alias.to_string());
             if !out.is_empty() {
                 out.push('\n');
             }
@@ -657,6 +932,27 @@ fn collect_import_aliases(stmt: &str) -> String {
 // ═══════════════════════════════════════════════════════════════════════════════
 // JS minification
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/// Parse the JS bundle with OXC and hard-fail the build on any error.
+///
+/// Called on the **raw** (pre-minification) bundle so error messages still
+/// reference readable source.  Uses `cargo:error=` so Cargo surfaces the
+/// problem immediately and stops the build — no silent fallback.
+fn js_bundle_validate(source: &str) {
+    use oxc_allocator::Allocator;
+    use oxc_parser::Parser;
+    use oxc_span::SourceType;
+
+    let allocator = Allocator::default();
+    // The bundle is a classic IIFE script, not an ES module.
+    let ret = Parser::new(&allocator, source, SourceType::cjs()).parse();
+    if !ret.errors.is_empty() {
+        for e in &ret.errors {
+            println!("cargo:error=JS bundle parse error: {e}");
+        }
+        std::process::exit(1);
+    }
+}
 
 /// Minify an ES-module file (contains import/export) — returns original on failure.
 fn js_minify_safe(source: &str) -> String {
@@ -739,7 +1035,6 @@ fn minify_tree_js(dir: &Path) {
                 continue;
             }
             if let Ok(src) = fs::read_to_string(&p) {
-                println!("cargo:warning=minify-js: {}", p.display());
                 let _ = fs::write(&p, js_minify_safe(&src));
             }
         }

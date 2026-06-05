@@ -183,6 +183,36 @@
     font-size: 14px;
 }
 
+/* Helper text above the magic-link form ("No password? Enter your
+   email…"). Quieter visual weight than the form labels. */
+.auth-hint {
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--color-text-secondary);
+}
+
+/* Status banner under the magic-link form. Uniform anti-enumeration
+   message rendered on every successful 2xx; error variant only used
+   for the 503-not-configured branch or network failures. */
+.auth-status {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+.auth-status-success {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+    border-left: 3px solid var(--color-warning-orange-text);
+}
+.auth-status-error {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+    border-left: 3px solid var(--color-warning-orange-text);
+}
+
 /* Divider between password and SSO login */
 .auth-divider {
     display: flex;

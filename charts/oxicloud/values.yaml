@@ -2,20 +2,19 @@
 replicaCount: 1
 
 image:
-  repository: oxicloud
+  repository: diocrafts/oxicloud
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: "0.5.6"
 
-postgresql:
-  enabled: true
-  auth:
-    username: postgres
-    password: "change_me_in_production"
-    database: oxicloud
-  primary:
-    persistence:
-      enabled: true
-      size: 8Gi
+# cf : https://github.com/AtalayaLabs/OxiCloud/blob/main/example.env
+envs:
+  - name: OXICLOUD_DB_CONNECTION_STRING
+    value: "postgres://postgres:postgres@postgres/oxicloud"
+  - name: OXICLOUD_STORAGE_PATH
+    value: /app/storage
+  - name: OXICLOUD_STATIC_PATH
+    value: /app/static
+
 
 config:
   server:
@@ -47,15 +46,8 @@ wopi:
       port: 9980
     admin:
       username: admin
-      password: "wopi_admin_password"
     # In production behind an ingress, you'd likely enable SSL termination.
     extraParams: "--o:ssl.enable=false --o:ssl.termination=false --o:net.frame_ancestors=http://* https://*"
-
-secrets:
-  # If existingSecret is set, the chart will NOT create a Secret and will use this one instead.
-  existingSecret: ""
-  jwtSecret: ""
-  oidcClientSecret: ""
 
 service:
   type: ClusterIP
@@ -63,7 +55,7 @@ service:
 
 ingress:
   enabled: true
-  className: "nginx" # Adjust to your ingress controller (e.g., traefik)
+  className: "traefik" # Adjust to your ingress controller (e.g., traefik)
   annotations: {}
   hosts:
     - host: cloud.example.com

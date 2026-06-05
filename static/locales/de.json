@@ -1,16 +1,50 @@
 {
+    "server": {
+        "magic_link": {
+            "page": {
+                "expired_title": "Dieser Anmeldelink ist nicht mehr gültig",
+                "expired_body": "Der Link ist möglicherweise abgelaufen oder wurde bereits verwendet. Wir können Ihnen einen neuen senden — er wird in wenigen Sekunden in Ihrem Posteingang sein.",
+                "resend_to": "Neuen Link an {{email}} senden",
+                "generic_unavailable": "Dieser Anmeldelink ist nicht mehr gültig. Er wurde möglicherweise bereits verwendet oder ist abgelaufen. Fordern Sie auf der Anmeldeseite einen neuen Link an.",
+                "service_unavailable": "Die Magic-Link-Anmeldung ist auf diesem Server nicht aktiviert.",
+                "internal_error": "Bei der Anmeldung ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.",
+                "resend_failure": "Beim Senden des Links ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.",
+                "cross_browser_title": "Anmeldung auf diesem Gerät fortsetzen?",
+                "cross_browser_body": "Sie haben diesen Anmeldelink in einem anderen Browser oder Gerät geöffnet als dem, von dem aus Sie ihn angefordert haben.",
+                "cross_browser_warning": "Wenn Sie diesen Link angefordert haben, können Sie sicher fortfahren. Falls nicht, schließen Sie diese Seite — ein Klick auf Weiter würde jemand anderen in Ihrem Konto anmelden.",
+                "cross_browser_continue": "Fortfahren und anmelden",
+                "resend_confirmation_title": "Prüfen Sie Ihren Posteingang",
+                "resend_confirmation_body": "Falls der Anmeldelink zu einem aktiven Konto gehörte, wurde gerade ein neuer Link gesendet. Bitte prüfen Sie Ihren Posteingang.",
+                "return_link": "Zurück zu OxiCloud"
+            },
+            "email": {
+                "invitation": {
+                    "subject": "{{inviter}} hat einen {{kind}} mit Ihnen auf OxiCloud geteilt",
+                    "body": "{{inviter}} hat einen {{kind}} mit Ihnen auf OxiCloud geteilt.\n\nÖffnen Sie ihn, indem Sie auf den folgenden Link klicken:\n{{link}}\n\nDer Link kann nur einmal verwendet werden und läuft in {{ttl_hours}} Stunden ab.\nFalls Sie diese Einladung nicht erwartet haben, können Sie diese Nachricht ignorieren.\n\n— OxiCloud"
+                },
+                "login": {
+                    "subject": "Anmeldung bei OxiCloud",
+                    "body": "Hallo,\n\nVerwenden Sie den Link unten, um sich bei OxiCloud anzumelden. Der Link kann nur einmal verwendet werden und läuft in {{ttl_minutes}} Minuten ab. Öffnen Sie ihn auf demselben Gerät, von dem aus Sie ihn angefordert haben.\n\n{{link}}\n\nFalls Sie diesen Anmeldelink nicht angefordert haben, können Sie diese Nachricht ignorieren — es ist keine weitere Aktion erforderlich.\n\n— OxiCloud"
+                },
+                "kind_file": "Datei",
+                "kind_folder": "Ordner",
+                "english_fallback_divider": "--- Englische Version unten ---"
+            }
+        }
+    },
     "app": {
         "title": "OxiCloud",
         "description": "Minimalistisches Cloud-Speichersystem"
     },
     "nav": {
         "files": "Dateien",
-        "shared": "Geteilt",
+        "shared": "Freigaben",
         "recent": "Zuletzt verwendet",
         "favorites": "Favoriten",
         "photos": "Fotos",
         "music": "Musik",
-        "trash": "Papierkorb"
+        "trash": "Papierkorb",
+        "sharedwithme": "Mit mir geteilt"
     },
     "photos": {
         "empty_state": "Noch keine Fotos",
@@ -125,7 +159,13 @@
         "about_description": "Cloud-Speicherplattform mit Rust und Clean Architecture. Schnell, sicher und privat.",
         "admin_panel": "Admin-Panel",
         "profile": "Mein Profil",
-        "role_user": "Benutzer"
+        "role_user": "Benutzer",
+        "theme": {
+            "light": "Hell",
+            "dark": "Dunkel",
+            "auto": "Wie System"
+        },
+        "manage_groups": "Gruppen verwalten"
     },
     "share": {
         "dialogTitle": "Link teilen",
@@ -269,7 +309,8 @@
             "archive": "Archiv",
             "installer": "Installationsdatei",
             "code": "Code"
-        }
+        },
+        "owner": "Eigentümer"
     },
     "dialogs": {
         "rename_folder": "Ordner umbenennen",
@@ -329,7 +370,13 @@
         "move_error": "Fehler beim Verschieben",
         "empty_name": "Der Name darf nicht leer sein",
         "name_exists": "Eine Datei oder ein Ordner mit diesem Namen existiert bereits",
-        "generic_error": "Ein Fehler ist aufgetreten"
+        "generic_error": "Ein Fehler ist aufgetreten",
+        "group_name_invalid": "Der Gruppenname muss dem E-Mail-Präfix-Format entsprechen (Buchstaben, Ziffern, Punkt, Bindestrich, Unterstrich; 1–64 Zeichen).",
+        "group_cycle": "Dieses Mitglied würde einen Gruppen-Zirkelbezug erzeugen.",
+        "group_depth_exceeded": "Die Verschachtelungstiefe überschreitet das zulässige Maximum (8).",
+        "group_virtual_immutable": "Die Gruppe „Internal“ wird vom System verwaltet und kann nicht geändert werden.",
+        "group_not_found": "Gruppe nicht gefunden.",
+        "group_name_taken": "Eine Gruppe mit diesem Namen existiert bereits."
     },
     "breadcrumb": {
         "home": "Startseite"
@@ -339,15 +386,36 @@
         "empty_state": "Der Papierkorb ist leer",
         "original_location": "Ursprünglicher Speicherort",
         "deleted_date": "Löschdatum",
+        "remaining": "Verbleibend",
         "actions": "Aktionen",
         "restore": "Wiederherstellen",
         "delete_permanently": "Endgültig löschen",
-        "empty_confirm": "Sind Sie sicher, dass Sie den Papierkorb leeren möchten? Alle Elemente werden endgültig gelöscht."
+        "empty_confirm": "Sind Sie sicher, dass Sie den Papierkorb leeren möchten? Alle Elemente werden endgültig gelöscht.",
+        "groupby": {
+            "remaining_days": "Verbleibende Tage",
+            "trashed_time": "Löschzeit"
+        }
+    },
+    "daysRemaining": {
+        "expired": "Abgelaufen",
+        "today": "Heute",
+        "tomorrow": "Morgen",
+        "inDays": "{{count}} Tage"
+    },
+    "expiryChip": {
+        "never": "Läuft nie ab",
+        "expired": "Abgelaufen",
+        "today": "Läuft heute ab",
+        "tomorrow": "Läuft morgen ab",
+        "inDays": "Läuft in {{count}} Tagen ab",
+        "onDate": "Läuft am {{date}} ab"
     },
     "auth": {
         "login_title": "Anmelden",
         "username": "Benutzername",
         "username_placeholder": "Geben Sie Ihren Benutzernamen ein",
+        "login_identifier": "Benutzername oder E-Mail",
+        "login_identifier_placeholder": "Geben Sie Ihren Benutzernamen oder Ihre E-Mail-Adresse ein",
         "password": "Passwort",
         "password_placeholder": "Geben Sie Ihr Passwort ein",
         "login_button": "Anmelden",
@@ -378,7 +446,14 @@
         "admin_create_error": "Fehler beim Erstellen des Administratorkontos",
         "or": "oder",
         "sso_login": "Mit SSO anmelden",
-        "sso_login_provider": "Mit {{provider}} anmelden"
+        "sso_login_provider": "Mit {{provider}} anmelden",
+        "magicLinkHint": "Kein Passwort? Geben Sie Ihre E-Mail-Adresse ein und wir senden Ihnen einen einmaligen Anmeldelink.",
+        "magicLinkEmailLabel": "E-Mail-Adresse",
+        "magicLinkEmailPlaceholder": "sie@beispiel.de",
+        "magicLinkSubmit": "Anmeldelink senden",
+        "magicLinkSent": "Wenn für diese E-Mail-Adresse ein Konto besteht, wurde ein Anmeldelink gesendet. Überprüfen Sie Ihren Posteingang.",
+        "magicLinkUnavailable": "Die Anmeldung per E-Mail ist auf diesem Server nicht verfügbar.",
+        "magicLinkNetworkError": "Server nicht erreichbar: {{message}}"
     },
     "storage": {
         "title": "Speicher",
@@ -428,7 +503,8 @@
         "clear": "Zuletzt verwendete löschen",
         "accessed": "Zugegriffen",
         "empty_state": "Keine zuletzt verwendeten Dateien",
-        "empty_hint": "Dateien, die Sie öffnen, werden hier angezeigt"
+        "empty_hint": "Dateien, die Sie öffnen, werden hier angezeigt",
+        "loadMore": "Mehr laden"
     },
     "notifications": {
         "file_renamed": "Datei umbenannt",
@@ -660,6 +736,18 @@
         "minutes_ago": "vor {{n}} Min",
         "hours_ago": "vor {{n}} Std",
         "days_ago": "vor {{n}} Tagen",
+        "edit_profile": "Profil bearbeiten",
+        "edit_oidc_managed": "Um Ihre Informationen (Name, Vorname, Profilbild, …) zu ändern, aktualisieren Sie sie bitte bei Ihrem Identity-Provider. Ihre Änderungen erscheinen bei der nächsten Anmeldung.",
+        "username_claim_hint": "2–64 Zeichen, Buchstaben / Ziffern / Punkt / Bindestrich / Unterstrich. Nach der Wahl kann der Benutzername nicht mehr geändert werden (DAV/NextCloud-Clients hängen davon ab).",
+        "username_already_claimed": "Benutzername ist gesetzt und kann nicht geändert werden (DAV/NextCloud-Clients hängen davon ab).",
+        "given_name": "Vorname",
+        "family_name": "Nachname",
+        "save_profile": "Änderungen speichern",
+        "profile_saved": "Profil aktualisiert",
+        "profile_no_changes": "Keine Änderungen zu speichern.",
+        "profile_save_failed": "Speichern fehlgeschlagen",
+        "username_taken_error": "Dieser Benutzername ist bereits vergeben.",
+        "username_immutable_error": "Ihr Benutzername ist bereits gesetzt und kann hier nicht geändert werden. Wenden Sie sich an einen Administrator, wenn Sie umbenennen möchten.",
         "change_password": "Passwort ändern",
         "current_password": "Aktuelles Passwort",
         "new_password": "Neues Passwort",
@@ -675,12 +763,84 @@
         "error_label_required": "Bitte Bezeichnung eingeben",
         "error_create_pw": "App-Passwort erstellen fehlgeschlagen",
         "confirm_revoke": "App-Passwort \"{{label}}\" widerrufen? Clients werden nicht mehr funktionieren.",
-        "error_revoke": "Widerrufen fehlgeschlagen"
+        "error_revoke": "Widerrufen fehlgeschlagen",
+        "edit_photo": "Edit photo",
+        "photo_tab_url": "URL",
+        "photo_tab_upload": "Upload",
+        "photo_url_placeholder": "https://example.com/photo.jpg",
+        "photo_url_hint": "https://, http://, or data:image/…;base64,… accepted",
+        "photo_choose_file": "Choose a photo (PNG, JPEG, WebP)",
+        "photo_resize_note": "Images larger than 512 × 512 px are automatically resized.",
+        "photo_save": "Save photo",
+        "photo_remove": "Remove photo",
+        "photo_cancel": "Cancel",
+        "photo_save_failed": "Failed to save photo",
+        "photo_no_file": "Please select a file first",
+        "photo_managed_by_oidc": "Photo managed by your identity provider."
     },
     "upload": {
         "uploading": "Wird hochgeladen...",
         "files": "Dateien",
         "complete": "{{count}} / {{total}} hochgeladen"
     },
-    "storage_quota_exceeded": "Speicherplatz erschöpft"
+    "storage_quota_exceeded": "Speicherplatz erschöpft",
+    "sharedwithme": {
+        "pageTitle": "Mit mir geteilt",
+        "pageDescription": "Dateien und Ordner, die andere Benutzer mit Ihnen geteilt haben",
+        "emptyStateTitle": "Noch nichts mit Ihnen geteilt",
+        "emptyStateDesc": "Elemente, die andere Benutzer mit Ihnen teilen, erscheinen hier",
+        "loadMore": "Mehr laden",
+        "sharedBy": "Geteilt von",
+        "colName": "Name",
+        "colType": "Typ",
+        "colSharedBy": "Geteilt von",
+        "colDate": "Datum der Freigabe",
+        "colPermissions": "Berechtigungen"
+    },
+    "groupby": {
+        "none": "Keine",
+        "title": "Gruppieren nach",
+        "owner": "Eigentümer",
+        "shareDate": "Freigabedatum",
+        "type": "Typ",
+        "type.folders": "Ordner",
+        "accessedAt": "Zugriffsdatum",
+        "modifiedAt": "Änderungsdatum",
+        "createdAt": "Erstellungsdatum",
+        "size": "Größe",
+        "favoriteDate": "Datum der Markierung",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
+    },
+    "dateBucket": {
+        "today": "Heute",
+        "last7days": "Letzte 7 Tage",
+        "last30days": "Letzte 30 Tage"
+    },
+    "groups": {
+        "title": "Gruppen verwalten",
+        "create_button": "Gruppe erstellen",
+        "create_dialog_title": "Neue Gruppe",
+        "edit_dialog_title": "Gruppe umbenennen",
+        "name_label": "Name",
+        "name_placeholder": "engineering",
+        "description_label": "Beschreibung (optional)",
+        "members_section": "Mitglieder",
+        "add_member_placeholder": "Benutzer oder Gruppe hinzufügen…",
+        "no_members": "Noch keine Mitglieder.",
+        "remove_member": "Entfernen",
+        "delete_group": "Gruppe löschen",
+        "delete_confirm": "Die Gruppe „{name}\" löschen? Auf diese Gruppe verweisende Berechtigungen werden widerrufen.",
+        "empty_state": "Noch keine Gruppen.",
+        "load_more": "Mehr laden",
+        "back_to_list": "Zurück",
+        "loading": "Wird geladen…",
+        "virtual_badge": "System",
+        "member_count_zero": "Keine Mitglieder",
+        "member_count_one": "1 Mitglied",
+        "member_count_other": "{count} Mitglieder",
+        "delete_confirm_label": "Tippe den Gruppennamen zur Bestätigung ein:",
+        "delete_confirm_mismatch": "Tippe den Gruppennamen exakt zur Bestätigung ein.",
+        "virtual_internal_name": "Intern"
+    }
 }

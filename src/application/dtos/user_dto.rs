@@ -7,7 +7,13 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserDto {
     pub id: String,
-    pub username: String,
+    /// Optional handle. `None` for users who have not claimed one
+    /// (externals, fresh email-only signups). Frontend display callers
+    /// should walk `username → given/family → email` as their fallback
+    /// chain. Omitted from JSON when None (consistent with the existing
+    /// given_name / family_name fields).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
     pub email: String,
     pub role: String,
     pub storage_quota_bytes: i64,
@@ -17,13 +23,43 @@ pub struct UserDto {
     pub last_login_at: Option<DateTime<Utc>>,
     pub active: bool,
     pub auth_provider: String,
+    pub image: Option<String>,
+    pub can_edit_image: bool,
+    /// `true` for grant-only external recipients (magic-link, OIDC-only,
+    /// future OCM federated). External users have no home folder and
+    /// can't own storage; their quota is always 0. Internal users
+    /// default to `false`.
+    pub is_external: bool,
+    /// Optional first/given name. Populated from the OIDC `given_name`
+    /// claim at JIT provisioning, or via a profile-edit endpoint.
+    /// `None` until explicitly set — `skip_serializing_if = "Option::is_none"`
+    /// keeps the wire format compact for the common case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub given_name: Option<String>,
+    /// Optional last/family name. Same provenance + serde rules as
+    /// `given_name`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family_name: Option<String>,
+    /// When the user first demonstrated control of their email (PR 23).
+    /// `None` = unverified (omitted from JSON). Stamped on the first
+    /// successful magic-link redemption or OIDC JIT with verified
+    /// claim. Idempotent — the original timestamp is preserved on
+    /// subsequent verifications.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_verified_at: Option<DateTime<Utc>>,
+    /// User-chosen locale for server-rendered surfaces (emails,
+    /// future authenticated HTML). `None` = no preference (the server
+    /// resolves to `OXICLOUD_DEFAULT_LOCALE` when rendering). Round-trips
+    /// through `/api/auth/me` and `PATCH /api/auth/me/profile`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_locale: Option<String>,
 }
 
 impl From<User> for UserDto {
     fn from(user: User) -> Self {
         Self {
             id: user.id().to_string(),
-            username: user.username().to_string(),
+            username: user.username().map(str::to_string),
             email: user.email().to_string(),
             role: format!("{}", user.role()),
             storage_quota_bytes: user.storage_quota_bytes(),
@@ -33,21 +69,47 @@ impl From<User> for UserDto {
             last_login_at: user.last_login_at(),
             active: user.is_active(),
             auth_provider: user.oidc_provider().unwrap_or("local").to_string(),
+            image: user.image().map(|s| s.to_string()),
+            can_edit_image: !user.is_oidc_user(),
+            is_external: user.is_external(),
+            given_name: user.given_name().map(str::to_string),
+            family_name: user.family_name().map(str::to_string),
+            email_verified_at: user.email_verified_at(),
+            preferred_locale: user.preferred_locale().map(str::to_string),
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct LoginDto {
+    /// Identifier the user typed. Accepts BOTH a username (no `@`) and
+    /// an email address (`@` present). The server dispatches on
+    /// `@`-in-input: with `@` it looks up by email; without, by
+    /// username. The two namespaces are provably disjoint (PR 16
+    /// forbids `@` in usernames), so a single field handles both
+    /// without ambiguity. The frontend submits whatever the user
+    /// typed in the "Username or email" field as-is.
     pub username: String,
     pub password: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct RegisterDto {
-    pub username: String,
+    /// Optional handle (2-64 chars, no `@`). When omitted, the user can
+    /// claim one later via the profile-edit endpoint. Users without a
+    /// username cannot use NextCloud clients or create app passwords
+    /// (Basic-Auth resolves users by username); web UI / native API
+    /// works fine without one.
+    #[serde(default)]
+    pub username: Option<String>,
     pub email: String,
-    pub password: String,
+    /// Optional password (≥8 chars when present). When omitted, a
+    /// welcome magic-link is mailed to `email` for first-session
+    /// bootstrap. The user can later set a password via the
+    /// change-password endpoint to switch to classic username/email +
+    /// password login.
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 /// DTO for the one-time initial admin setup endpoint (`/api/setup`).
@@ -57,6 +119,56 @@ pub struct SetupAdminDto {
     pub username: String,
     pub email: String,
     pub password: String,
+}
+
+/// Partial-update body for `PATCH /api/auth/me/profile` (PR 24).
+///
+/// Each field is **optional**:
+/// - **absent** → no change to that field.
+/// - **present** → set / claim.
+///
+/// **Username is claim-once, immutable.** This endpoint accepts
+/// `username` only when the caller currently has none — passing it
+/// when one is already claimed is rejected with `409 UsernameImmutable`.
+/// The immutability avoids the NextCloud / DAV client breakage that
+/// would otherwise come from renaming (paths under
+/// `/remote.php/dav/files/{user}/…` and the `verify_url_user` check
+/// both bake the username in as a stable identifier). If a user really
+/// typoed their handle and needs to fix it, an admin override is the
+/// escape hatch.
+///
+/// **Given / family name** are freely settable. Any non-empty value
+/// replaces the current one. Clearing back to `None` is out of scope
+/// for v1.
+///
+/// **OIDC-linked users are rejected wholesale with 403** — their
+/// profile fields are managed at the IdP. The IdP is the source of
+/// truth; mirroring writes here would just create a divergence.
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema, Default)]
+pub struct UpdateProfileDto {
+    /// Handle to claim (2-64 chars, `[A-Za-z0-9._-]+`, no `@`).
+    /// Accepted only when the caller currently has no username. Once
+    /// claimed the handle is permanent for the lifetime of the
+    /// account; subsequent attempts to set or change it via this
+    /// endpoint are rejected with 409. Admin override (via the
+    /// admin-create-user / admin-update-user surface, future PR) is
+    /// the escape hatch for genuine typos.
+    #[serde(default)]
+    pub username: Option<String>,
+    /// New first/given name. Any non-empty value sets/replaces the
+    /// current value. Absent → no change.
+    #[serde(default)]
+    pub given_name: Option<String>,
+    /// New last/family name. Same semantics as `given_name`.
+    #[serde(default)]
+    pub family_name: Option<String>,
+    /// New preferred locale (BCP-47 shape, e.g. `"fr"`, `"zh-TW"`).
+    /// Must resolve against the server's `LocaleRegistry` — unknown
+    /// codes are rejected with 400. Pass an empty string to clear the
+    /// preference back to the server default (the application layer
+    /// normalises `""` → `None`).
+    #[serde(default)]
+    pub preferred_locale: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

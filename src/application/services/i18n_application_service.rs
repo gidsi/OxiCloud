@@ -23,8 +23,23 @@ impl I18nApplicationService {
 
     /// Get a translation for a key and locale
     pub async fn translate(&self, key: &str, locale: Option<Locale>) -> I18nResult<String> {
-        let locale = locale.unwrap_or_default();
-        self.i18n_service.translate(key, locale).await
+        self.i18n_service
+            .translate(key, locale.unwrap_or_default())
+            .await
+    }
+
+    /// Get a translation with `{{name}}` substitution applied. Mirrors
+    /// the frontend convention so JSON values stay interchangeable.
+    /// `None` locale resolves to the server default (English).
+    pub async fn translate_args(
+        &self,
+        key: &str,
+        locale: Option<Locale>,
+        args: &[(&str, &str)],
+    ) -> I18nResult<String> {
+        self.i18n_service
+            .translate_args(key, locale.unwrap_or_default(), args)
+            .await
     }
 
     /// Load translations for a locale
@@ -38,7 +53,7 @@ impl I18nApplicationService {
         let mut results = Vec::new();
 
         for locale in locales {
-            let result = self.i18n_service.load_translations(locale).await;
+            let result = self.i18n_service.load_translations(locale.clone()).await;
             results.push((locale, result));
         }
 

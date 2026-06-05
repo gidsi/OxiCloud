@@ -67,11 +67,28 @@ pub trait UserRepository: Send + Sync + 'static {
     /// Updates the last login date
     async fn update_last_login(&self, user_id: Uuid) -> UserRepositoryResult<()>;
 
-    /// Lists users with pagination
-    async fn list_users(&self, limit: i64, offset: i64) -> UserRepositoryResult<Vec<User>>;
+    /// Lists users with pagination.
+    ///
+    /// `include_external` controls whether external (grant-only) users
+    /// appear in the result. Default callers should pass `false` so
+    /// external users stay invisible to internal-user surfaces (system
+    /// address book autocomplete, sharee search, etc.). Only the admin
+    /// management UI should request `true`.
+    async fn list_users(
+        &self,
+        limit: i64,
+        offset: i64,
+        include_external: bool,
+    ) -> UserRepositoryResult<Vec<User>>;
 
     /// Searches users by username or email (SQL ILIKE) with a limit.
-    async fn search_users(&self, query: &str, limit: i64) -> UserRepositoryResult<Vec<User>>;
+    /// See [`list_users`] for the meaning of `include_external`.
+    async fn search_users(
+        &self,
+        query: &str,
+        limit: i64,
+        include_external: bool,
+    ) -> UserRepositoryResult<Vec<User>>;
 
     /// Activates or deactivates a user
     async fn set_user_active_status(&self, user_id: Uuid, active: bool)

@@ -86,11 +86,14 @@
     color: var(--color-text-heading);
 }
 
-.search-container {
+/* Slot wrapping .search-container + #path-tooltip — it owns the flex slot
+   so the tooltip can absolutely overlay the search bar via inset:0 instead
+   of viewport-fixed positioning. */
+.search-slot {
     flex-grow: 1;
     max-width: 600px;
-    position: relative;
     margin-right: 20px;
+    position: relative;
     display: flex;
     align-items: center;
 
@@ -98,6 +101,13 @@
         margin-left: 20px;
         margin-right: unset;
     }
+}
+
+.search-container {
+    flex-grow: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
 }
 
 .search-container input {
@@ -204,8 +214,8 @@
         justify-content: center;
     }
 
-    /* Hide full search bar on mobile by default */
-    .search-container {
+    /* Hide full search slot on mobile by default */
+    .search-slot {
         display: none;
     }
 
@@ -224,7 +234,7 @@
         justify-content: center;
     }
 
-    .top-bar--search-active .search-container {
+    .top-bar--search-active .search-slot {
         display: flex;
         flex-grow: 1;
         max-width: none;
