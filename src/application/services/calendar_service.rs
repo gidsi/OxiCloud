@@ -3,10 +3,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::dtos::calendar_dto::{
-    CalendarAccessDto, CalendarDto, CalendarEventDto,
-    CalendarObjectDeleteResultDto, CalendarObjectPutResultDto, CreateCalendarDto, CreateEventDto,
-    CreateEventICalDto, DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto,
-    UpdateEventDto,
+    CalendarAccessDto, CalendarDto, CalendarEventDto, CalendarObjectDeleteResultDto,
+    CalendarObjectPutResultDto, CreateCalendarDto, CreateEventDto, CreateEventICalDto,
+    DeleteCalendarObjectDto, PutCalendarObjectDto, UpdateCalendarDto, UpdateEventDto,
 };
 use crate::application::ports::calendar_ports::{CalendarStoragePort, CalendarUseCase};
 use crate::common::errors::{DomainError, ErrorKind};
@@ -47,14 +46,16 @@ impl CalendarUseCase for CalendarService {
         update: UpdateCalendarDto,
         user_id: Uuid,
     ) -> Result<CalendarDto, DomainError> {
-        self.ensure_calendar_write_access(calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(calendar_id, user_id)
+            .await?;
         self.calendar_storage
             .update_calendar(calendar_id, update)
             .await
     }
 
     async fn delete_calendar(&self, calendar_id: &str, user_id: Uuid) -> Result<(), DomainError> {
-        self.ensure_calendar_write_access(calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(calendar_id, user_id)
+            .await?;
         self.calendar_storage.delete_calendar(calendar_id).await
     }
 
@@ -217,7 +218,8 @@ impl CalendarUseCase for CalendarService {
         event: CreateEventDto,
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError> {
-        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(&event.calendar_id, user_id)
+            .await?;
         self.calendar_storage.create_event(event).await
     }
 
@@ -226,7 +228,8 @@ impl CalendarUseCase for CalendarService {
         event: CreateEventICalDto,
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError> {
-        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(&event.calendar_id, user_id)
+            .await?;
         self.calendar_storage.create_event_from_ical(event).await
     }
 
@@ -235,7 +238,8 @@ impl CalendarUseCase for CalendarService {
         put: PutCalendarObjectDto,
         user_id: Uuid,
     ) -> Result<CalendarObjectPutResultDto, DomainError> {
-        self.ensure_calendar_write_access(&put.calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(&put.calendar_id, user_id)
+            .await?;
 
         self.calendar_storage.put_calendar_object(put).await
     }
@@ -245,7 +249,8 @@ impl CalendarUseCase for CalendarService {
         dto: DeleteCalendarObjectDto,
         user_id: Uuid,
     ) -> Result<CalendarObjectDeleteResultDto, DomainError> {
-        self.ensure_calendar_write_access(&dto.calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(&dto.calendar_id, user_id)
+            .await?;
 
         self.calendar_storage.delete_calendar_object(dto).await
     }
@@ -257,13 +262,15 @@ impl CalendarUseCase for CalendarService {
         user_id: Uuid,
     ) -> Result<CalendarEventDto, DomainError> {
         let event = self.calendar_storage.get_event(event_id).await?;
-        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(&event.calendar_id, user_id)
+            .await?;
         self.calendar_storage.update_event(event_id, update).await
     }
 
     async fn delete_event(&self, event_id: &str, user_id: Uuid) -> Result<(), DomainError> {
         let event = self.calendar_storage.get_event(event_id).await?;
-        self.ensure_calendar_write_access(&event.calendar_id, user_id).await?;
+        self.ensure_calendar_write_access(&event.calendar_id, user_id)
+            .await?;
         self.calendar_storage.delete_event(event_id).await
     }
 
@@ -282,7 +289,9 @@ impl CalendarUseCase for CalendarService {
             .get_calendar(&event.calendar_id)
             .await?;
         if !has_access && !calendar.is_public {
-            return Err(Self::not_found_for_inaccessible_calendar(&event.calendar_id));
+            return Err(Self::not_found_for_inaccessible_calendar(
+                &event.calendar_id,
+            ));
         }
         Ok(event)
     }

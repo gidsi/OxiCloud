@@ -29,7 +29,6 @@ pub const CALENDAR_SERVER_GETCTAG_PROPERTY: &str = "{http://calendarserver.org/n
 pub const APPLE_CALENDAR_COLOR_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-color";
 pub const APPLE_CALENDAR_ORDER_PROPERTY: &str = "{http://apple.com/ns/ical/}calendar-order";
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CalendarAccessLevel {
     NoAccess,

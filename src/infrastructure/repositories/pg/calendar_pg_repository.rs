@@ -407,9 +407,9 @@ impl CalendarRepository for CalendarPgRepository {
                 ))
             })?
         {
-            access_level = access_level.strongest(
-                CalendarAccessLevel::from_share_access_level(&share_access_level)?,
-            );
+            access_level = access_level.strongest(CalendarAccessLevel::from_share_access_level(
+                &share_access_level,
+            )?);
         }
 
         Ok(access_level)

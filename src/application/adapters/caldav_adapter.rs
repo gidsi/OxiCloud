@@ -93,9 +93,7 @@ impl CalDavAdapter {
         )))?;
         xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
 
-        xml_writer.write_event(Event::End(BytesEnd::new(
-            "D:current-user-privilege-set",
-        )))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:current-user-privilege-set")))?;
 
         Ok(())
     }

@@ -70,7 +70,7 @@ async fn setup_db_pool() -> PgPool {
         );
 
     let test_database_name = format!("oxicloud_story2_readonly_{}", Uuid::new_v4().simple());
-    
+
     // Connect to global template to create isolated DB
     let mut admin_options = PgConnectOptions::from_str(&base_database_url)
         .expect("TEST_DATABASE_URL or DATABASE_URL must be a valid PostgreSQL connection URL");
@@ -83,7 +83,10 @@ async fn setup_db_pool() -> PgPool {
         .await
         .expect("failed to connect to PostgreSQL maintenance database");
 
-    let create_database_sql = format!("CREATE DATABASE \"{}\"", test_database_name.replace('"', "\"\""));
+    let create_database_sql = format!(
+        "CREATE DATABASE \"{}\"",
+        test_database_name.replace('"', "\"\"")
+    );
     admin_pool
         .execute(create_database_sql.as_str())
         .await
@@ -117,7 +120,11 @@ async fn seed_test_data(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
     let calendar_id = Uuid::new_v4();
 
     // 1. Insert Test Users
-    for (id, username) in [(user_a_id, "usera"), (user_b_id, "userb"), (user_c_id, "userc")] {
+    for (id, username) in [
+        (user_a_id, "usera"),
+        (user_b_id, "userb"),
+        (user_c_id, "userc"),
+    ] {
         sqlx::query(
             "INSERT INTO auth.users (id, username, email, password_hash, role, active) VALUES ($1, $2, $3, 'hash', 'user'::auth.userrole, TRUE)"
         )
@@ -148,7 +155,7 @@ async fn seed_test_data(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
             ($1, '{DAV:}resourcetype', 'collection,calendar'),
             ($1, '{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set', 'VEVENT')
         ON CONFLICT (calendar_id, name) DO UPDATE SET value = EXCLUDED.value
-        "#
+        "#,
     )
     .bind(calendar_id)
     .execute(pool)
@@ -172,7 +179,7 @@ async fn seed_test_data(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
 async fn test_read_only_privilege_enforcement_in_propfind() {
     let pool = setup_db_pool().await;
     let (_user_a, user_b, _user_c, _cal_id) = seed_test_data(&pool).await;
-    
+
     // Boot up app injecting User B
     let app_b = build_app_for_user(user_b, "userb", pool).await;
 
@@ -191,29 +198,35 @@ async fn test_read_only_privilege_enforcement_in_propfind() {
         .unwrap();
 
     let response = app_b.router.oneshot(req).await.unwrap();
-    
+
     assert_eq!(
         response.status(),
         StatusCode::MULTI_STATUS,
         "PROPFIND should succeed with 207 Multi-Status for a user with read access"
     );
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let xml = String::from_utf8(body_bytes.to_vec()).unwrap().to_lowercase();
-    
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let xml = String::from_utf8(body_bytes.to_vec())
+        .unwrap()
+        .to_lowercase();
+
     // AC: XML MUST include <D:read/>
     assert!(
-        xml.contains("<d:read/>") || xml.contains("<read xmlns=\"dav:\"/>") || xml.contains("<read/>"),
+        xml.contains("<d:read/>")
+            || xml.contains("<read xmlns=\"dav:\"/>")
+            || xml.contains("<read/>"),
         "Expected PROPFIND response to grant the read privilege"
     );
-    
+
     // AC: XML MUST NOT include <D:write/> in current-user-privilege-set
     assert!(
-        !xml.contains("<d:write/>") 
-        && !xml.contains("<write xmlns=\"dav:\"/>") 
-        && !xml.contains("<write/>") 
-        && !xml.contains("write-content") 
-        && !xml.contains("write-properties"),
+        !xml.contains("<d:write/>")
+            && !xml.contains("<write xmlns=\"dav:\"/>")
+            && !xml.contains("<write/>")
+            && !xml.contains("write-content")
+            && !xml.contains("write-properties"),
         "Expected PROPFIND response to strictly NOT contain any write privileges for a read-only user"
     );
 }
@@ -222,22 +235,28 @@ async fn test_read_only_privilege_enforcement_in_propfind() {
 async fn test_server_side_rejection_of_unauthorized_edits_403() {
     let pool = setup_db_pool().await;
     let (_user_a, user_b, _user_c, _cal_id) = seed_test_data(&pool).await;
-    
+
     // Boot up app injecting User B
     let app_b = build_app_for_user(user_b, "userb", pool).await;
 
     let scenarios = vec![
-        ("PUT", "/dav/calendars/usera/default/test_event.ics", Body::from(VALID_ICS)),
-        ("DELETE", "/dav/calendars/usera/default/test_event.ics", Body::empty()),
+        (
+            "PUT",
+            "/dav/calendars/usera/default/test_event.ics",
+            Body::from(VALID_ICS),
+        ),
+        (
+            "DELETE",
+            "/dav/calendars/usera/default/test_event.ics",
+            Body::empty(),
+        ),
         ("PROPPATCH", "/dav/calendars/usera/default/", Body::empty()),
         ("MKCALENDAR", "/dav/calendars/usera/default/", Body::empty()),
     ];
 
     for (method, uri, body) in scenarios {
-        let mut builder = Request::builder()
-            .method(method)
-            .uri(uri);
-            
+        let mut builder = Request::builder().method(method).uri(uri);
+
         if method == "PUT" {
             builder = builder.header("Content-Type", "text/calendar; charset=utf-8");
         } else if method == "PROPPATCH" {
@@ -246,7 +265,7 @@ async fn test_server_side_rejection_of_unauthorized_edits_403() {
 
         let req = builder.body(body).unwrap();
         let response = app_b.router.clone().oneshot(req).await.unwrap();
-        
+
         assert_eq!(
             response.status(),
             StatusCode::FORBIDDEN,
@@ -260,7 +279,7 @@ async fn test_server_side_rejection_of_unauthorized_edits_403() {
 async fn test_idor_prevention_for_unauthorized_users_404() {
     let pool = setup_db_pool().await;
     let (_user_a, _user_b, user_c, _cal_id) = seed_test_data(&pool).await;
-    
+
     // Boot up app injecting User C (Zero Access)
     let app_c = build_app_for_user(user_c, "userc", pool).await;
 
@@ -272,10 +291,8 @@ async fn test_idor_prevention_for_unauthorized_users_404() {
     ];
 
     for (method, uri) in scenarios {
-        let mut builder = Request::builder()
-            .method(method)
-            .uri(uri);
-            
+        let mut builder = Request::builder().method(method).uri(uri);
+
         if method == "PUT" {
             builder = builder.header("Content-Type", "text/calendar; charset=utf-8");
         } else if method == "PROPFIND" || method == "PROPPATCH" {
@@ -285,7 +302,7 @@ async fn test_idor_prevention_for_unauthorized_users_404() {
 
         let req = builder.body(Body::empty()).unwrap();
         let response = app_c.router.clone().oneshot(req).await.unwrap();
-        
+
         assert_eq!(
             response.status(),
             StatusCode::NOT_FOUND,

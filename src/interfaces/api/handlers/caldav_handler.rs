@@ -198,7 +198,6 @@ fn strip_username_prefix(path: &str) -> &str {
 
 // ─── Helper: extract user from request ───────────────────────────────
 
-
 fn parse_dav_calendar_collection_path(path: &str) -> Option<(String, String)> {
     let trimmed = path.trim_matches('/');
     let segments: Vec<&str> = trimmed
@@ -663,9 +662,7 @@ async fn handle_propfind(
                     base_href,
                     &depth,
                 )
-                .map_err(|e| {
-                    AppError::internal_error(format!("Failed to generate XML: {}", e))
-                })?;
+                .map_err(|e| AppError::internal_error(format!("Failed to generate XML: {}", e)))?;
 
                 return Ok(Response::builder()
                     .status(StatusCode::MULTI_STATUS)
@@ -1073,7 +1070,8 @@ fn put_condition_from_headers(
 }
 
 fn parse_calendar_object_path(path: &str) -> Result<(Option<String>, String, String), AppError> {
-    if let Some((owner_username, calendar_key, resource_name)) = parse_dav_calendar_object_path(path)
+    if let Some((owner_username, calendar_key, resource_name)) =
+        parse_dav_calendar_object_path(path)
     {
         validate_calendar_resource_name(&resource_name)?;
         return Ok((Some(owner_username), calendar_key, resource_name));
@@ -1327,7 +1325,10 @@ async fn handle_delete_calendar_collection(
         &calendar_id_string,
         &format!(
             "calendars/{}/{}",
-            collection_path.username.as_deref().unwrap_or(&user.username),
+            collection_path
+                .username
+                .as_deref()
+                .unwrap_or(&user.username),
             collection_path.calendar_key
         ),
         "write",
