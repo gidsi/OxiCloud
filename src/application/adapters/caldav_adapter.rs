@@ -61,6 +61,43 @@ impl CalDavAdapter {
         format!("{}/{}", base_href.trim_end_matches('/'), resource_name)
     }
 
+    fn write_current_user_privilege_set<W: Write>(
+        xml_writer: &mut Writer<W>,
+        calendar: &CalendarDto,
+    ) -> Result<()> {
+        xml_writer.write_event(Event::Start(BytesStart::new(
+            "D:current-user-privilege-set",
+        )))?;
+
+        xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new("D:read")))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
+
+        if calendar.current_user_access.can_write() {
+            for privilege in [
+                "D:write",
+                "D:write-content",
+                "D:write-properties",
+                "D:bind",
+                "D:unbind",
+            ] {
+                xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
+                xml_writer.write_event(Event::Empty(BytesStart::new(privilege)))?;
+                xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
+            }
+        }
+
+        xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
+        xml_writer.write_event(Event::Empty(BytesStart::new(
+            "D:read-current-user-privilege-set",
+        )))?;
+        xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
+
+        xml_writer.write_event(Event::End(BytesEnd::new("D:current-user-privilege-set")))?;
+
+        Ok(())
+    }
+
     fn write_calendar_data<W: Write>(
         xml_writer: &mut Writer<W>,
         event: &CalendarEventDto,
@@ -972,22 +1009,7 @@ impl CalDavAdapter {
         xml_writer.write_event(Event::Empty(BytesStart::new("C:calendar-access")))?;
 
         // Current user privilege set
-        xml_writer.write_event(Event::Start(BytesStart::new(
-            "D:current-user-privilege-set",
-        )))?;
-        xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
-        xml_writer.write_event(Event::Empty(BytesStart::new("D:read")))?;
-        xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
-
-        // Only add write privilege if user owns the calendar or has write access
-        if calendar.owner_id == "current_user_id" {
-            // This should be replaced with actual user check
-            xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
-            xml_writer.write_event(Event::Empty(BytesStart::new("D:write")))?;
-            xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
-        }
-
-        xml_writer.write_event(Event::End(BytesEnd::new("D:current-user-privilege-set")))?;
+        Self::write_current_user_privilege_set(xml_writer, calendar)?;
 
         // Calendar description if present
         if let Some(desc) = &calendar.description {
@@ -1076,23 +1098,7 @@ impl CalDavAdapter {
                     xml_writer.write_event(Event::End(BytesEnd::new("D:getcontenttype")))?;
                 }
                 ("DAV:", "current-user-privilege-set") => {
-                    xml_writer.write_event(Event::Start(BytesStart::new(
-                        "D:current-user-privilege-set",
-                    )))?;
-                    xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
-                    xml_writer.write_event(Event::Empty(BytesStart::new("D:read")))?;
-                    xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
-
-                    // Only add write privilege if user owns the calendar or has write access
-                    if calendar.owner_id == "current_user_id" {
-                        // This should be replaced with actual user check
-                        xml_writer.write_event(Event::Start(BytesStart::new("D:privilege")))?;
-                        xml_writer.write_event(Event::Empty(BytesStart::new("D:write")))?;
-                        xml_writer.write_event(Event::End(BytesEnd::new("D:privilege")))?;
-                    }
-
-                    xml_writer
-                        .write_event(Event::End(BytesEnd::new("D:current-user-privilege-set")))?;
+                    Self::write_current_user_privilege_set(xml_writer, calendar)?;
                 }
 
                 // CalDAV namespace properties
