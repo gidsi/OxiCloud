@@ -4,19 +4,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CalendarAccessLevelDto {
+    #[default]
     None,
     Read,
     Write,
     Owner,
-}
-
-impl Default for CalendarAccessLevelDto {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl CalendarAccessLevelDto {

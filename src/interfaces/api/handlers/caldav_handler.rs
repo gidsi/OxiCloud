@@ -1573,6 +1573,30 @@ async fn handle_proppatch(
     let user = extract_user(&req)?;
     let calendar_service = get_calendar_service(&state)?;
 
+    let collection_path = parse_calendar_collection_path(path)?
+        .ok_or_else(|| AppError::bad_request("Invalid calendar collection path"))?;
+
+    let calendar_id_string = resolve_calendar_id_for_request_path(
+        &state,
+        calendar_service,
+        &user,
+        collection_path.username.as_deref(),
+        &collection_path.calendar_key,
+    )
+    .await?;
+
+    if let Some(response) = ensure_write_access_for_calendar_id(
+        calendar_service,
+        &user,
+        &calendar_id_string,
+        path,
+        "PROPPATCH",
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+
     let body_bytes = body::to_bytes(req.into_body(), MAX_CALDAV_BODY)
         .await
         .map_err(|e| AppError::bad_request(format!("Failed to read request body: {}", e)))?;
@@ -1583,12 +1607,7 @@ async fn handle_proppatch(
         )
         .map_err(|e| AppError::bad_request(format!("Failed to parse PROPPATCH: {}", e)))?;
 
-    let effective_path = strip_username_prefix(path);
-    let calendar_id = effective_path.split('/').next().unwrap_or(effective_path);
-
-    if calendar_id.is_empty() {
-        return Err(AppError::bad_request("Calendar ID required"));
-    }
+    let calendar_id = calendar_id_string.as_str();
 
     let mut update = UpdateCalendarDto {
         slug: None,
