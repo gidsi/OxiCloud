@@ -1052,15 +1052,11 @@ fn minify_tree_json(dir: &Path) {
     for entry in entries.flatten() {
         let p = entry.path();
         if p.extension().is_some_and(|e| e == "json") {
-            if let Ok(src) = fs::read_to_string(&p) {
-                let _ = fs::write(&p, json_minify(&src));
-            }
-        }
+            if let Ok(src) = fs::read_to_string(&p) {                let _ = fs::write(&p, json_minify(&src));            }
             let _ = fs::write(&p, json_minify(&src));
         }
     }
 }
-
 /// Strip insignificant whitespace outside JSON strings.
 fn json_minify(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
