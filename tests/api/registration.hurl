@@ -39,7 +39,7 @@ Content-Type: application/json
   "password": "TestPassword1!"
 }
 
-HTTP 200
+HTTP 201
 [Asserts]
 jsonpath "$.message" contains "request received"
 
@@ -69,7 +69,7 @@ Content-Type: application/json
   "email": "pr18-emailonly@example.com"
 }
 
-HTTP 200
+HTTP 201
 [Captures]
 # PR 22 — capture the browser-binding cookie so the redemption can
 # replay it. Hurl's automatic cookie jar doesn't reliably attach
@@ -305,7 +305,7 @@ Content-Type: application/json
   "password": "AttackerPassword99!"
 }
 
-HTTP 200
+HTTP 201
 [Asserts]
 jsonpath "$.message" contains "request received"
 
@@ -345,7 +345,7 @@ Content-Type: application/json
   "password": "AttackerPassword99!"
 }
 
-HTTP 200
+HTTP 201
 [Asserts]
 jsonpath "$.message" contains "request received"
 
