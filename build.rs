@@ -1051,9 +1051,11 @@ fn minify_tree_json(dir: &Path) {
     };
     for entry in entries.flatten() {
         let p = entry.path();
-        if p.extension().is_some_and(|e| e == "json")
-            && let Ok(src) = fs::read_to_string(&p)
-        {
+        if p.extension().is_some_and(|e| e == "json") {
+            if let Ok(src) = fs::read_to_string(&p) {
+                let _ = fs::write(&p, json_minify(&src));
+            }
+        }
             let _ = fs::write(&p, json_minify(&src));
         }
     }
