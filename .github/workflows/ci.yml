@@ -58,7 +58,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 25
+          node-version: 22
 
       # because we are not using package.json
       - name: Install Stylelint, TypeScript and plugins
