@@ -302,6 +302,7 @@ fn minify_tree_css(dir: &Path) {
                 continue;
             }
             println!("cargo:warning=CSS importing: {}", p.display());
+            #[allow(clippy::collapsible_if)]
             if let Ok(src) = fs::read_to_string(&p) {
                 let _ = fs::write(&p, css_minify_safe(&src));
             }
@@ -1034,6 +1035,7 @@ fn minify_tree_js(dir: &Path) {
             if fname.starts_with("app.") {
                 continue;
             }
+            #[allow(clippy::collapsible_if)]
             if let Ok(src) = fs::read_to_string(&p) {
                 let _ = fs::write(&p, js_minify_safe(&src));
             }
@@ -1052,6 +1054,7 @@ fn minify_tree_json(dir: &Path) {
     for entry in entries.flatten() {
         let p = entry.path();
         if p.extension().is_some_and(|e| e == "json") {
+            #[allow(clippy::collapsible_if)]
             if let Ok(src) = fs::read_to_string(&p) {
                 let _ = fs::write(&p, json_minify(&src));
             }
