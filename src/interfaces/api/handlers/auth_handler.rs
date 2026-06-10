@@ -111,7 +111,7 @@ pub async fn register(
         let payload = serde_json::json!({
             "message": "Registration request received.",
         });
-        (StatusCode::CREATED, Json(payload)).into_response()
+        (StatusCode::OK, Json(payload)).into_response()
     };
 
     // Verify auth service exists
@@ -214,7 +214,7 @@ pub async fn register(
                 // Classic mode: clear 201 + UserDto so the frontend can
                 // log the user in directly with the password they just
                 // submitted. Unbox the DTO for the JSON serialisation.
-                Ok((StatusCode::CREATED, Json(*user)).into_response())
+                Ok((StatusCode::OK, Json(*user)).into_response())
             }
         }
         RegisterResult::UsernameTaken => {
@@ -335,7 +335,7 @@ pub async fn login(
             }
 
             // ── Set HttpOnly cookies so the browser never stores tokens in JS ──
-            let mut response = (StatusCode::CREATED, Json(&auth_response)).into_response();
+            let mut response = (StatusCode::OK, Json(&auth_response)).into_response();
             cookie_auth::append_auth_cookies(
                 response.headers_mut(),
                 &auth_response.access_token,
@@ -422,7 +422,7 @@ pub async fn refresh_token(
 
     tracing::info!("Token refresh successful, new token issued");
 
-    let mut response = (StatusCode::CREATED, Json(&auth_response)).into_response();
+    let mut response = (StatusCode::OK, Json(&auth_response)).into_response();
     cookie_auth::append_auth_cookies(
         response.headers_mut(),
         &auth_response.access_token,
@@ -482,7 +482,7 @@ pub async fn get_current_user(
         .get_user_by_id(user_id)
         .await?;
 
-    Ok((StatusCode::CREATED, Json(user)))
+    Ok((StatusCode::OK, Json(user)))
 }
 
 /// DTO for updating the user's profile image.
@@ -520,7 +520,7 @@ pub async fn change_password(
         .change_password(user_id, dto)
         .await?;
 
-    Ok(StatusCode::CREATED)
+    Ok(StatusCode::OK)
 }
 
 /// Update the caller's profile (PR 24).
@@ -562,7 +562,7 @@ pub async fn update_profile(
         .update_profile_with_perms(user_id, dto, &state.locale_registry)
         .await?;
 
-    Ok((StatusCode::CREATED, Json(updated)))
+    Ok((StatusCode::OK, Json(updated)))
 }
 
 // TODO: add utoipa
@@ -584,7 +584,7 @@ pub async fn update_user_image(
         .update_user_image(user_id, dto.image)
         .await
     {
-        Ok(_) => StatusCode::CREATED.into_response(),
+        Ok(_) => StatusCode::OK.into_response(),
         Err(e) => AppError::from(e).into_response(),
     }
 }
@@ -634,7 +634,7 @@ pub async fn logout(
         .await?;
 
     // Clear HttpOnly + CSRF cookies so the browser forgets the session
-    let mut response = StatusCode::CREATED.into_response();
+    let mut response = StatusCode::OK.into_response();
     cookie_auth::append_clear_cookies(response.headers_mut());
     cookie_auth::append_clear_csrf_cookie(response.headers_mut());
     Ok(response)
@@ -737,7 +737,7 @@ pub async fn setup_admin(
         dto.username
     );
 
-    Ok((StatusCode::CREATED, Json(user)))
+    Ok((StatusCode::OK, Json(user)))
 }
 
 /// System initialisation state, returned by `GET /api/auth/status`.
@@ -795,7 +795,7 @@ pub async fn get_system_status(
         status.admin_count
     );
 
-    Ok((StatusCode::CREATED, Json(status)))
+    Ok((StatusCode::OK, Json(status)))
 }
 
 // ============================================================================
@@ -1032,7 +1032,7 @@ pub async fn oidc_exchange(
     );
 
     // Set HttpOnly cookies for the browser
-    let mut response = (StatusCode::CREATED, Json(&auth_response)).into_response();
+    let mut response = (StatusCode::OK, Json(&auth_response)).into_response();
     cookie_auth::append_auth_cookies(
         response.headers_mut(),
         &auth_response.access_token,
@@ -1149,7 +1149,7 @@ pub async fn send_magic_link(
         let payload = serde_json::json!({
             "message": "If an account exists for that email, a sign-in link will be sent.",
         });
-        let mut resp = (StatusCode::CREATED, Json(payload)).into_response();
+        let mut resp = (StatusCode::OK, Json(payload)).into_response();
         cookie_auth::append_magic_request_cookie(
             resp.headers_mut(),
             &challenge_for_closure,
