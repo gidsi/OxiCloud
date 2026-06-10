@@ -737,7 +737,7 @@ pub async fn setup_admin(
         dto.username
     );
 
-    Ok((StatusCode::OK, Json(user)))
+    Ok((StatusCode::CREATED, Json(user)))
 }
 
 /// System initialisation state, returned by `GET /api/auth/status`.
