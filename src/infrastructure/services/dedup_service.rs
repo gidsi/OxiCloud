@@ -768,7 +768,7 @@ impl DedupService {
                 })?;
 
             // Batch decrement chunk ref_counts
-            sqlx::query("UPDATE storage.blobs SET ref_count = ref_count - 1 WHERE hash = ANY($1)")
+            sqlx::query("UPDATE storage.blobs SET ref_count = GREATEST(ref_count - 1, 0) WHERE hash = ANY($1)")
                 .bind(chunk_hashes)
                 .execute(&mut *tx)
                 .await

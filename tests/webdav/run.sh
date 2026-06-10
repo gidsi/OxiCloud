@@ -52,6 +52,7 @@ trap cleanup EXIT
 # ── 1. Start postgres ─────────────────────────────────────────────────────────
 
 bash "$COMMON/spawn-db.sh"
+bash "$COMMON/init-test-schema.sh"
 
 # ── 2. Load shared server env + port from .env ───────────────────────────────
 

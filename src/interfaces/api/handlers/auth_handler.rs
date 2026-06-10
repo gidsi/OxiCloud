@@ -214,7 +214,7 @@ pub async fn register(
                 // Classic mode: clear 201 + UserDto so the frontend can
                 // log the user in directly with the password they just
                 // submitted. Unbox the DTO for the JSON serialisation.
-                Ok((StatusCode::CREATED, Json(*user)).into_response())
+                Ok((StatusCode::OK, Json(*user)).into_response())
             }
         }
         RegisterResult::UsernameTaken => {
