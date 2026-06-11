@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring-node-exporter
+  labels:
+    app.kubernetes.io/name: node-exporter
+    app.kubernetes.io/managed-by: fluxcd
