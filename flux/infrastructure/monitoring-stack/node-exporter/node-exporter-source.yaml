@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: node-exporter-source
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  url: ssh://git@github.com/your-org/your-config-repo.git
+  ref:
+    branch: main
+  # path inside the repo for the node-exporter manifests
+  # Assuming 'flux/infrastructure/monitoring-stack/node-exporter' is the repo-relative folder
+  # Replace with actual relative path if differs

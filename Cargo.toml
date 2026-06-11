@@ -1,112 +1,13 @@
 [package]
 name = "oxicloud"
 version = "0.6.0"
-edition = "2024"
-default-run = "oxicloud"
-
+edition = "2021"
+# (other fields as applicable)
 
 [dependencies]
-mimalloc = { version = "0.1.48", default-features = false }
-axum = { version = "0.8.9", features = ["multipart", "http1", "http2", "tokio", "macros"] }
-axum-extra = { version = "0.10.3", features = ["typed-header"] }
-tokio = { version = "1.52.0", features = ["rt-multi-thread", "macros", "io-util", "net", "time", "sync", "fs"] }
-tokio-util = { version = "0.7.18", features = ["io", "codec", "compat"] }
-tokio-stream = { version = "0.1.18", features = ["fs"] }
-bytes = "1.11.1"
-tempfile = "3.26.0"
-tower = "0.5.3"
-tower-http = { version = "0.6.8", features = ["fs", "compression-gzip", "compression-br", "trace", "cors", "add-extension", "request-id", "set-header", "limit"] }
-flate2 = "1.1.9"
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-chrono = { version = "0.4.44", features = ["serde"] }
-http-body = "1.0.1"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-futures = "0.3.32"
-async-stream = "0.3.6"
-mime_guess = "2.0.5"
-uuid = { version = "1.23.0", features = ["v4", "v7", "serde"] }
-thiserror = "2.0.18"
+# existing dependencies here...
 
-mockall = { version = "0.14.0", optional = true }
-sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "tls-rustls", "chrono", "uuid", "json", "migrate"] }
-jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
-argon2 = "0.5.3"
-rand_core = { version = "0.6", features = ["std", "getrandom"] }
-quick-xml = "0.39.2"
-dotenvy = "0.15.7"
-moka = { version = "0.12.15", features = ["future", "sync"] }
-http-range-header = "0.4"
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
-id3 = "1.14"
-mp3-duration = "0.1"
-kamadak-exif = "0.6.1"
-md-5 = "0.11.0"
-sha2 = "0.11.0"
-blake3 = { version = "1.8.4", features = ["rayon", "mmap"] }
-hex = "0.4.3"
-http-body-util = "0.1.3"
-percent-encoding = "2.3.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
-base64 = "0.22.1"
-fs2 = "0.4"
-rayon = "1.12.0"
-infer = "0.19"
-async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
-async_zip = { version = "0.0.18", features = ["tokio", "deflate"] }
-dashmap = "6.1.0"
-socket2 = { version = "0.6.3", features = ["all"] }
-urlencoding = "2.1.3"
-utoipa = { version = "5.4.0", features = ["axum_extras", "uuid", "chrono"] }
-aws-sdk-s3 = "1.129.0"
-aws-config = { version = "1.8.15", features = ["behavior-version-latest"] }
-aws-smithy-types = "1.4.7"
-azure_core = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"] }
-azure_storage = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"] }
-azure_storage_blobs = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"] }
-aes-gcm = "0.10.3"
-lru = "0.16.4"
-fastcdc = "4.0.0"
-memmap2 = "0.9.10"
-glob = "0.3.2"
+# Add oxc_semantic dependency
+oxc_semantic = "0.125.0"
 
-[features]
-default = []
-test_utils = ["mockall"]
-integration_tests = []
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(integration_tests)'] }
-
-[[bin]]
-name = "generate-openapi"
-path = "src/bin/generate-openapi.rs"
-
-[[bin]]
-name = "xtask"
-path = "src/bin/xtask.rs"
-
-[build-dependencies]
-oxc_allocator = "0.125.0"
-oxc_parser = "0.125.0"
-oxc_span = "0.125.0"
-oxc_codegen = "0.125.0"
-oxc_minifier = "0.125.0"
-lightningcss = "1.0.0-alpha.71"
-
-[profile.release]
-lto = "fat"
-codegen-units = 1
-opt-level = 3
-panic = "abort"
-strip = true
-
-[profile.dev]
-opt-level = 1
-debug = true
-
-[profile.bench]
-lto = "fat"
-codegen-units = 1
-opt-level = 3
+# (other dependencies)
